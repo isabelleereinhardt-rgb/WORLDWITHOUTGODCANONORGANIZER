@@ -1,8 +1,8 @@
 /* ============================================================
    The Codex — Documents & Slide Decks
-   Google-Docs-like rich editor + a lightweight deck builder.
-   Everything autosaves to localStorage; export to Word / Markdown /
-   print-to-PDF. The assistant recognises canon names as you type.
+   Rich text editor + deck builder. Everything saves to IndexedDB
+   (via CodexStore), so images persist. Items can be filed under
+   a project folder. Export to Word / Markdown / print-to-PDF.
    ============================================================ */
 (function () {
 "use strict";
@@ -11,66 +11,56 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const view = () => $("#view");
 const uid = () => "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-
-/* ---------- storage ---------- */
-const DOCS = "codex.docs", DECKS = "codex.decks";
-const load = k => JSON.parse(localStorage.getItem(k) || "[]");
-const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
-function getDoc(id) { return load(DOCS).find(d => d.id === id); }
-function putDoc(doc) {
-  const all = load(DOCS); const i = all.findIndex(d => d.id === doc.id);
-  doc.updated = Date.now();
-  if (i >= 0) all[i] = doc; else all.unshift(doc);
-  save(DOCS, all);
-}
-function delDoc(id) { save(DOCS, load(DOCS).filter(d => d.id !== id)); }
-function getDeck(id) { return load(DECKS).find(d => d.id === id); }
-function putDeck(deck) {
-  const all = load(DECKS); const i = all.findIndex(d => d.id === deck.id);
-  deck.updated = Date.now();
-  if (i >= 0) all[i] = deck; else all.unshift(deck);
-  save(DECKS, all);
-}
-function delDeck(id) { save(DECKS, load(DECKS).filter(d => d.id !== id)); }
 const fmtDate = t => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const S = () => window.CodexStore;
 
 /* ============================================================
    DOCUMENTS
    ============================================================ */
-function list() {
-  const docs = load(DOCS).sort((a, b) => b.updated - a.updated);
+async function list(folderId) {
+  await S().ready;
+  if (window.CodexFolders) await CodexFolders.ensureCache(true);
+  let docs = (await S().all("docs")).sort((a, b) => b.updated - a.updated);
+  if (folderId) docs = docs.filter(d => d.folder === folderId);
+
+  const folderBar = window.CodexFolders ? CodexFolders.bar("doc", folderId, "#/docs") : "";
   const cards = docs.map(d => `
     <div class="entry-card" data-open="${d.id}" style="cursor:pointer">
-      <h3>📝 ${esc(d.title || "Untitled")}</h3>
+      <h3>${esc(d.title || "Untitled")}</h3>
       <p>${esc(stripHtml(d.html).slice(0, 160)) || "Empty document"}</p>
       <div class="meta">Edited ${fmtDate(d.updated)}
         <button class="btn ghost sm" data-del="${d.id}" style="margin-left:auto">Delete</button></div>
     </div>`).join("");
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">📝 Workspace</div>
+    <div class="page-kicker">Workspace</div>
     <h1>Documents</h1>
-    <p class="muted">Write lore, drafts, and notes right inside your codex. They save automatically to this browser — use <b>Back up my work</b> in the sidebar to keep a copy.</p>
-    <div style="margin:18px 0"><button class="btn" id="newDoc">＋ New document</button></div>
+    <p class="muted">Write lore, drafts, and notes right inside your codex. They save automatically to this
+      browser — use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
+    ${folderBar}
+    <div style="margin:16px 0"><button class="btn" id="newDoc">New document</button></div>
     ${docs.length ? `<div class="list-grid">${cards}</div>` :
-      `<div class="empty-state"><div class="ic">📝</div>No documents yet.<br>Create one to start writing.</div>`}
+      `<div class="empty-state">No documents here yet. Create one to start writing.</div>`}
   </div>`;
-  $("#newDoc").onclick = () => {
-    const d = { id: uid(), title: "", html: "", updated: Date.now() };
-    putDoc(d); location.hash = "#/doc/" + d.id;
+  $("#newDoc").onclick = async () => {
+    const d = { id: uid(), title: "", html: "", folder: folderId || null };
+    await S().put("docs", d); location.hash = "#/doc/" + d.id;
   };
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
     if (e.target.dataset.del) return;
     location.hash = "#/doc/" + c.dataset.open;
   });
-  $$("[data-del]", view()).forEach(b => b.onclick = e => {
+  $$("[data-del]", view()).forEach(b => b.onclick = async e => {
     e.stopPropagation();
-    if (confirm("Delete this document?")) { delDoc(b.dataset.del); list(); }
+    if (confirm("Delete this document?")) { await S().del("docs", b.dataset.del); list(folderId); }
   });
 }
 
-function open(id) {
-  const doc = getDoc(id);
+async function open(id) {
+  await S().ready;
+  if (window.CodexFolders) await CodexFolders.ensureCache();
+  const doc = await S().get("docs", id);
   if (!doc) { location.hash = "#/docs"; return; }
+  const folderSelect = window.CodexFolders ? CodexFolders.selectFor(doc.folder) : "";
   view().innerHTML = `
     <div class="doc-toolbar">
       <select id="tbBlock" title="Text style">
@@ -83,16 +73,16 @@ function open(id) {
       <button data-cmd="underline" title="Underline"><u>U</u></button>
       <button data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
       <span class="sep"></span>
-      <button data-cmd="insertUnorderedList" title="Bullet list">• List</button>
-      <button data-cmd="insertOrderedList" title="Numbered list">1. List</button>
-      <button data-cmd="formatBlock" data-val="blockquote" title="Quote">❝</button>
+      <button data-cmd="insertUnorderedList" title="Bullet list">List</button>
+      <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
       <span class="sep"></span>
-      <button id="tbLink" title="Insert link">🔗</button>
-      <button id="tbImg" title="Insert image">🖼️</button>
-      <button id="tbHr" title="Divider">―</button>
+      <button id="tbLink" title="Insert link">Link</button>
+      <button id="tbImg" title="Insert image">Image</button>
+      <button id="tbHr" title="Divider">Divider</button>
       <span class="sep"></span>
-      <button id="tbAssist" title="Toggle assistant" class="accent">✦</button>
-      <button id="tbExport" title="Export">⤓ Export</button>
+      ${folderSelect}
+      <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
+      <button id="tbExport" title="Export">Export</button>
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="wrap">
@@ -105,9 +95,10 @@ function open(id) {
   edEl.focus();
 
   let saveT, scanT;
-  const persist = () => {
-    doc.title = titleEl.value; doc.html = edEl.innerHTML; putDoc(doc);
-    stateEl.textContent = "Saved";
+  const persist = async () => {
+    doc.title = titleEl.value; doc.html = edEl.innerHTML;
+    await S().put("docs", doc);
+    stateEl.textContent = S().usingFallback() ? "Saved (local)" : "Saved";
   };
   const touch = () => { stateEl.textContent = "Saving…"; clearTimeout(saveT); saveT = setTimeout(persist, 600); };
   titleEl.oninput = touch;
@@ -122,8 +113,7 @@ function open(id) {
   // toolbar
   $$("[data-cmd]", view()).forEach(b => b.onmousedown = e => {
     e.preventDefault();
-    if (b.dataset.val) document.execCommand(b.dataset.cmd, false, b.dataset.val);
-    else document.execCommand(b.dataset.cmd, false, null);
+    document.execCommand(b.dataset.cmd, false, null);
     edEl.focus(); touch();
   });
   $("#tbBlock").onchange = e => { document.execCommand("formatBlock", false, e.target.value); edEl.focus(); touch(); };
@@ -132,16 +122,19 @@ function open(id) {
   $("#tbImg").onclick = () => insertImage(edEl, touch);
   $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
   $("#tbExport").onclick = () => exportMenu(doc);
+  const fsel = $('[data-role="folder-move"]', view());
+  if (fsel) fsel.onchange = () => { doc.folder = fsel.value || null; touch(); };
 
-  // paste images as data URLs
-  edEl.addEventListener("paste", ev => {
+  // paste images (downscaled)
+  edEl.addEventListener("paste", async ev => {
     const items = (ev.clipboardData || {}).items || [];
     for (const it of items) {
       if (it.type && it.type.indexOf("image") === 0) {
         ev.preventDefault();
-        const file = it.getAsFile(); const r = new FileReader();
-        r.onload = () => { document.execCommand("insertImage", false, r.result); touch(); };
-        r.readAsDataURL(file);
+        try {
+          const url = await window.CodexImg.fileToScaledDataURL(it.getAsFile());
+          document.execCommand("insertImage", false, url); touch();
+        } catch (e) { toast("Couldn't read that image"); }
       }
     }
   });
@@ -150,11 +143,12 @@ function open(id) {
 function insertImage(edEl, touch) {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "image/*";
-  inp.onchange = () => {
+  inp.onchange = async () => {
     const f = inp.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = () => { edEl.focus(); document.execCommand("insertImage", false, r.result); touch(); };
-    r.readAsDataURL(f);
+    try {
+      const url = await window.CodexImg.fileToScaledDataURL(f);
+      edEl.focus(); document.execCommand("insertImage", false, url); touch();
+    } catch (e) { toast("Couldn't read that image"); }
   };
   inp.click();
 }
@@ -223,40 +217,47 @@ function htmlToMd(html) {
 /* ============================================================
    SLIDE DECKS
    ============================================================ */
-function deckList() {
-  const decks = load(DECKS).sort((a, b) => b.updated - a.updated);
+async function deckList(folderId) {
+  await S().ready;
+  if (window.CodexFolders) await CodexFolders.ensureCache(true);
+  let decks = (await S().all("decks")).sort((a, b) => b.updated - a.updated);
+  if (folderId) decks = decks.filter(d => d.folder === folderId);
+  const folderBar = window.CodexFolders ? CodexFolders.bar("deck", folderId, "#/slides") : "";
   const cards = decks.map(d => `
     <div class="entry-card" data-open="${d.id}" style="cursor:pointer">
-      <h3>📊 ${esc(d.title || "Untitled deck")}</h3>
+      <h3>${esc(d.title || "Untitled deck")}</h3>
       <p>${d.slides.length} slide${d.slides.length === 1 ? "" : "s"}</p>
       <div class="meta">Edited ${fmtDate(d.updated)}
         <button class="btn ghost sm" data-del="${d.id}" style="margin-left:auto">Delete</button></div>
     </div>`).join("");
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">📊 Workspace</div>
+    <div class="page-kicker">Workspace</div>
     <h1>Slide Decks</h1>
-    <p class="muted">Build simple presentations for your world — lore recaps, house profiles, pitch decks. Present fullscreen or export to PDF.</p>
-    <div style="margin:18px 0"><button class="btn" id="newDeck">＋ New deck</button></div>
+    <p class="muted">Build simple presentations for your world — lore recaps, house profiles, pitch decks.
+      Present fullscreen or export to PDF.</p>
+    ${folderBar}
+    <div style="margin:16px 0"><button class="btn" id="newDeck">New deck</button></div>
     ${decks.length ? `<div class="list-grid">${cards}</div>` :
-      `<div class="empty-state"><div class="ic">📊</div>No decks yet.</div>`}
+      `<div class="empty-state">No decks here yet.</div>`}
   </div>`;
-  $("#newDeck").onclick = () => {
-    const d = { id: uid(), title: "Untitled deck",
-      slides: [{ title: "Title slide", body: "Click to edit" }], updated: Date.now() };
-    putDeck(d); location.hash = "#/deck/" + d.id;
+  $("#newDeck").onclick = async () => {
+    const d = { id: uid(), title: "Untitled deck", folder: folderId || null,
+      slides: [{ title: "Title slide", body: "Click to edit" }] };
+    await S().put("decks", d); location.hash = "#/deck/" + d.id;
   };
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
     if (e.target.dataset.del) return; location.hash = "#/deck/" + c.dataset.open;
   });
-  $$("[data-del]", view()).forEach(b => b.onclick = e => {
+  $$("[data-del]", view()).forEach(b => b.onclick = async e => {
     e.stopPropagation();
-    if (confirm("Delete this deck?")) { delDeck(b.dataset.del); deckList(); }
+    if (confirm("Delete this deck?")) { await S().del("decks", b.dataset.del); deckList(folderId); }
   });
 }
 
 let curDeck = null, curSlide = 0;
-function deckOpen(id) {
-  curDeck = getDeck(id); curSlide = 0;
+async function deckOpen(id) {
+  await S().ready;
+  curDeck = await S().get("decks", id); curSlide = 0;
   if (!curDeck) { location.hash = "#/slides"; return; }
   renderDeck();
 }
@@ -265,10 +266,10 @@ function renderDeck() {
   view().innerHTML = `
     <div class="doc-toolbar">
       <input class="doc-title" style="font-size:20px;width:auto;flex:1" id="deckTitle" value="${esc(d.title)}">
-      <button class="btn ghost sm" id="addSlide">＋ Slide</button>
-      <button class="btn ghost sm" id="delSlide">🗑 Slide</button>
-      <button class="btn sm" id="present">▶ Present</button>
-      <button class="btn ghost sm" id="deckExport">⤓ PDF</button>
+      <button class="btn ghost sm" id="addSlide">+ Slide</button>
+      <button class="btn ghost sm" id="delSlide">Delete slide</button>
+      <button class="btn sm" id="present">Present</button>
+      <button class="btn ghost sm" id="deckExport">PDF</button>
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="deck-stage">
@@ -281,7 +282,7 @@ function renderDeck() {
         <p class="faint" style="text-align:center;margin-top:14px;font-size:12px">Click the title or body to edit · arrow keys navigate slides in Present mode</p>
       </div>
     </div>`;
-  const persist = () => { putDeck(d); $("#saveState").textContent = "Saved"; };
+  const persist = async () => { await S().put("decks", d); $("#saveState").textContent = "Saved"; };
   const touch = () => { $("#saveState").textContent = "Saving…"; clearTimeout(renderDeck._t); renderDeck._t = setTimeout(persist, 500); };
 
   $("#deckTitle").oninput = e => { d.title = e.target.value; touch(); };

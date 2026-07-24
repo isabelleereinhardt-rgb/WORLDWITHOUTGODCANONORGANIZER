@@ -7,7 +7,7 @@ built-in assistant that recognizes your characters and places as you type.
 
 Think **Notion + Google Docs + Obsidian**, built specifically for this world.
 
-### 🔗 Live site
+### Live site
 
 **https://isabelleereinhardt-rgb.github.io/WORLDWITHOUTGODCANONORGANIZER/**
 
@@ -63,25 +63,43 @@ can open from any device:
 - **Atlas & galleries** — all your maps, flags, and visual reference plates in
   clean image galleries (click to zoom).
 - **Name Index** — an A–Z of every cross-linked name in the world.
-- **Documents** — a Google-Docs-style editor. Write lore, format it, paste images.
-  Export to **Word (.doc)**, **Markdown**, or **PDF (print)**. Autosaves as you go.
+- **Summaries above every result** — search or open a cross-reference and the top
+  of the page gives you a *synthesized brief* of the topic — the key sentences,
+  facts, and related names pulled together from across your canon — **before** the
+  list of individual results. So you get the gist first, the sources second.
+- **Documents** — a Google-Docs-style editor. Write lore, format it, add images
+  (they're **saved properly now** — see below). Export to **Word (.doc)**,
+  **Markdown**, or **PDF (print)**. Autosaves as you go.
 - **Slide Decks** — build simple presentations, present fullscreen, export to PDF.
+- **Canvases & Mood Boards** — freeform boards, Notion-style: pin **images, videos
+  (YouTube / Vimeo / .mp4), links, and text notes**, and drag them wherever you
+  like. Make as many boards as you want.
+- **Projects (folders)** — file your Documents, Decks, and Canvases under a project
+  so several books / worlds stay untangled. Use the **+ Project** chip at the top of
+  each workspace page.
+- **Import & Add Lore** — drag in text or Markdown files, or paste writing straight
+  in, and it's indexed immediately: searchable, cross-linked, and readable by the
+  assistant. Drop in images and they become a gallery.
 - **Codex Assistant** (the ✦ button, top-right) — your canon at your fingertips.
-  Type a name to get an instant blurb pulled straight from what *you've* written.
-  Keep it open while writing a Document and it recognizes names as you type and
-  shows you their summaries — so you always know what you're referring to.
+  Type a name for an instant **summary** (not just a one-line blurb) with related
+  names and sources, **ask a question in plain words** and it synthesizes an answer
+  from your passages, or keep it open while writing and it recognizes names as you
+  type.
 
 > The assistant reads **only your own canon** — it never invents facts. Everything
-> it shows you comes from the documents in `source/`.
+> it shows you comes from your own documents and the notes you add.
 
 ---
 
 ## Your writing is saved in the browser
 
-Documents and slide decks you create live in your browser's local storage. To keep
-a permanent copy or move between devices, use **Back up my work** in the sidebar
-(and **Restore backup** to load it elsewhere). Your original canon in `source/` is
-always safe in the repo regardless.
+Documents, decks, canvases, folders, and imported notes are stored in your
+browser's **IndexedDB** — which, unlike the old local-storage approach, has plenty
+of room, so **images you add actually persist** instead of vanishing. To keep a
+permanent copy or move between devices, use **Back up my work** in the sidebar (it
+now backs up everything — including your boards and imported lore) and **Restore
+backup** to load it elsewhere. Your original canon in `source/` is always safe in
+the repo regardless.
 
 ---
 
