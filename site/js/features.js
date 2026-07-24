@@ -243,8 +243,32 @@ function viewSettings() {
     </section>
 
     <section class="set-block">
+      <h3>Assistant — connect AI <span class="ai-conn-badge" id="aiConnBadge">Not connected</span></h3>
+      <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste a <b>Google Gemini</b> API key, then in the ✦ Assistant type a
+        question and press <b>Enter</b> for a written answer — reasoned, but grounded <b>only</b> in your own canon,
+        never invented. Gemini has a <b>free tier</b>. Your key is stored <b>only in this browser</b>, is never
+        uploaded, and is deliberately kept out of your backups.</p>
+      <div class="set-row">
+        <label>Gemini API key</label>
+        <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your key (AIza…)" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
+      </div>
+      <div class="set-row">
+        <label>Model</label>
+        <select id="aiModel">
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash — fast &amp; free</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash — free</option>
+          <option value="gemini-2.5-pro">Gemini 2.5 Pro — most capable</option>
+        </select>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <a class="btn ghost sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
+        <button class="btn ghost sm" id="aiForget" ${localStorage.getItem("codex.aiKey") ? "" : "hidden"}>Disconnect</button>
+      </div>
+    </section>
+
+    <section class="set-block">
       <h3>AI behaviour</h3>
-      <p class="faint" style="margin:2px 0 10px">Extra instructions for how the assistant should read and reason about your world. Saved with your work.</p>
+      <p class="faint" style="margin:2px 0 10px">Extra instructions for how the assistant should read and reason about your world. Saved with your work, and fed to the AI on every question.</p>
       <textarea class="import-body" id="aiInstr" placeholder="e.g. Prefer my own terminology. When I ask who someone is, give a short blurb in my voice, not a raw quote.">${esc(s.aiInstr || "")}</textarea>
       <div style="margin-top:8px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>
     </section>
@@ -260,6 +284,25 @@ function viewSettings() {
   $("#uiFont").onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
   $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
   $("#saveAiInstr") && ($("#saveAiInstr").onclick = () => { Extra.settings.aiInstr = $("#aiInstr").value; saveSettings(); toast("Saved"); });
+
+  const aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"), aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget");
+  if (aiKeyEl) {
+    aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-2.5-flash";
+    const reflectAi = () => {
+      const on = !!localStorage.getItem("codex.aiKey");
+      aiBadge.textContent = on ? "Connected" : "Not connected";
+      aiBadge.classList.toggle("on", on);
+      aiForget.hidden = !on;
+    };
+    reflectAi();
+    aiKeyEl.addEventListener("input", () => {
+      const v = aiKeyEl.value.trim();
+      if (v) localStorage.setItem("codex.aiKey", v); else localStorage.removeItem("codex.aiKey");
+      reflectAi();
+    });
+    aiModelEl.onchange = () => localStorage.setItem("codex.aiModel", aiModelEl.value);
+    aiForget.onclick = () => { localStorage.removeItem("codex.aiKey"); aiKeyEl.value = ""; reflectAi(); toast("Disconnected"); };
+  }
 
   if (!s.typography) s.typography = defaultTypography();
   const touchTypo = key => {

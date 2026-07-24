@@ -1062,6 +1062,129 @@ function assistantAnswer(q) {
     <div class="ans-sources"><div class="ans-label">Drawn from</div>${sources}</div>`;
 }
 
+/* ============================================================
+   AI (Gemini) — bring-your-own-key, grounded in your own canon.
+   The key lives ONLY in this browser: never uploaded, never in a
+   backup. Answers fire on Enter (not per keystroke) so a free-tier
+   key is never spammed. With no key, everything falls back to the
+   local synthesis above.
+   ============================================================ */
+const AI = {
+  get key()   { return localStorage.getItem("codex.aiKey") || ""; },
+  get model() { return localStorage.getItem("codex.aiModel") || "gemini-2.5-flash"; },
+  get on()    { return !!this.key; },
+  instr()     { try { return (window.CodexExtra && CodexExtra.settings && CodexExtra.settings.aiInstr) || ""; } catch (e) { return ""; } },
+};
+
+/* pull the most relevant passages from the active workspace's canon */
+function gatherContext(query, maxEntries) {
+  const seen = new Set(), picked = [];
+  const named = matchNamedSubject(query) || partialEntity(query);
+  if (named) {
+    const lore = bestEntryFor(named);
+    if (lore) { seen.add(lore.id); picked.push(lore); }
+    mentionsOf(named, lore ? lore.id : null).forEach(m => { if (!seen.has(m.id)) { seen.add(m.id); picked.push(m); } });
+  }
+  searchAll(query).forEach(e => { if (!seen.has(e.id)) { seen.add(e.id); picked.push(e); } });
+  const usable = picked.filter(e => e.type === "pdf" || e.type === "note").slice(0, maxEntries);
+  let context = ""; const budget = 16000;
+  for (const e of usable) {
+    const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1800)}\n\n`;
+    if (context.length + chunk.length > budget) break;
+    context += chunk;
+  }
+  return { results: usable, context };
+}
+
+/* tiny, safe markdown renderer for streamed answers (escapes first) */
+function renderMarkdownLite(t) {
+  const e2 = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const inline = s => e2(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*(?!\*)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "", inList = false;
+  for (const raw of (t || "").split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    if (/^#{1,6}\s+/.test(line))     { if (inList) { html += "</ul>"; inList = false; } html += `<h4 class="ai-h">${inline(line.replace(/^#{1,6}\s+/, ""))}</h4>`; continue; }
+    if (/^\s*[-*+]\s+/.test(line))   { if (!inList) { html += "<ul class='ai-ul'>"; inList = true; } html += `<li>${inline(line.replace(/^\s*[-*+]\s+/, ""))}</li>`; continue; }
+    if (/^\s*\d+[.)]\s+/.test(line)) { if (!inList) { html += "<ul class='ai-ul'>"; inList = true; } html += `<li>${inline(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>`; continue; }
+    if (!line.trim())                { if (inList) { html += "</ul>"; inList = false; } continue; }
+    if (inList) { html += "</ul>"; inList = false; }
+    html += `<p>${inline(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+
+/* stream a completion from Google Gemini directly from the browser (BYO key) */
+async function callGeminiStream(system, userContent, onDelta) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(AI.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(AI.key)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: userContent }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+    }),
+  });
+  if (!res.ok || !res.body) {
+    let msg = `HTTP ${res.status}`;
+    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      let ev; try { ev = JSON.parse(data); } catch (e) { continue; }
+      if (ev.error) throw new Error(ev.error.message || "stream error");
+      const parts = ev.candidates && ev.candidates[0] && ev.candidates[0].content && ev.candidates[0].content.parts;
+      if (parts) { for (const p of parts) if (p.text) full += p.text; onDelta(full); }
+    }
+  }
+  return full;
+}
+
+async function aiAnswer(query) {
+  const body = $("#assistantBody");
+  const { results, context } = gatherContext(query, 10);
+  const sys =
+    "You are the Canon Assistant for a personal worldbuilding project. Answer using ONLY the canon excerpts the user provides — their own notes and lore. " +
+    "Never invent names, houses, events, or facts the excerpts don't support; if the answer isn't there, say so plainly and suggest what to search for. " +
+    "Use the world's own terms and spellings. Write in clear, direct prose — no throat-clearing, no \"based on the excerpts\". Keep it as long as the question needs and no longer. Light markdown (short headings, bold, bullet lists) is welcome." +
+    (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
+  const user = context
+    ? `Question: ${query}\n\nCanon excerpts:\n${context}`
+    : `Question: ${query}\n\n(There are no matching excerpts in the canon. Say so, and suggest what the author could search for or add.)`;
+  body.innerHTML = `<div class="ans-answer ai">
+      <div class="ans-a-label">${svg("spark")} Answer · Gemini</div>
+      <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Reading your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
+    </div><div class="ans-sources" id="aiSources"></div>`;
+  const streamEl = $("#aiStream");
+  try {
+    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; });
+    streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try rephrasing.</p>`;
+    const src = results.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
+    $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
+    bindAssistantLinks(body);
+  } catch (err) {
+    body.innerHTML = `<div class="assistant-hint" style="text-align:left">⚠️ Gemini couldn't answer: <b>${esc(err.message)}</b><br>
+      <span class="faint">Check your key in <b>Settings → Assistant</b>. Here's a local result instead:</span></div>${assistantAnswer(query)}`;
+    bindAssistantLinks(body);
+  }
+}
+window.CodexAI = { answer: aiAnswer, get on() { return AI.on; } };
+
 /* ---------- assistant recent-lookup history ---------- */
 const assistantHistory = { key: "codex.assistant.history",
   list() { try { return JSON.parse(localStorage.getItem(this.key) || "[]"); } catch (e) { return []; } },
@@ -1239,9 +1362,13 @@ function assistantIdle() {
     <div style="margin-top:14px">
       <div class="sc-rel-label">Quick actions</div>
       <div class="recog">${QUICK_ACTIONS.map(a => `<span class="chip" data-quick="${esc(a.q)}">${esc(a.label)}</span>`).join("")}</div>
-    </div>${histHtml}`;
+    </div>${histHtml}
+    <div class="ai-idle-note">${AI.on
+      ? `✦ <b>Gemini is connected.</b> Type a question and press <b>Enter</b> for a written, reasoned answer — grounded in your canon.`
+      : `Want real AI answers? <span class="ai-connect-link" id="aiConnectLink">Connect Gemini</span> in Settings (it's free) — then press <b>Enter</b> on any question.`}</div>`;
   $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
   $$('[data-quick]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.quick; assistantLookup(c.dataset.quick); });
+  const cl = $("#aiConnectLink"); if (cl) cl.onclick = () => { location.hash = "#/settings"; };
 }
 function assistantScan(text) {
   const found = [], seen = new Set();
@@ -1271,7 +1398,8 @@ async function backupAll() {
   else { data = { _codex: true, stores: {} }; }
   data._codex = true;
   // include tiny localStorage prefs too
-  data.prefs = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("codex.")) data.prefs[k] = localStorage.getItem(k); }
+  // include tiny localStorage prefs, but NEVER the private AI key
+  data.prefs = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("codex.") && k !== "codex.aiKey") data.prefs[k] = localStorage.getItem(k); }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1411,6 +1539,16 @@ async function init() {
   assistantIdle();
   let aT;
   $("#assistantInput").addEventListener("input", e => { clearTimeout(aT); aT = setTimeout(() => assistantLookup(e.target.value), 160); });
+  // Enter sends a real question to Gemini when connected (never on keystroke, to spare free-tier limits)
+  $("#assistantInput").addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    clearTimeout(aT);
+    const v = e.target.value.trim();
+    if (!v) return;
+    if (AI.on) { assistantHistory.push(v); aiAnswer(v); }
+    else assistantLookup(v);
+  });
 
   $("#searchOpen").onclick = () => openSearch("");
   const si = $("#searchInput"); let sT;
