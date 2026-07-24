@@ -565,12 +565,16 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
 .tl-add input,.tl-add select{padding:9px 12px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);
   background:var(--bg-raised);color:var(--ink);font-family:var(--sans);font-size:13.5px}
 .tl-add input[placeholder^="Event"]{flex:1;min-width:200px}
-.tl-line-wrap{margin:34px 0 10px;padding:0 20px}
+.tl-line-wrap{margin:34px 0 10px;padding:0 8px;overflow-x:visible}
 .tl-line{position:relative;height:70px;border-top:2px solid var(--line-strong)}
 .tl-point{position:absolute;top:-6px;transform:translateX(-50%);cursor:pointer;text-align:center}
 .tl-dot{width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg)}
 .tl-point.active .tl-dot{background:var(--danger)}
 .tl-point-label{font-size:10.5px;color:var(--ink-faint);margin-top:6px;white-space:nowrap}
+.tl-zero{position:absolute;top:-14px;transform:translateX(-50%);text-align:center;pointer-events:none}
+.tl-zero:before{content:"";display:block;width:2px;height:84px;background:var(--line-strong);margin:0 auto}
+.tl-zero span{display:block;font-size:9.5px;color:var(--ink-faint);white-space:nowrap;margin-top:-2px}
+.tl-axis-ends{display:flex;justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--ink-faint)}
 .tl-detail{margin-top:20px;background:var(--bg-raised);border:1px solid var(--line);border-radius:var(--radius);
   padding:18px;max-width:600px}
 .tl-detail-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px;font-size:15px}
@@ -591,6 +595,15 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
 .cc-draw-toolbar button{font-size:11px;padding:4px 8px;border:1px solid var(--line-strong);border-radius:6px;
   background:var(--bg-sunken);color:var(--ink-soft);cursor:pointer;font-family:var(--sans)}
 .cc-draw-canvas{display:block;width:100%;touch-action:none;cursor:crosshair;background:var(--bg-raised)}
+
+/* speech mini-player */
+.speech-player{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:250;
+  display:flex;align-items:center;gap:12px;background:var(--ink);color:var(--bg);
+  padding:9px 10px 9px 16px;border-radius:24px;box-shadow:var(--shadow);font-size:13px}
+.speech-player button{background:rgba(255,255,255,.14);border:none;color:inherit;border-radius:16px;
+  padding:6px 12px;cursor:pointer;font-family:var(--sans);font-size:13px}
+.speech-player #speechToggle{width:30px;padding:6px 0;text-align:center}
+.speech-player button:hover{background:rgba(255,255,255,.24)}
 
 /* grammar */
 .grammar-panel{position:fixed;top:64px;right:20px;width:320px;max-height:70vh;overflow-y:auto;

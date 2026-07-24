@@ -44,7 +44,7 @@ window.CodexFeed = { log: logFeed };
    SETTINGS  — theme colour, fonts, restore deleted
    ============================================================ */
 function defaultSettings() {
-  return { accent: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces" };
+  return { accent: "", bg: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces" };
 }
 function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
@@ -54,6 +54,11 @@ function mix(hex, withHex, amt) {
   const a = hexToRgb(hex), b = hexToRgb(withHex); if (!a || !b) return hex;
   const c = k => Math.round(a[k] + (b[k] - a[k]) * amt);
   return `rgb(${c("r")},${c("g")},${c("b")})`;
+}
+function luminance(hex) {
+  const c = hexToRgb(hex); if (!c) return 1;
+  const ch = [c.r, c.g, c.b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
 const UI_FONTS = { Inter: "'Inter',system-ui,sans-serif", System: "system-ui,-apple-system,sans-serif", Georgia: "Georgia,serif", Verdana: "Verdana,Geneva,sans-serif", Mono: "'Courier New',monospace" };
 const READ_FONTS = { Fraunces: "'Fraunces',Georgia,serif", Georgia: "Georgia,serif", Inter: "'Inter',sans-serif", System: "system-ui,sans-serif" };
@@ -67,6 +72,20 @@ function applySettings(s) {
   } else {
     root.removeProperty("--accent"); root.removeProperty("--accent-ink"); root.removeProperty("--accent-soft");
   }
+  if (s.bg) {
+    const dark = luminance(s.bg) < 0.5;
+    const ink = dark ? "#f0ece0" : "#2c2a26";
+    root.setProperty("--bg", s.bg);
+    root.setProperty("--bg-raised", mix(s.bg, "#ffffff", dark ? 0.10 : 0.6));
+    root.setProperty("--bg-sunken", mix(s.bg, "#000000", dark ? 0.2 : 0.05));
+    root.setProperty("--ink", ink);
+    root.setProperty("--ink-soft", dark ? "#c9c2b0" : "#6a655c");
+    root.setProperty("--ink-faint", dark ? "#8c8574" : "#9c968a");
+    root.setProperty("--line", mix(s.bg, ink, dark ? 0.2 : 0.12));
+    root.setProperty("--line-strong", mix(s.bg, ink, dark ? 0.32 : 0.22));
+  } else {
+    ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
+  }
   root.setProperty("--sans", UI_FONTS[s.uiFont] || UI_FONTS.Inter);
   root.setProperty("--serif", READ_FONTS[s.readFont] || READ_FONTS.Fraunces);
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
@@ -76,6 +95,7 @@ function saveSettings() { localStorage.setItem("codex.settings", JSON.stringify(
 function viewSettings() {
   const s = Extra.settings;
   const swatches = ["#7c5cff", "#c2603f", "#d0699a", "#3f8f6b", "#b8893b", "#3f6f8f", "#9a6bd0", "#d98b2b", "#2f9e8f", "#e0577d"];
+  const bgSwatches = ["#f6f3ec", "#17151a", "#fbe9ee", "#eaf3ec", "#eef1fb", "#fff6e0", "#f1e6f7", "#2a2438"];
   const hiddenCount = Extra.hidden.size;
   view().innerHTML = `<div class="wrap">
     <div class="page-kicker">Settings</div>
@@ -89,6 +109,17 @@ function viewSettings() {
         ${swatches.map(c => `<button class="swatch" style="background:${c}" data-accent="${c}" title="${c}"></button>`).join("")}
         <label class="swatch wheel" title="Custom colour"><input type="color" id="accentPicker" value="${s.accent || "#7c5cff"}"></label>
         <button class="btn ghost sm" id="accentReset">Reset</button>
+      </div>
+    </section>
+
+    <section class="set-block">
+      <h3>Background colour</h3>
+      <p class="faint" style="margin:2px 0 12px">Not feeling black-and-white or the usual light/dark? Pick any background —
+        text colour adjusts automatically to stay readable on it.</p>
+      <div class="swatch-row">
+        ${bgSwatches.map(c => `<button class="swatch" style="background:${c}" data-bg="${c}" title="${c}"></button>`).join("")}
+        <label class="swatch wheel" title="Custom colour"><input type="color" id="bgPicker" value="${s.bg || "#f6f3ec"}"></label>
+        <button class="btn ghost sm" id="bgReset">Reset to theme default</button>
       </div>
     </section>
 
@@ -126,6 +157,9 @@ function viewSettings() {
   $$(".swatch[data-accent]").forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker").oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
   $("#accentReset").onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
+  $$(".swatch[data-bg]").forEach(b => b.onclick = () => { Extra.settings.bg = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
+  $("#bgPicker").oninput = e => { Extra.settings.bg = e.target.value; saveSettings(); };
+  $("#bgReset").onclick = () => { Extra.settings.bg = ""; saveSettings(); toast("Background reset to theme default"); };
   $("#fontSize").oninput = e => { Extra.settings.fontSize = +e.target.value; $("#fsVal").textContent = e.target.value + "px"; saveSettings(); };
   $("#uiFont").onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
   $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
@@ -205,22 +239,34 @@ async function viewFeed() {
 
 /* ============================================================
    SPEECH  — read-aloud (TTS) + dictation (STT)
+   A small fixed mini-player appears whenever something is being
+   read, with Pause/Resume and Stop — and reading always stops the
+   moment you navigate to a different page, so it never keeps
+   talking about a section you've left.
    ============================================================ */
 const Speech = {
   reading: false,
+  paused: false,
   read(text) {
     if (!("speechSynthesis" in window)) { toast("Speech not supported here"); return; }
     speechSynthesis.cancel();
-    if (!text || !text.trim()) { toast("Select some text first"); return; }
+    if (!text || !text.trim()) { toast("Nothing to read — select some text first, or open an entry."); return; }
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1; u.onend = () => { Speech.reading = false; };
-    Speech.reading = true; speechSynthesis.speak(u);
+    u.rate = 1;
+    u.onend = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
+    u.onerror = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
+    Speech.reading = true; Speech.paused = false;
+    speechSynthesis.speak(u);
+    showPlayer();
   },
   readSelection() {
     const sel = (window.getSelection && String(window.getSelection())) || "";
     this.read(sel);
   },
-  stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.reading = false; },
+  pause() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.pause(); this.paused = true; updatePlayer(); } },
+  resume() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.resume(); this.paused = false; updatePlayer(); } },
+  toggle() { this.paused ? this.resume() : this.pause(); },
+  stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.reading = false; this.paused = false; hidePlayer(); },
   dictate(onText, onStop) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { toast("Dictation not supported in this browser"); return null; }
@@ -241,6 +287,36 @@ const Speech = {
   },
 };
 window.CodexSpeech = Speech;
+
+/* ---------- floating mini-player ---------- */
+function showPlayer() {
+  let el = document.getElementById("speechPlayer");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "speechPlayer";
+    el.className = "speech-player";
+    el.innerHTML = `<button id="speechToggle" title="Pause / resume"></button>
+      <span class="speech-label">Reading aloud…</span>
+      <button id="speechStop" title="Stop">Stop</button>`;
+    document.body.appendChild(el);
+    document.getElementById("speechToggle").onclick = () => Speech.toggle();
+    document.getElementById("speechStop").onclick = () => Speech.stop();
+  }
+  el.hidden = false;
+  updatePlayer();
+}
+function updatePlayer() {
+  const el = document.getElementById("speechPlayer"); if (!el) return;
+  const btn = document.getElementById("speechToggle");
+  const label = el.querySelector(".speech-label");
+  if (btn) btn.textContent = Speech.paused ? "▶" : "❚❚";
+  if (label) label.textContent = Speech.paused ? "Paused" : "Reading aloud…";
+}
+function hidePlayer() { const el = document.getElementById("speechPlayer"); if (el) el.hidden = true; }
+
+/* stop reading the instant you navigate away — nothing should keep
+   talking about a page you've already left */
+window.addEventListener("hashchange", () => { if (Speech.reading) Speech.stop(); });
 
 /* global read-aloud button (reads current selection) */
 function readSelectionGlobal() { Speech.readSelection(); }

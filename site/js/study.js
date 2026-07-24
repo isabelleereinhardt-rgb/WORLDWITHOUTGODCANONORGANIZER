@@ -13,16 +13,27 @@ const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const view = () => $("#view");
 const C = () => window.Codex;
 
+/* returns { items, note } — note explains why the pool is smaller than hoped, if it is */
 function pool(topic) {
   const DB = C().DB;
   const entries = C().visibleEntries ? C().visibleEntries() : DB.entries;
   const usable = entries.filter(e => e.type === "pdf" || e.type === "note");
-  if (!topic || !topic.trim()) return usable;
+  if (!topic || !topic.trim()) return { items: usable, note: null };
   const t = topic.trim().toLowerCase();
-  const cat = C().categoriesList().find(c => c.name.toLowerCase() === t);
-  if (cat) return usable.filter(e => e.category === cat.name);
-  const named = usable.filter(e => e.title.toLowerCase().includes(t) || (e._hay || "").includes(t));
-  return named.length ? named : usable;
+  // exact category match first, then a looser "contains" match (so "houses" matches "Noble Houses")
+  const cats = C().categoriesList();
+  let cat = cats.find(c => c.name.toLowerCase() === t) || cats.find(c => c.name.toLowerCase().includes(t) || t.includes(c.name.toLowerCase()));
+  if (cat) {
+    const items = usable.filter(e => e.category === cat.name);
+    return { items, note: items.length ? null : `Nothing's in "${cat.name}" yet.` };
+  }
+  // otherwise treat the topic as a name/subject and gather everything that mentions it
+  const titleHits = usable.filter(e => e.title.toLowerCase().includes(t));
+  const mentionHits = usable.filter(e => !titleHits.includes(e) && (e._hay || "").includes(t));
+  const named = titleHits.concat(mentionHits);
+  if (named.length >= 3) return { items: named, note: null };
+  if (named.length) return { items: named, note: `Only ${named.length} entr${named.length === 1 ? "y" : "ies"} in your canon match "${topic.trim()}" — try a broader topic (a category name like "Noble Houses"), or leave it blank to pull from everything.` };
+  return { items: usable, note: `Nothing matched "${topic.trim()}", so this pulls from your whole canon instead.` };
 }
 function shuffle(arr) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function pick(arr, n) { return shuffle(arr).slice(0, n); }
@@ -63,20 +74,24 @@ function view_() {
   $("#stArea").innerHTML = `<div class="empty-state">Set a topic (or not) and hit Generate.</div>`;
 }
 
+let poolNote = null;
 function generate() {
   const topic = $("#stTopic").value;
   const count = Math.max(3, Math.min(30, +$("#stCount").value || 10));
   const mode = $("#stMode").value;
-  const src = pick(pool(topic), Math.min(count, 60));
+  const { items, note } = pool(topic);
+  poolNote = note;
+  const src = pick(items, Math.min(count, items.length));
   if (!src.length) { $("#stArea").innerHTML = `<div class="empty-state">Nothing in your canon matches that topic yet.</div>`; return; }
-  cards = src.slice(0, count).map(questionFor);
+  cards = src.map(questionFor);
   window.CodexFeed && CodexFeed.log("Generated " + (mode === "quiz" ? "quiz" : "flashcards"), `${cards.length} on "${topic || "everything"}"`);
   if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
 }
+function poolNoteHtml() { return poolNote ? `<div class="import-ok" style="margin-bottom:14px">${esc(poolNote)}</div>` : ""; }
 
 function renderCards() {
   flipped = new Set();
-  $("#stArea").innerHTML = `<p class="muted">${cards.length} cards on <b>${esc($("#stTopic").value || "your canon")}</b> — click a card to flip it.</p>
+  $("#stArea").innerHTML = `${poolNoteHtml()}<p class="muted">${cards.length} card${cards.length === 1 ? "" : "s"} on <b>${esc($("#stTopic").value || "your canon")}</b> — click a card to flip it.</p>
     <div class="flash-grid">${cards.map((c, i) => flashcardHtml(c, i)).join("")}</div>`;
   bindCards();
 }
@@ -115,8 +130,9 @@ function renderQuizQuestion() {
   if (quizState.i >= cards.length) { renderQuizResults(); return; }
   const c = cards[quizState.i];
   const progress = `Question ${quizState.i + 1} of ${cards.length} · Score ${quizState.score}`;
+  const noteBlock = quizState.i === 0 ? poolNoteHtml() : "";
   if (quizState.difficulty === "hard") {
-    area.innerHTML = `<p class="muted">${progress}</p>
+    area.innerHTML = `${noteBlock}<p class="muted">${progress}</p>
       <div class="quiz-card">
         <div class="quiz-q">${esc(c.q)}</div>
         <textarea class="import-body" id="quizAnswer" placeholder="Type your answer, then reveal…" style="min-height:80px"></textarea>
@@ -134,7 +150,7 @@ function renderQuizQuestion() {
     $("#gotWrong").onclick = () => nextQuestion();
   } else {
     const options = shuffle([c.a, ...distractorsFor(c)]);
-    area.innerHTML = `<p class="muted">${progress}</p>
+    area.innerHTML = `${noteBlock}<p class="muted">${progress}</p>
       <div class="quiz-card">
         <div class="quiz-q">${esc(c.q)}</div>
         <div class="quiz-opts">${options.map((o, i) => `<button class="quiz-opt" data-opt="${esc(o)}">${esc((o || "").slice(0, 140))}</button>`).join("")}</div>

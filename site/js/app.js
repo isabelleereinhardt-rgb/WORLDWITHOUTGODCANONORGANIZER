@@ -584,19 +584,70 @@ function viewGallery(e) {
   </div>`;
   bindGallery();
 }
+let mapsSelectMode = false, mapsSelected = new Set();
 function viewMaps() {
+  mapsSelectMode = false; mapsSelected = new Set();
+  renderMaps();
+}
+function renderMaps() {
   const galleries = DB.entries.filter(e => e.type === "gallery");
   const mapDocs = DB.entries.filter(e => e.category === "Maps & Locations" && e.type === "pdf");
+  const items = galleries.concat(mapDocs);
+  const cards = items.map(e => {
+    if (!mapsSelectMode) {
+      return e.type === "gallery"
+        ? `<a class="entry-card" href="#/entry/${e.id}"><h3>${esc(e.title)}</h3><p>${e.images.length} images</p><div class="meta">Gallery</div></a>`
+        : entryCard(e);
+    }
+    const checked = mapsSelected.has(e.id);
+    const preview = e.type === "gallery" ? `${e.images.length} images` : esc((e.summary || "").slice(0, 160));
+    return `<div class="entry-card selectable ${checked ? "checked" : ""}" data-id="${e.id}">
+      <input type="checkbox" class="ec-check" ${checked ? "checked" : ""}>
+      <h3>${esc(e.title)}</h3><p>${preview}</p>
+      <div class="meta">${e.type === "gallery" ? "Gallery" : catDot(e.category) + " " + esc(e.category)}</div>
+    </div>`;
+  }).join("");
+
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${svg("atlas")} Atlas</div>
-    <h1>Atlas &amp; Galleries</h1>
-    <p class="muted">Maps, flags, and visual reference plates.</p>
-    <div class="list-grid">
-      ${galleries.map(e => `<a class="entry-card" href="#/entry/${e.id}"><h3>${esc(e.title)}</h3><p>${e.images.length} images</p>
-        <div class="meta">Gallery</div></a>`).join("")}
-      ${mapDocs.map(e => entryCard(e)).join("")}
+    <div class="browse-head">
+      <h1>Atlas &amp; Galleries</h1>
+      <div class="browse-actions">
+        ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${mapsSelectMode ? "Cancel" : "Select"}</button>` : ""}
+      </div>
     </div>
+    <p class="muted">Maps, flags, and visual reference plates.</p>
+    ${mapsSelectMode ? `<div class="select-bar">
+      <label class="sel-all"><input type="checkbox" id="selAll" ${items.length && mapsSelected.size === items.length ? "checked" : ""}> Select all</label>
+      <span class="faint" id="selCount">${mapsSelected.size} selected</span>
+      <button class="btn danger sm" id="deleteSelected" ${mapsSelected.size ? "" : "disabled"}>Delete selected</button>
+    </div>` : ""}
+    <div class="list-grid">${cards || `<div class="empty-state">Nothing here yet.</div>`}</div>
   </div>`;
+  bindGallery();
+
+  if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { mapsSelectMode = !mapsSelectMode; if (!mapsSelectMode) mapsSelected.clear(); renderMaps(); };
+  if (mapsSelectMode) {
+    $("#selAll").onchange = e => { mapsSelected = e.target.checked ? new Set(items.map(i => i.id)) : new Set(); renderMaps(); };
+    $$(".entry-card.selectable", view).forEach(card => {
+      const cb = card.querySelector(".ec-check");
+      const toggle = () => {
+        if (cb.checked) mapsSelected.add(card.dataset.id); else mapsSelected.delete(card.dataset.id);
+        $("#selCount").textContent = mapsSelected.size + " selected";
+        $("#deleteSelected").disabled = !mapsSelected.size;
+        card.classList.toggle("checked", cb.checked);
+      };
+      cb.onchange = toggle;
+      card.onclick = e => { if (e.target === cb) return; cb.checked = !cb.checked; toggle(); };
+    });
+    $("#deleteSelected").onclick = async () => {
+      if (!mapsSelected.size) return;
+      if (!confirm(`Delete ${mapsSelected.size} item${mapsSelected.size === 1 ? "" : "s"} from the Atlas? You can restore them anytime from Settings → Deleted entries.`)) return;
+      await CodexExtra.hide(Array.from(mapsSelected));
+      mapsSelected.clear(); mapsSelectMode = false;
+      refresh();
+    };
+  }
 }
 function bindGallery() {
   $$(".gallery figure", view).forEach(f => f.onclick = () => {
@@ -973,32 +1024,52 @@ const assistantHistory = { key: "codex.assistant.history",
   },
 };
 
-/* ---------- task/command parsing: "list all characters in <book>" ---------- */
+/* ---------- shared category-keyword map, used by both task and opinion parsing ---------- */
+const KIND_WORDS = [
+  [/\bcharacters?\b/i, "Characters", "character"],
+  [/\bhouses?\b/i, "Noble Houses", "house"],
+  [/\bgoddesses?\b/i, "Religion & Faith", "goddess"],
+  [/\bgods?\b/i, "Religion & Faith", "god"],
+  [/\bplaces?\b/i, "Maps & Locations", "place"],
+  [/\blocations?\b/i, "Maps & Locations", "location"],
+  [/\bbooks?\b|\bstories\b/i, "Books & Stories", "book"],
+  [/\bmagic\b/i, "Magic System", "magic entry"],
+  [/\btimeline\b|\bhistory\b/i, "Timeline & History", "historical entry"],
+  [/\bculture\b|\bfashion\b/i, "Culture & Fashion", "culture entry"],
+  [/\bcanon\b|\bcontinuity\b/i, "Canon & Continuity", "canon entry"],
+  [/\breference\b|\blexicon\b|\bterms?\b/i, "Reference & Lexicon", "reference entry"],
+  [/\bnotes?\b/i, "My Notes", "note"],
+];
+function findKind(q) { for (const k of KIND_WORDS) { const m = q.match(k[0]); if (m) return { cat: k[1], label: k[2], match: m }; } return null; }
+
+/* ---------- task/command parsing: "list all characters in <book>", "how many houses", etc. ---------- */
+const TASK_TRIGGER = /\b(list|show|display|enumerate|find all|find every|get all|get me|pull up|tell me|give me|what are|who are|which|name all|name every|how many)\b/i;
 function tryCommand(q) {
-  const m = q.match(/^(?:list|show|give me)\s+(?:all\s+)?(?:the\s+)?(characters?|houses?|gods?|places?|locations?)\s*(?:in|from|of)?\s*(.*)$/i);
-  if (!m) return null;
-  const kindMap = { character: "Characters", characters: "Characters", house: "Noble Houses", houses: "Noble Houses",
-    god: "Religion & Faith", gods: "Religion & Faith", place: "Maps & Locations", places: "Maps & Locations",
-    location: "Maps & Locations", locations: "Maps & Locations" };
-  const cat = kindMap[m[1].toLowerCase()];
-  const filterTerm = (m[2] || "").trim().replace(/^(my|the)\s+/i, "");
-  let pool = DB.entries.filter(e => e.category === cat && (e.type === "pdf" || e.type === "note"));
+  if (!TASK_TRIGGER.test(q)) return null;
+  const kind = findKind(q);
+  if (!kind) return null;
+  let after = q.slice(kind.match.index + kind.match[0].length);
+  after = after.replace(/^\s*(in|from|of|about|within|that are in|that are from|named|called|that)\s*/i, "").trim().replace(/[?.!]+$/, "");
+  // strip trailing filler that isn't actually a topic — "how many houses ARE THERE", "characters DO I HAVE"
+  after = after.replace(/\s*(are there|is there|do i have|does it have|exist|are in my canon|do you have|are in the canon|are there\?)\s*$/i, "").trim();
+  const filterTerm = after;
+  let pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (filterTerm) pool = pool.filter(e => e._hay.includes(filterTerm.toLowerCase()));
   pool = pool.sort((a, b) => a.title.localeCompare(b.title));
-  const label = filterTerm ? `${m[1]} in “${filterTerm}”` : m[1];
-  if (!pool.length) return `<div class="assistant-hint">I couldn't find any ${esc(label)} in your canon.</div>`;
-  return `<div class="ans-label" style="margin-bottom:6px">Found ${pool.length} ${esc(label)}</div>
+  const label = filterTerm ? `${kind.cat} in "${filterTerm}"` : kind.cat;
+  if (!pool.length) return `<div class="assistant-hint">I couldn't find any ${esc(label)} in your canon.${filterTerm ? " Try dropping the “" + esc(filterTerm) + "” part and just asking for all of them." : ""}</div>`;
+  return `<div class="ans-label" style="margin-bottom:6px">Found ${pool.length} in ${esc(label)}</div>
     <div class="recog">${pool.map(e => `<a class="chip" href="#/entry/${e.id}">${esc(e.title)}</a>`).join("")}</div>`;
 }
 
 /* ---------- opinion mode: "what's your favourite character" ---------- */
+const OPINION_TRIGGER = /\b(favou?rite|best|coolest|most interesting|most powerful|most important|top)\b/i;
 function tryOpinion(q) {
-  const m = q.match(/\b(favou?rite|best|most interesting)\s+(character|house|god(?:dess)?|place|location)\b/i);
-  if (!m) return null;
-  const kindMap = { character: "Characters", house: "Noble Houses", god: "Religion & Faith", goddess: "Religion & Faith", place: "Maps & Locations", location: "Maps & Locations" };
-  const cat = kindMap[m[2].toLowerCase()] || kindMap[m[2].toLowerCase().replace(/dess$/, "")];
-  const pool = DB.entries.filter(e => e.category === cat && (e.type === "pdf" || e.type === "note"));
-  if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(m[2])} entries to pick from yet.</div>`;
+  if (!OPINION_TRIGGER.test(q)) return null;
+  const kind = findKind(q);
+  if (!kind) return null;
+  const pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
+  if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(kind.label)} entries to pick from yet.</div>`;
   const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
   scored.sort((a, b) => b.score - a.score);
   const pick = scored[0].e;
@@ -1007,7 +1078,7 @@ function tryOpinion(q) {
     <div class="blurb">
       <div class="bt">${catDot(pick.category)} ${esc(pick.title)}</div>
       <div class="bs">${esc(sents.join(" ")) || esc(pick.summary || "")}</div>
-      <div class="bl">Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries — more cross-referenced than the rest of your ${esc(m[2])} entries, which usually means it's load-bearing for the story.</div>
+      <div class="bl">Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries — more cross-referenced than the rest of your ${esc(kind.label)} entries, which usually means it's load-bearing for the story.</div>
       <div style="margin-top:8px"><a class="btn sm" href="#/entry/${pick.id}">Open entry</a></div>
     </div>`;
 }
