@@ -1,27 +1,37 @@
 /* ============================================================
-   The Codex — storage layer (IndexedDB)
+   Beep Beep Organizer — storage layer (IndexedDB)
    Documents, slide decks, canvases (mood boards), folders,
    imported notes, and media all live here. IndexedDB has far
    more room than localStorage, so images actually persist now.
    Falls back to localStorage if IndexedDB is unavailable.
+
+   Multi-workspace: each workspace gets its own IndexedDB database
+   (codex-db--default for the original World Without God workspace,
+   codex-db--<id> for every workspace after that), so switching
+   workspaces fully isolates docs/notes/canvases/etc — nothing
+   bleeds between projects. Call CodexStore.switchWorkspace(id)
+   before touching data for a workspace other than the current one.
+
    API is promise-based:  await CodexStore.all("docs") etc.
    ============================================================ */
 (function () {
 "use strict";
 
 const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta",
-  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline"];
-const DB_NAME = "codex-db";
-const DB_VER = 2;
+  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames"];
+const DB_VER = 3;
 let db = null;
 let usingFallback = false;
+let currentWorkspace = "default";
+
+function dbNameFor(workspaceId) { return workspaceId === "default" ? "codex-db" : "codex-db--" + workspaceId; }
 
 /* ---------- open ---------- */
-function openDB() {
+function openDB(name) {
   return new Promise((resolve) => {
     if (!("indexedDB" in window)) { usingFallback = true; return resolve(null); }
     let req;
-    try { req = indexedDB.open(DB_NAME, DB_VER); }
+    try { req = indexedDB.open(name, DB_VER); }
     catch (e) { usingFallback = true; return resolve(null); }
     req.onupgradeneeded = () => {
       const d = req.result;
@@ -33,9 +43,9 @@ function openDB() {
   });
 }
 
-/* ---------- localStorage fallback ---------- */
+/* ---------- localStorage fallback (namespaced per workspace too) ---------- */
 const LS = {
-  key: (s) => "codex.store." + s,
+  key(s) { return "codex.store." + currentWorkspace + "." + s; },
   all(s) { try { return JSON.parse(localStorage.getItem(this.key(s)) || "[]"); } catch (e) { return []; } },
   saveAll(s, arr) { try { localStorage.setItem(this.key(s), JSON.stringify(arr)); return true; } catch (e) { return false; } },
   put(s, obj) { const a = this.all(s); const i = a.findIndex(x => x.id === obj.id); if (i >= 0) a[i] = obj; else a.unshift(obj); return this.saveAll(s, a); },
@@ -52,6 +62,7 @@ function wrap(req) {
 const Store = {
   ready: null,
   usingFallback: () => usingFallback,
+  currentWorkspace: () => currentWorkspace,
 
   async all(store) {
     if (usingFallback || !db) return LS.all(store);
@@ -78,11 +89,10 @@ const Store = {
     catch (e) { return LS.del(store, id); }
   },
 
-  /* export EVERYTHING (canon workspace) as a plain object for backup */
+  /* export EVERYTHING in the *current* workspace as a plain object for backup */
   async exportAll() {
-    const out = { _codex: true, v: 1, exported: new Date().toISOString(), stores: {} };
+    const out = { _codex: true, v: 1, workspace: currentWorkspace, exported: new Date().toISOString(), stores: {} };
     for (const s of STORES) out.stores[s] = await this.all(s);
-    // legacy localStorage docs/decks too, just in case
     return out;
   },
   async importAll(data) {
@@ -93,10 +103,37 @@ const Store = {
     }
     return true;
   },
+
+  /* switch every subsequent read/write to a different workspace's isolated
+     database. Safe to call repeatedly (re-opens are cheap). */
+  async switchWorkspace(workspaceId) {
+    if (db) { try { db.close(); } catch (e) {} db = null; }
+    usingFallback = false;
+    currentWorkspace = workspaceId || "default";
+    this.ready = (async () => {
+      db = await openDB(dbNameFor(currentWorkspace));
+      await migrateLegacy();
+    })();
+    await this.ready;
+    return true;
+  },
+
+  /* permanently remove a workspace's entire database (used when deleting a workspace) */
+  deleteWorkspaceDB(workspaceId) {
+    return new Promise((resolve) => {
+      if (!("indexedDB" in window)) return resolve(false);
+      const name = dbNameFor(workspaceId);
+      const req = indexedDB.deleteDatabase(name);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => resolve(false);
+      req.onblocked = () => resolve(false);
+    });
+  },
 };
 
-/* ---------- one-time migration from the old localStorage format ---------- */
+/* ---------- one-time migration from the old localStorage format (default workspace only) ---------- */
 async function migrateLegacy() {
+  if (currentWorkspace !== "default") return;
   try {
     const done = await Store.get("meta", "legacy-migrated");
     if (done) return;
@@ -109,7 +146,7 @@ async function migrateLegacy() {
 }
 
 Store.ready = (async () => {
-  db = await openDB();
+  db = await openDB(dbNameFor(currentWorkspace));
   await migrateLegacy();
 })();
 

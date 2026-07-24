@@ -13,15 +13,63 @@ const view = () => $("#view");
 const uid = (p) => (p || "x") + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const S = () => window.CodexStore;
 
+/* ============================================================
+   SETTINGS data — fonts + typography (defined before Extra, since
+   Extra's initial value calls defaultSettings() immediately)
+   ============================================================ */
+/* the full font library — loaded via the Google Fonts link in index.html,
+   plus a few system fonts that need no loading at all */
+const FONT_LIST = [
+  "Fraunces", "Inter", "Lora", "Cormorant Garamond", "Cormorant", "Playfair Display", "EB Garamond",
+  "Crimson Text", "Crimson Pro", "Libre Baskerville", "Merriweather", "Spectral", "Vollkorn",
+  "Source Serif 4", "PT Serif", "Bitter", "Domine", "Alegreya", "Cardo", "Marcellus", "Cinzel",
+  "Cinzel Decorative", "Diplomata SC", "Almendra", "IM Fell English", "Old Standard TT", "Abril Fatface",
+  "Josefin Sans", "Raleway", "Montserrat", "Poppins", "Nunito", "Quicksand", "Work Sans", "Karla",
+  "Space Grotesk", "Jost", "Georgia", "Times New Roman", "Verdana", "System UI",
+];
+function fontStack(name) {
+  if (name === "Georgia") return "Georgia,serif";
+  if (name === "Times New Roman") return "'Times New Roman',Times,serif";
+  if (name === "Verdana") return "Verdana,Geneva,sans-serif";
+  if (name === "System UI") return "system-ui,-apple-system,sans-serif";
+  const serifish = !/Sans|Work Sans|Raleway|Montserrat|Poppins|Nunito|Quicksand|Karla|Grotesk|Jost|Inter/.test(name);
+  return `'${name}',${serifish ? "Georgia,serif" : "system-ui,sans-serif"}`;
+}
+
+/* every text style you can pick a font/size/colour for, and where it applies */
+const TYPO_STYLES = [
+  { key: "title", label: "Title", tag: "h1", defFont: "Fraunces", defSize: 34, defColor: "" },
+  { key: "subtitle", label: "Subtitle", tag: "h2", defFont: "Fraunces", defSize: 20, defColor: "" },
+  { key: "h1", label: "Heading 1", tag: "h1", defFont: "Fraunces", defSize: 28, defColor: "" },
+  { key: "h2", label: "Heading 2", tag: "h2", defFont: "Fraunces", defSize: 23, defColor: "" },
+  { key: "h3", label: "Heading 3", tag: "h3", defFont: "Fraunces", defSize: 19, defColor: "" },
+  { key: "h4", label: "Heading 4", tag: "h4", defFont: "Fraunces", defSize: 17, defColor: "" },
+  { key: "h5", label: "Heading 5", tag: "h5", defFont: "Fraunces", defSize: 15.5, defColor: "" },
+  { key: "h6", label: "Heading 6", tag: "h6", defFont: "Fraunces", defSize: 14, defColor: "" },
+  { key: "h7", label: "Heading 7", tag: "div", defFont: "Fraunces", defSize: 13, defColor: "" },
+  { key: "body", label: "Normal Text", tag: "p", defFont: "Fraunces", defSize: 16.5, defColor: "" },
+  { key: "caption", label: "Caption", tag: "p", defFont: "Inter", defSize: 12, defColor: "" },
+];
+function defaultTypography() {
+  const t = {};
+  TYPO_STYLES.forEach(s => { t[s.key] = { font: s.defFont, size: s.defSize, color: s.defColor }; });
+  return t;
+}
+function defaultSettings() {
+  return { accent: "", bg: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces", typography: defaultTypography() };
+}
+
 /* ---------- shared caches (read synchronously by app.js) ---------- */
 const Extra = {
   hidden: new Set(),      // soft-deleted source-entry ids
   cats: [],               // custom sections [{id,name}]
+  excludedNames: new Set(), // names removed from the Name Index / cross-linking
   settings: defaultSettings(),
   async ready() {
     await S().ready;
     const h = await S().all("hidden"); this.hidden = new Set(h.map(x => x.id));
     this.cats = (await S().all("cats")).sort((a, b) => (a.created || 0) - (b.created || 0));
+    const x = await S().all("excludedNames"); this.excludedNames = new Set(x.map(r => r.id));
     const saved = localStorage.getItem("codex.settings");
     if (saved) { try { this.settings = Object.assign(defaultSettings(), JSON.parse(saved)); } catch (e) {} }
     applySettings(this.settings);
@@ -31,6 +79,9 @@ const Extra = {
   async unhideAll() { for (const id of Array.from(this.hidden)) await S().del("hidden", id); this.hidden.clear(); },
   async addCat(name) { const c = { id: uid("cat"), name: name.trim(), created: Date.now() }; await S().put("cats", c); this.cats.push(c); return c; },
   async delCat(id) { await S().del("cats", id); this.cats = this.cats.filter(c => c.id !== id); },
+  async excludeNames(names) { for (const n of names) { this.excludedNames.add(n); await S().put("excludedNames", { id: n }); } logFeed("Removed from Name Index", names.length + " name" + (names.length === 1 ? "" : "s")); },
+  async unexcludeName(n) { this.excludedNames.delete(n); await S().del("excludedNames", n); },
+  async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
 };
 window.CodexExtra = Extra;
 
@@ -43,9 +94,6 @@ window.CodexFeed = { log: logFeed };
 /* ============================================================
    SETTINGS  — theme colour, fonts, restore deleted
    ============================================================ */
-function defaultSettings() {
-  return { accent: "", bg: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces" };
-}
 function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
   return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
@@ -60,9 +108,6 @@ function luminance(hex) {
   const ch = [c.r, c.g, c.b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
   return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
-const UI_FONTS = { Inter: "'Inter',system-ui,sans-serif", System: "system-ui,-apple-system,sans-serif", Georgia: "Georgia,serif", Verdana: "Verdana,Geneva,sans-serif", Mono: "'Courier New',monospace" };
-const READ_FONTS = { Fraunces: "'Fraunces',Georgia,serif", Georgia: "Georgia,serif", Inter: "'Inter',sans-serif", System: "system-ui,sans-serif" };
-
 function applySettings(s) {
   const root = document.documentElement.style;
   if (s.accent) {
@@ -86,9 +131,30 @@ function applySettings(s) {
   } else {
     ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
   }
-  root.setProperty("--sans", UI_FONTS[s.uiFont] || UI_FONTS.Inter);
-  root.setProperty("--serif", READ_FONTS[s.readFont] || READ_FONTS.Fraunces);
+  root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
+  root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
+  applyTypography(s.typography || defaultTypography());
+}
+
+/* inject one <style> block covering every Title/Heading/Caption style, so
+   the same look applies both in the document editor and in the rendered
+   reading view — this is what makes "pick Georgia for Heading 1 in Settings"
+   actually show up when you type a Heading 1 in a document. */
+function applyTypography(typo) {
+  let styleEl = document.getElementById("typographyStyle");
+  if (!styleEl) { styleEl = document.createElement("style"); styleEl.id = "typographyStyle"; document.head.appendChild(styleEl); }
+  // !important: these are explicit per-style overrides from Settings, and
+  // need to beat existing tag-based rules like ".doc-editor h1{font-size:...}"
+  // which otherwise out-specificity a plain ".ty-h1" class selector
+  const css = TYPO_STYLES.map(s => {
+    const t = typo[s.key] || {};
+    const font = fontStack(t.font || s.defFont);
+    const size = (t.size || s.defSize) + "px";
+    const color = t.color ? `color:${t.color} !important;` : "";
+    return `.ty-${s.key}{font-family:${font} !important;font-size:${size} !important;${color}}`;
+  }).join("\n");
+  styleEl.textContent = css;
 }
 function saveSettings() { localStorage.setItem("codex.settings", JSON.stringify(Extra.settings)); applySettings(Extra.settings); }
 
@@ -97,6 +163,7 @@ function viewSettings() {
   const swatches = ["#7c5cff", "#c2603f", "#d0699a", "#3f8f6b", "#b8893b", "#3f6f8f", "#9a6bd0", "#d98b2b", "#2f9e8f", "#e0577d"];
   const bgSwatches = ["#f6f3ec", "#17151a", "#fbe9ee", "#eaf3ec", "#eef1fb", "#fff6e0", "#f1e6f7", "#2a2438"];
   const hiddenCount = Extra.hidden.size;
+  const excludedCount = Extra.excludedNames.size;
   view().innerHTML = `<div class="wrap">
     <div class="page-kicker">Settings</div>
     <h1>Settings</h1>
@@ -131,12 +198,33 @@ function viewSettings() {
       </div>
       <div class="set-row">
         <label>Interface font</label>
-        <select id="uiFont">${Object.keys(UI_FONTS).map(f => `<option ${f === s.uiFont ? "selected" : ""}>${f}</option>`).join("")}</select>
+        <select id="uiFont">${FONT_LIST.map(f => `<option ${f === s.uiFont ? "selected" : ""}>${f}</option>`).join("")}</select>
       </div>
       <div class="set-row">
-        <label>Reading / heading font</label>
-        <select id="readFont">${Object.keys(READ_FONTS).map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select>
+        <label>Reading / heading font (default)</label>
+        <select id="readFont">${FONT_LIST.map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select>
       </div>
+    </section>
+
+    <section class="set-block">
+      <h3>Typography — every text style</h3>
+      <p class="faint" style="margin:2px 0 12px">Font, size, and colour for each style, independently — mix and match
+        (Georgia for Heading 1, Lora for body, whatever you want). These are exactly the styles you can pick when
+        writing in a Document — write a Heading 1 there and it looks like this.</p>
+      <div class="typo-table">
+        <div class="typo-head"><span>Style</span><span>Font</span><span>Size</span><span>Colour</span><span>Preview</span></div>
+        ${TYPO_STYLES.map(st => {
+          const t = (s.typography && s.typography[st.key]) || { font: st.defFont, size: st.defSize, color: "" };
+          return `<div class="typo-row" data-key="${st.key}">
+            <span class="typo-label">${esc(st.label)}</span>
+            <select class="typo-font" data-key="${st.key}">${FONT_LIST.map(f => `<option ${f === t.font ? "selected" : ""}>${f}</option>`).join("")}</select>
+            <input class="typo-size" type="number" min="9" max="72" step="0.5" data-key="${st.key}" value="${t.size}">
+            <input class="typo-color" type="color" data-key="${st.key}" value="${t.color || "#2c2a26"}">
+            <span class="typo-preview ty-${st.key}" id="typoPreview-${st.key}" style="${t.color ? "color:" + esc(t.color) : ""}">${esc(st.label)}</span>
+          </div>`;
+        }).join("")}
+      </div>
+      <button class="btn ghost sm" id="typoReset" style="margin-top:12px">Reset typography to defaults</button>
     </section>
 
     <section class="set-block">
@@ -144,6 +232,14 @@ function viewSettings() {
       <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed — restore it here.</p>
       ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
         <div class="hidden-list" id="hiddenList"></div>` : `<p class="faint">Nothing deleted.</p>`}
+    </section>
+
+    <section class="set-block">
+      <h3>Removed from Name Index</h3>
+      <p class="faint" style="margin:2px 0 10px">Names you've removed from the Name Index stop being cross-linked in your text, but nothing about them is deleted — restore any of them here.</p>
+      ${excludedCount ? `<button class="btn ghost sm" id="restoreNamesAll">Restore all ${excludedCount} name${excludedCount === 1 ? "" : "s"}</button>
+        <div class="recog" style="margin-top:10px">${Array.from(Extra.excludedNames).map(n => `<span class="chip" data-restorename="${esc(n)}" style="cursor:pointer">${esc(n)} ✕</span>`).join("")}</div>`
+        : `<p class="faint">Nothing removed.</p>`}
     </section>
 
     <section class="set-block">
@@ -165,6 +261,22 @@ function viewSettings() {
   $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
   $("#saveAiInstr") && ($("#saveAiInstr").onclick = () => { Extra.settings.aiInstr = $("#aiInstr").value; saveSettings(); toast("Saved"); });
 
+  if (!s.typography) s.typography = defaultTypography();
+  const touchTypo = key => {
+    const row = $(`.typo-row[data-key="${key}"]`);
+    const font = row.querySelector(".typo-font").value;
+    const size = +row.querySelector(".typo-size").value;
+    const color = row.querySelector(".typo-color").value;
+    s.typography[key] = { font, size, color };
+    const preview = document.getElementById("typoPreview-" + key);
+    if (preview) { preview.style.fontFamily = fontStack(font); preview.style.fontSize = size + "px"; preview.style.color = color; }
+    saveSettings();
+  };
+  $$(".typo-font").forEach(el => el.onchange = () => touchTypo(el.dataset.key));
+  $$(".typo-size").forEach(el => el.oninput = () => touchTypo(el.dataset.key));
+  $$(".typo-color").forEach(el => el.oninput = () => touchTypo(el.dataset.key));
+  $("#typoReset").onclick = () => { s.typography = defaultTypography(); saveSettings(); viewSettings(); };
+
   if (hiddenCount) {
     renderHidden();
     $("#restoreAll").onclick = async () => { await Extra.unhideAll(); window.Codex && Codex.refresh && Codex.refresh(); toast("Restored"); viewSettings(); };
@@ -175,6 +287,10 @@ function viewSettings() {
     el.innerHTML = items.map(e => `<div class="hidden-item"><span>${esc(e.title)} <span class="faint">· ${esc(e.category)}</span></span>
       <button class="btn ghost sm" data-restore="${e.id}">Restore</button></div>`).join("");
     $$("[data-restore]", el).forEach(b => b.onclick = async () => { await Extra.unhide(b.dataset.restore); window.Codex && Codex.refresh && Codex.refresh(); viewSettings(); });
+  }
+  if (excludedCount) {
+    $("#restoreNamesAll").onclick = async () => { await Extra.unexcludeAllNames(); window.Codex && Codex.refresh && Codex.refresh(); toast("Restored"); viewSettings(); };
+    $$("[data-restorename]").forEach(el => el.onclick = async () => { await Extra.unexcludeName(el.dataset.restorename); window.Codex && Codex.refresh && Codex.refresh(); viewSettings(); });
   }
 }
 
@@ -323,4 +439,5 @@ function readSelectionGlobal() { Speech.readSelection(); }
 window.CodexReadAloud = readSelectionGlobal;
 
 window.CodexUI = { viewSettings, viewTasks, viewFeed };
+window.CodexTypo = { STYLES: TYPO_STYLES, FONT_LIST, fontStack };
 })();

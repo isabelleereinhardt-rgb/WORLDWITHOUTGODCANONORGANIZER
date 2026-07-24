@@ -1,11 +1,24 @@
-# World Without God — Canon Organizer
+# Beep Beep Organizer
 
-A calm, searchable home for your entire canon. It reads every document you've
-written, organizes it into collections, cross-links every name so you can chase a
-subject wherever it appears, and gives you a workspace to write new lore — with a
-built-in assistant that recognizes your characters and places as you type.
+A calm, searchable home for worldbuilding, writing, and canon — built first for
+*World Without God*, but built to hold as many separate projects as you want.
+It reads every document you've written, organizes it into collections,
+cross-links every name so you can chase a subject wherever it appears, and gives
+you a workspace to write new lore — with a built-in assistant that recognizes
+your characters and places as you type.
 
-Think **Notion + Google Docs + Obsidian**, built specifically for this world.
+Think **Notion + Google Docs + Obsidian**, built specifically for writers and
+worldbuilders — but general enough to run more than one project at once.
+
+### Workspaces
+
+The app itself is just "Beep Beep Organizer" — **World Without God** is the name
+of your *first* workspace, not the app. Click **Workspaces** in the top bar to
+create more: each one is a fully separate project with its own documents, notes,
+canvases, everything, stored in its own isolated database. Only the original
+workspace ships with the pre-extracted World Without God canon — any workspace
+you create after that starts blank. The assistant only ever looks at whichever
+workspace is currently active.
 
 ### Live site
 
@@ -108,34 +121,65 @@ can open from any device:
   Reckoning) years and they're placed and re-ordered on a line automatically;
   click any point to write or read its notes.
 - **Activity Feed** — a running log of what's changed lately.
-- **Settings** — pick any **accent colour** (a full colour wheel, not just presets),
-  adjust base font size and interface/reading fonts, restore deleted entries, and
-  leave standing instructions for how the assistant should behave.
+- **Settings** — full **colour wheels** for both accent and background (text
+  contrast adjusts automatically so it's always readable), base font size, and
+  **typography for every text style** — Title, Subtitle, Heading 1–7, Normal
+  Text, and Caption each get their own font, size, and colour, picked from a
+  **40-font library** (Lora, Cinzel, Playfair Display, EB Garamond, Cormorant,
+  Times New Roman, and more). Restore deleted entries and Name Index removals,
+  and leave standing instructions for how the assistant should behave.
 - **Export** (top-right) — print/save the current page as a PDF with a **portrait
   or landscape** toggle, or download a full backup of everything as one file.
 - **Canon Assistant** (the ✦ button, top-right) — your canon at your fingertips.
   - Look up a name for a **natural-reading summary** (not a raw quote) with related
     names and sources.
   - **Ask questions in plain words** — it synthesizes an answer from your passages.
-  - **Give it tasks** — e.g. *"list all characters in Aicruae"* pulls a live list.
+  - **Give it tasks** — e.g. *"list all characters in Aicruae"* or *"how many
+    houses are there"* pulls a live list.
   - **Ask its opinion** — e.g. *"what's your favourite house"* and it picks one and
     explains its reasoning from how central that entry is to your canon.
-  - Remembers your **recent lookups** so you can jump back to one.
+  - **Check consistency** — *"check consistency for Solis"* gathers every entry
+    actually about that subject and flags facts where they disagree.
+  - **Summarize the document you're writing** — *"summarize this document"* while
+    a Document is open.
+  - **Quick-action chips** in the assistant panel for the common asks, and it
+    remembers your **recent lookups** so you can jump back to one.
   - Keep it open while writing and it recognises names as you type.
 
 > The assistant reads **only your own canon** — it never invents facts. Everything
-> it shows you comes from your own documents, notes, and canvases.
+> it shows you comes from your own documents, notes, and canvases. It's a local,
+> rule-based tool (no external AI call) — genuinely good at finding and
+> synthesizing what you've written, not at generating new prose from nothing.
+
+### Writing in Documents
+
+The Document editor has the same styles as Settings — pick **Title, Subtitle,
+Heading 1–7, Normal Text, or Caption** from the toolbar dropdown (or type **/**
+for a Notion-style command menu with all of them, plus tables, images, lists,
+and dividers) and it renders exactly the font/size/colour you configured. While
+typing, if what you've typed is the unique start of a name you've used before,
+press **Tab** to autocomplete it.
 
 ---
 
-## Your writing is saved in the browser
+## Your writing is saved in the browser — one device, no accounts
 
 Documents, decks, canvases, folders, tasks, and imported notes are stored in your
-browser's **IndexedDB** — which, unlike the old local-storage approach, has plenty
-of room, so **images you add actually persist** instead of vanishing. To keep a
-permanent copy or move between devices, use **Back up my work** in the sidebar (it
-backs up everything) and **Restore backup** to load it elsewhere. Your original
-canon in `source/` is always safe in the repo regardless.
+browser's **IndexedDB**, one separate database per workspace — which, unlike the
+old local-storage approach, has plenty of room, so **images you add actually
+persist** instead of vanishing. To keep a permanent copy or move a workspace to
+another device, open that workspace and use **Back up my work** in the sidebar
+(it exports everything *in the currently-active workspace*) and **Restore
+backup** to load it elsewhere. Your original canon in `source/` is always safe
+in the repo regardless.
+
+There are no user accounts and no login — everything lives only in this browser,
+on this device. That also means there's no real way to share a workspace live
+with someone else or see it from a second computer; the closest equivalent is
+exporting a backup file and having them import it. Real multi-device accounts
+and live sharing would need a hosted backend (a real database + authentication)
+that a static site like this one doesn't have — a separate project if you ever
+want to take it that far.
 
 ---
 

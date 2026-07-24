@@ -134,11 +134,21 @@ function noteToEntry(n) {
 }
 function rebuildEntries() {
   const hidden = window.CodexExtra ? CodexExtra.hidden : new Set();
+  // only the workspace(s) flagged hasCanon=true ship with the pre-extracted
+  // World Without God source material; every other workspace starts blank
+  // and only ever contains what you've written into it yourself
+  const hasCanon = !window.CodexWorkspaces || CodexWorkspaces.activeHasCanon();
+  const base = hasCanon ? ORIG_ENTRIES : [];
+  const baseEntities = hasCanon ? ORIG_ENTITIES : [];
   const noteEntries = notesCache.map(noteToEntry);
-  DB.entries = ORIG_ENTRIES.filter(e => !hidden.has(e.id)).concat(noteEntries.filter(e => !hidden.has(e.id)));
-  DB.entities = ORIG_ENTITIES.slice();
+  DB.entries = base.filter(e => !hidden.has(e.id)).concat(noteEntries.filter(e => !hidden.has(e.id)));
+  DB.entities = baseEntities.slice();
   noteEntries.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  const excludedNames = window.CodexExtra ? CodexExtra.excludedNames : new Set();
+  if (excludedNames.size) DB.entities = DB.entities.filter(n => !excludedNames.has(n));
   DB.stats.entries = DB.entries.length;
+  DB.stats.entities = DB.entities.length;
+  DB.stats.images = hasCanon ? (window.WORLD_DB && window.WORLD_DB.stats && window.WORLD_DB.stats.images) || 0 : 0;
 }
 async function addNote(title, text, images, category) {
   const note = {
@@ -657,18 +667,53 @@ function bindGallery() {
 }
 
 /* ---------- name index ---------- */
+let indexSelectMode = false, indexSelected = new Set();
 function viewIndex() {
+  indexSelectMode = false; indexSelected = new Set();
+  renderIndex();
+}
+function renderIndex() {
   const groups = {};
   DB.entities.forEach(n => { const L = (n[0] || "#").toUpperCase(); (groups[L] = groups[L] || []).push(n); });
   const letters = Object.keys(groups).sort();
+  const total = DB.entities.length;
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${svg("index")} Index</div>
-    <h1>Name Index</h1>
+    <div class="browse-head">
+      <h1>Name Index</h1>
+      <div class="browse-actions">
+        ${total ? `<button class="btn ghost sm" id="toggleSelect">${indexSelectMode ? "Cancel" : "Select"}</button>` : ""}
+      </div>
+    </div>
     <p class="muted">Every cross-linked name in your world. Click any to gather its mentions and a summary.</p>
+    ${indexSelectMode ? `<div class="select-bar">
+      <label class="sel-all"><input type="checkbox" id="selAll" ${total && indexSelected.size === total ? "checked" : ""}> Select all</label>
+      <span class="faint" id="selCount">${indexSelected.size} selected</span>
+      <button class="btn danger sm" id="deleteSelected" ${indexSelected.size ? "" : "disabled"}>Remove from index</button>
+    </div>` : ""}
     ${letters.map(L => `<h3 style="font-family:var(--serif);margin-top:26px">${esc(L)}</h3>
-      <div class="recog">${groups[L].sort().map(n => `<span class="chip" data-subject="${esc(n)}">${esc(n)}</span>`).join("")}</div>`).join("")}
+      <div class="recog">${groups[L].sort().map(n => indexSelectMode
+        ? `<label class="chip index-chip ${indexSelected.has(n) ? "checked" : ""}"><input type="checkbox" class="ic-check" data-name="${esc(n)}" ${indexSelected.has(n) ? "checked" : ""}>${esc(n)}</label>`
+        : `<span class="chip" data-subject="${esc(n)}">${esc(n)}</span>`).join("")}</div>`).join("")}
   </div>`;
-  $$(".chip[data-subject]", view).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject));
+
+  if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { indexSelectMode = !indexSelectMode; if (!indexSelectMode) indexSelected.clear(); renderIndex(); };
+  if (!indexSelectMode) { $$(".chip[data-subject]", view).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject)); return; }
+
+  $("#selAll").onchange = e => { indexSelected = e.target.checked ? new Set(DB.entities) : new Set(); renderIndex(); };
+  $$(".ic-check", view).forEach(cb => cb.onchange = () => {
+    if (cb.checked) indexSelected.add(cb.dataset.name); else indexSelected.delete(cb.dataset.name);
+    cb.closest(".index-chip").classList.toggle("checked", cb.checked);
+    $("#selCount").textContent = indexSelected.size + " selected";
+    $("#deleteSelected").disabled = !indexSelected.size;
+  });
+  $("#deleteSelected").onclick = async () => {
+    if (!indexSelected.size) return;
+    if (!confirm(`Remove ${indexSelected.size} name${indexSelected.size === 1 ? "" : "s"} from the index? They'll stop being cross-linked in your text. You can restore them anytime from Settings.`)) return;
+    await CodexExtra.excludeNames(Array.from(indexSelected));
+    indexSelected.clear(); indexSelectMode = false;
+    refresh();
+  };
 }
 
 /* ---------- IMPORT / add lore ---------- */
@@ -1086,11 +1131,76 @@ function tryOpinion(q) {
     </div>`;
 }
 
+/* ---------- consistency check: does more than one entry disagree about the same fact? ---------- */
+const CONSISTENCY_TRIGGER = /\b(check consistency|consistency check|check for contradictions|check contradictions|any contradictions|is .* consistent)\b/i;
+function tryConsistency(q) {
+  if (!CONSISTENCY_TRIGGER.test(q)) return null;
+  const m = q.match(/\b(?:for|on|about|in|with|is)\s+([a-z][\w' -]{1,60}?)(?:\s+consistent)?\??$/i);
+  const subject = m ? m[1].trim() : "";
+  // scoped tightly to entries actually ABOUT the subject (by title) plus
+  // canon-audit/reference docs that mention it — NOT every entry that
+  // happens to name-drop it in passing, which would compare apples to oranges
+  const sl = subject.toLowerCase();
+  const pool = subject
+    ? DB.entries.filter(e => (e.type === "pdf" || e.type === "note") &&
+        (e.title.toLowerCase().includes(sl) ||
+         ((e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") && e._hay.includes(sl))))
+    : DB.entries.filter(e => e.type === "pdf" || e.type === "note");
+  const uniq = Array.from(new Set(pool)).filter(e => e && (e.type === "pdf" || e.type === "note")).slice(0, 40);
+  if (!uniq.length) return `<div class="assistant-hint">I couldn't find anything to check${subject ? ` for "${esc(subject)}"` : ""}.</div>`;
+  // gather every entry's own declared facts, grouped by fact key
+  const byKey = {};
+  uniq.forEach(e => {
+    factsOf(e, 10).forEach(f => {
+      const key = f.k.toLowerCase();
+      (byKey[key] = byKey[key] || []).push({ entry: e, k: f.k, v: f.v });
+    });
+  });
+  const conflicts = Object.values(byKey).filter(list => {
+    const distinctVals = new Set(list.map(x => x.v.toLowerCase().trim()));
+    return distinctVals.size > 1 && new Set(list.map(x => x.entry.id)).size > 1;
+  });
+  if (!conflicts.length) {
+    return `<div class="assistant-hint">${svg("spark")} Checked ${uniq.length} ${uniq.length === 1 ? "entry" : "entries"}${subject ? ` touching "${esc(subject)}"` : ""} —
+      no entries declare different values for the same fact. That doesn't guarantee consistency (I can only compare
+      facts written as "Key: Value" lines), but nothing obvious conflicts.</div>`;
+  }
+  return `<div class="ans-label">Possible inconsistenc${conflicts.length === 1 ? "y" : "ies"} — ${conflicts.length} fact${conflicts.length === 1 ? "" : "s"} where entries disagree</div>
+    ${conflicts.slice(0, 8).map(list => `<div class="blurb">
+      <div class="bt">${esc(list[0].k)}</div>
+      ${list.map(x => `<div class="bl"><b>${esc(x.v)}</b> — <a href="#/entry/${x.entry.id}">${esc(x.entry.title)}</a></div>`).join("")}
+    </div>`).join("")}`;
+}
+
+/* ---------- summarize the document currently open in the editor ---------- */
+const SUMMARIZE_DOC_TRIGGER = /\b(summarize this( document)?|summarise this( document)?|tl;?dr this|summary of this)\b/i;
+function trySummarizeDoc(q) {
+  if (!SUMMARIZE_DOC_TRIGGER.test(q)) return null;
+  const cur = window.CodexEditor && CodexEditor.getCurrentDoc();
+  if (!cur || !document.body.contains(cur.editor)) {
+    return `<div class="assistant-hint">Open a document first, then ask me to summarize it.</div>`;
+  }
+  const text = cur.editor.innerText || "";
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 8) return `<div class="assistant-hint">Not much written yet — give it a few more sentences and ask again.</div>`;
+  const sents = sentencesOf(text).filter(s => s.length > 15);
+  const scored = sents.map((s, i) => ({ s, score: (i < 3 ? 1 : 0) + (DESCRIPTIVE.test(s) ? 0.6 : 0) + Math.min(3, entitiesIn(s).size) * 0.3 }));
+  scored.sort((a, b) => b.score - a.score);
+  const picked = scored.slice(0, 4).map(x => x.s);
+  const names = Array.from(entitiesIn(text)).slice(0, 8);
+  return `<div class="ans-label">Summary of “${esc(cur.title() || "this document")}” — ${words.length} words</div>
+    <div class="blurb"><div class="bs">${picked.map(esc).join(" ")}</div>
+    ${names.length ? `<div class="brel">${names.map(n => `<span class="chip" data-subject="${esc(n)}">${esc(n)}</span>`).join("")}</div>` : ""}
+    </div>`;
+}
+
 function assistantLookup(q) {
   const body = $("#assistantBody");
   q = (q || "").trim();
   if (!q) { assistantIdle(); return; }
   assistantHistory.push(q);
+  const sum = trySummarizeDoc(q); if (sum) { body.innerHTML = sum; bindAssistantLinks(body); return; }
+  const con = tryConsistency(q); if (con) { body.innerHTML = con; bindAssistantLinks(body); return; }
   const cmd = tryCommand(q); if (cmd) { body.innerHTML = cmd; bindAssistantLinks(body); return; }
   const op = tryOpinion(q); if (op) { body.innerHTML = op; bindAssistantLinks(body); return; }
   const named = matchNamedSubject(q) || partialEntity(q);
@@ -1107,6 +1217,13 @@ function partialEntity(q) {
   const m = DB.entities.find(n => n.toLowerCase().includes(ql));
   return m || null;
 }
+const QUICK_ACTIONS = [
+  { label: "List characters", q: "list all characters" },
+  { label: "List noble houses", q: "list all houses" },
+  { label: "Favourite house", q: "favourite house" },
+  { label: "Check consistency", q: "check consistency" },
+  { label: "Summarize this document", q: "summarize this document" },
+];
 function assistantIdle() {
   const hist = assistantHistory.list();
   const histHtml = hist.length ? `<div style="margin-top:14px">
@@ -1116,9 +1233,15 @@ function assistantIdle() {
   $("#assistantBody").innerHTML = `<div class="assistant-hint">
     ${svg("spark")} I read only what <b>you've</b> written.<br><br>
     Look up any name for an instant summary, ask a question in plain words, give me a task
-    ("list all characters in Aicruae"), ask my opinion ("favourite house"), or open a Document
-    and I'll recognise names as you type.</div>${histHtml}`;
+    ("list all characters in Aicruae"), ask my opinion ("favourite house"), check your canon for
+    contradictions, summarize the document you're writing, or open a Document and I'll recognise
+    names as you type.</div>
+    <div style="margin-top:14px">
+      <div class="sc-rel-label">Quick actions</div>
+      <div class="recog">${QUICK_ACTIONS.map(a => `<span class="chip" data-quick="${esc(a.q)}">${esc(a.label)}</span>`).join("")}</div>
+    </div>${histHtml}`;
   $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
+  $$('[data-quick]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.quick; assistantLookup(c.dataset.quick); });
 }
 function assistantScan(text) {
   const found = [], seen = new Set();
@@ -1239,14 +1362,24 @@ function collapseSidebar(force) {
 
 async function init() {
   try {
-    if (window.CodexStore) { await CodexStore.ready; await loadNotes(); }
+    if (window.CodexStore) {
+      // if the last-active workspace isn't the default one, redirect storage
+      // to that workspace's own isolated database before loading anything
+      const wsId = window.CodexWorkspaces ? CodexWorkspaces.activeId() : "default";
+      if (wsId !== "default") await CodexStore.switchWorkspace(wsId);
+      else await CodexStore.ready;
+      await loadNotes();
+    }
     if (window.CodexExtra) await CodexExtra.ready();
   } catch (e) { /* non-fatal */ }
   buildIndexes();
   buildNav();
+  if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel();
   $("#app").classList.remove("loading");
   route();
   window.addEventListener("hashchange", route);
+
+  if ($("#wsSwitchOpen")) $("#wsSwitchOpen").onclick = () => window.CodexWorkspaces && CodexWorkspaces.openSwitcher();
 
   const savedTheme = localStorage.getItem("codex.theme");
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
@@ -1306,5 +1439,6 @@ function isEditing(t) { return t && (t.isContentEditable || /input|textarea/i.te
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries };
+async function reloadWorkspace() { await loadNotes(); refresh(); }
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace };
 })();

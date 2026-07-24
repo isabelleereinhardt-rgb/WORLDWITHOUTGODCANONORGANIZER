@@ -13,11 +13,14 @@ const view = () => $("#view");
 const uid = () => "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const fmtDate = t => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 const S = () => window.CodexStore;
+let curDocRef = null; // { title(), editor } for whichever document is currently open, so the assistant can summarize "this document"
+function getCurrentDoc() { return curDocRef; }
 
 /* ============================================================
    DOCUMENTS
    ============================================================ */
 async function list(folderId) {
+  curDocRef = null;
   await S().ready;
   if (window.CodexFolders) await CodexFolders.ensureCache(true);
   let docs = (await S().all("docs")).sort((a, b) => b.updated - a.updated);
@@ -64,8 +67,8 @@ async function open(id) {
   view().innerHTML = `
     <div class="doc-toolbar">
       <select id="tbBlock" title="Text style">
-        <option value="p">Body</option><option value="h1">Heading 1</option>
-        <option value="h2">Heading 2</option><option value="blockquote">Quote</option>
+        ${(window.CodexTypo ? CodexTypo.STYLES : []).map(s => `<option value="${s.key}">${s.label}</option>`).join("")}
+        <option value="quote">Quote</option>
       </select>
       <span class="sep"></span>
       <button data-cmd="bold" title="Bold"><b>B</b></button>
@@ -114,6 +117,7 @@ async function open(id) {
 
   const titleEl = $("#docTitle"), edEl = $("#docEditor"), stateEl = $("#saveState");
   edEl.focus();
+  curDocRef = { title: () => titleEl.value, editor: edEl };
 
   let saveT, scanT;
   const updateWordCount = () => {
@@ -142,7 +146,7 @@ async function open(id) {
     document.execCommand(b.dataset.cmd, false, null);
     edEl.focus(); touch();
   });
-  $("#tbBlock").onchange = e => { document.execCommand("formatBlock", false, e.target.value); edEl.focus(); touch(); };
+  $("#tbBlock").onchange = e => { applyBlockStyle(e.target.value, edEl); touch(); };
   $("#tbSpacing").onchange = e => {
     if (!e.target.value) return;
     const sel = window.getSelection();
@@ -157,14 +161,7 @@ async function open(id) {
   $("#tbLink").onclick = () => { const u = prompt("Link URL:"); if (u) document.execCommand("createLink", false, u); touch(); };
   $("#tbHr").onclick = () => { document.execCommand("insertHorizontalRule"); touch(); };
   $("#tbImg").onclick = () => insertImage(edEl, touch);
-  $("#tbTable").onclick = () => {
-    const rows = +(prompt("Rows:", "3") || 3), cols = +(prompt("Columns:", "3") || 3);
-    if (!rows || !cols) return;
-    let html = '<table class="doc-table"><tbody>';
-    for (let r = 0; r < rows; r++) { html += "<tr>"; for (let c = 0; c < cols; c++) html += "<td>&nbsp;</td>"; html += "</tr>"; }
-    html += "</tbody></table><p><br></p>";
-    document.execCommand("insertHTML", false, html); touch();
-  };
+  $("#tbTable").onclick = () => insertTable(touch);
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
   $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
   $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
@@ -187,6 +184,187 @@ async function open(id) {
       }
     }
   });
+
+  bindSlashMenu(edEl, touch);
+  bindAutocomplete(edEl, touch);
+}
+
+/* ---------- entity-name autocomplete: type the start of a name you've
+   used before and press Tab to finish it, the way Notion/Docs complete
+   words. Only fires when exactly one canon name matches, so it never
+   guesses wrong. ---------- */
+let acEl = null, acSuggestion = null;
+function closeAC() { if (acEl) { acEl.remove(); acEl = null; } acSuggestion = null; }
+function bindAutocomplete(edEl, touch) {
+  edEl.addEventListener("keyup", e => {
+    if (["Tab", "Escape", "ArrowUp", "ArrowDown", "Enter"].includes(e.key)) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) { closeAC(); return; }
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== 3) { closeAC(); return; }
+    const before = node.textContent.slice(0, sel.anchorOffset);
+    const m = before.match(/([A-Za-z]{3,})$/);
+    if (!m) { closeAC(); return; }
+    const partial = m[1];
+    const entities = (window.Codex ? Codex.DB.entities : []);
+    const pl = partial.toLowerCase();
+    const matches = entities.filter(n => n.length > partial.length && n.toLowerCase().startsWith(pl));
+    if (matches.length !== 1) { closeAC(); return; }
+    acSuggestion = { full: matches[0], partialLen: partial.length };
+    showAC(matches[0].slice(partial.length));
+  });
+  edEl.addEventListener("keydown", e => {
+    if (!acSuggestion) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      document.execCommand("insertText", false, acSuggestion.full.slice(acSuggestion.partialLen));
+      closeAC(); touch();
+    } else if (e.key === "Escape") closeAC();
+  });
+  edEl.addEventListener("blur", () => setTimeout(closeAC, 150));
+}
+function showAC(remainder) {
+  if (!acEl) { acEl = document.createElement("div"); acEl.className = "ac-hint"; document.body.appendChild(acEl); }
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    const r = sel.getRangeAt(0).cloneRange();
+    const rect = r.getClientRects()[0] || r.getBoundingClientRect();
+    acEl.style.left = (rect.right + window.scrollX + 2) + "px";
+    acEl.style.top = (rect.top + window.scrollY - 1) + "px";
+  }
+  acEl.textContent = remainder + " ⇥";
+}
+
+/* ---------- block styles: Title / Subtitle / Heading 1-7 / Normal / Caption / Quote
+   Reads font+size+colour straight from Settings (via CodexTypo), so a
+   Heading 1 typed here looks exactly like you configured it there. ---------- */
+function applyBlockStyle(value, edEl) {
+  edEl.focus();
+  if (value === "quote") { document.execCommand("formatBlock", false, "blockquote"); return; }
+  const st = window.CodexTypo && CodexTypo.STYLES.find(s => s.key === value);
+  if (!st) return;
+  document.execCommand("formatBlock", false, st.tag);
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    let node = sel.anchorNode;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    let block = node && node.closest ? node.closest(st.tag) : null;
+    if (!block || block === edEl) block = node;
+    if (block && block.classList && block !== edEl) {
+      block.className = (block.className || "").replace(/\bty-\S+/g, "").trim();
+      block.classList.add("ty-" + value);
+    }
+  }
+}
+function insertTable(touch) {
+  const rows = +(prompt("Rows:", "3") || 3), cols = +(prompt("Columns:", "3") || 3);
+  if (!rows || !cols) return;
+  let html = '<table class="doc-table"><tbody>';
+  for (let r = 0; r < rows; r++) { html += "<tr>"; for (let c = 0; c < cols; c++) html += "<td>&nbsp;</td>"; html += "</tr>"; }
+  html += "</tbody></table><p><br></p>";
+  document.execCommand("insertHTML", false, html); touch();
+}
+
+/* ---------- slash command menu (Notion-style): type "/" to insert/format ---------- */
+let slashEl = null, slashSel = 0, slashItems = [];
+function closeSlash() { if (slashEl) { slashEl.remove(); slashEl = null; } }
+function slashCommandList(edEl, touch) {
+  const styleItems = (window.CodexTypo ? CodexTypo.STYLES : []).map(s => ({ label: s.label, run: () => applyBlockStyle(s.key, edEl) }));
+  return [
+    ...styleItems,
+    { label: "Quote", run: () => applyBlockStyle("quote", edEl) },
+    { label: "Bullet list", run: () => document.execCommand("insertUnorderedList") },
+    { label: "Numbered list", run: () => document.execCommand("insertOrderedList") },
+    { label: "Table", run: () => insertTable(touch) },
+    { label: "Image", run: () => insertImage(edEl, touch) },
+    { label: "Divider", run: () => document.execCommand("insertHorizontalRule") },
+  ];
+}
+function bindSlashMenu(edEl, touch) {
+  edEl.addEventListener("keyup", e => {
+    if (["ArrowUp", "ArrowDown", "Enter", "Escape"].includes(e.key) && slashEl) return; // handled in keydown
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) { closeSlash(); return; }
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== 3) { closeSlash(); return; }
+    const textBefore = node.textContent.slice(0, sel.anchorOffset);
+    if (e.key === "/" && /(^|\s)\/$/.test(textBefore)) {
+      openSlash(edEl, touch, node);
+    } else if (slashEl) {
+      // keep menu open only while the "/" and a short filter word follow
+      const m = textBefore.match(/\/(\w*)$/);
+      if (!m) closeSlash(); else filterSlash(m[1]);
+    }
+  });
+  edEl.addEventListener("keydown", e => {
+    if (!slashEl) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); slashSel = Math.min(slashSel + 1, slashItems.length - 1); paintSlash(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); slashSel = Math.max(slashSel - 1, 0); paintSlash(); }
+    else if (e.key === "Enter") { e.preventDefault(); runSlash(edEl, touch); }
+    else if (e.key === "Escape") { e.preventDefault(); closeSlash(); }
+  });
+  edEl.addEventListener("blur", () => setTimeout(closeSlash, 150));
+}
+function openSlash(edEl, touch) {
+  closeSlash();
+  slashEl = document.createElement("div");
+  slashEl.className = "slash-menu";
+  document.body.appendChild(slashEl);
+  slashSel = 0;
+  slashItems = slashCommandList(edEl, touch);
+  positionSlash();
+  paintSlash();
+}
+function positionSlash() {
+  if (!slashEl) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0).cloneRange();
+  const rect = r.getClientRects()[0] || r.getBoundingClientRect();
+  slashEl.style.left = (rect.left + window.scrollX) + "px";
+  slashEl.style.top = (rect.bottom + window.scrollY + 6) + "px";
+}
+function filterSlash(query) {
+  if (!slashEl) return;
+  const all = slashItems;
+  const q = (query || "").toLowerCase();
+  slashEl._filtered = q ? all.filter(i => i.label.toLowerCase().includes(q)) : all;
+  slashSel = 0;
+  paintSlash();
+}
+function paintSlash() {
+  if (!slashEl) return;
+  const items = slashEl._filtered || slashItems;
+  slashEl.innerHTML = items.length
+    ? items.map((it, i) => `<div class="slash-item ${i === slashSel ? "sel" : ""}" data-i="${i}">${it.label}</div>`).join("")
+    : `<div class="slash-empty">No match</div>`;
+  $$(".slash-item", slashEl).forEach(el => {
+    el.onmouseenter = () => { slashSel = +el.dataset.i; paintSlash(); };
+    el.onmousedown = e => e.preventDefault(); // don't steal focus from editor
+  });
+}
+function runSlash(edEl, touch) {
+  const items = slashEl && (slashEl._filtered || slashItems);
+  const item = items && items[slashSel];
+  closeSlash();
+  if (!item) return;
+  // remove the trailing "/query" the user typed to trigger the menu
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    const node = sel.anchorNode;
+    if (node && node.nodeType === 3) {
+      const before = node.textContent.slice(0, sel.anchorOffset);
+      const m = before.match(/\/(\w*)$/);
+      if (m) {
+        const range = document.createRange();
+        range.setStart(node, sel.anchorOffset - m[0].length);
+        range.setEnd(node, sel.anchorOffset);
+        range.deleteContents();
+      }
+    }
+  }
+  item.run();
+  touch();
 }
 
 /* ---------- dictation (speech-to-text straight into the editor) ---------- */
@@ -500,5 +678,5 @@ function exportDeckPdf(d) {
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
-window.CodexEditor = { list, open, deckList, deckOpen };
+window.CodexEditor = { list, open, deckList, deckOpen, getCurrentDoc };
 })();
