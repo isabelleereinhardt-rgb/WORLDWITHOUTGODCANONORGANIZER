@@ -506,8 +506,7 @@ function viewEntry(id) {
     ${e.links.map(l => `<a class="note-link" href="${esc(l)}" target="_blank" rel="noopener">${esc(l)}</a>`).join("")}
   </div>` : "";
   const catSelector = e._user ? `<select class="folder-select" id="entryCatMove" title="Move to a section">
-    <option value="My Notes" ${e.category === "My Notes" ? "selected" : ""}>My Notes</option>
-    ${customCats().map(c => `<option value="${esc(c)}" ${e.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+    ${categoriesList().map(c => `<option value="${esc(c.name)}" ${e.category === c.name ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
   </select>` : "";
 
   view.innerHTML = `<div class="wrap">
@@ -674,7 +673,10 @@ function viewIndex() {
 
 /* ---------- IMPORT / add lore ---------- */
 function viewImport() {
-  const cats = customCats();
+  // every section is a valid filing destination — the built-in canon collections,
+  // "My Notes", and any custom sections you've made with the + button
+  const allCats = categoriesList().map(c => c.name);
+  const custom = customCats();
   view.innerHTML = `<div class="wrap">
     <div class="page-kicker">${svg("import")} Import &amp; Add Lore</div>
     <h1>Add to your canon</h1>
@@ -695,12 +697,13 @@ function viewImport() {
     <input class="import-title" id="pasteTitle" placeholder="Title (e.g. a character, place, or note)">
     <textarea class="import-body" id="pasteBody" placeholder="Paste or type the lore here…"></textarea>
     <div class="import-row">
-      <select class="folder-select" id="pasteCat">
-        <option value="My Notes">My Notes</option>
-        ${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}
+      <select class="folder-select" id="pasteCat" title="Which section this gets filed under">
+        ${allCats.map(c => `<option value="${esc(c)}" ${c === "My Notes" ? "selected" : ""}>${esc(c)}</option>`).join("")}
       </select>
       <button class="btn" id="addPaste">Add to my canon</button>
     </div>
+    ${custom.length ? "" : `<p class="faint" style="margin-top:8px;font-size:12px">Want a section of your own (not one of the built-in ones)?
+      Click the <b>+</b> next to "The Canon" in the sidebar to create one — it'll show up in this list too.</p>`}
 
     <div id="importLog" class="import-log"></div>
   </div>`;
