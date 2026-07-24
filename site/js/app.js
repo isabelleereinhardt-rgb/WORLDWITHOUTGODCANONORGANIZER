@@ -34,6 +34,11 @@ const IC = {
   speaker:'<path d="M4 8v4h3l4 3V5L7 8z"/><path d="M13.5 8a3 3 0 0 1 0 4"/>',
   timer:  '<circle cx="10" cy="11" r="6.2"/><path d="M10 7.5V11l3 1.6"/><path d="M8 3h4"/>',
   table:  '<rect x="3.5" y="4" width="13" height="12" rx="1"/><path d="M3.5 8.3h13M3.5 12.6h13M9 4v12"/>',
+  mindmap:'<circle cx="10" cy="4.5" r="2"/><circle cx="4.5" cy="15" r="2"/><circle cx="15.5" cy="15" r="2"/><path d="M8.6 6.2L5.9 13.2M11.4 6.2l2.7 7M6.5 15h7"/>',
+  sheet:  '<rect x="3.5" y="3.5" width="13" height="13" rx="1"/><path d="M3.5 8.2h13M3.5 12.8h13M8.5 3.5v13"/>',
+  cards:  '<rect x="4" y="6" width="10" height="12" rx="1.4" transform="rotate(-8 9 12)"/><rect x="6" y="4" width="10" height="12" rx="1.4"/>',
+  timeline:'<path d="M3.5 10h13"/><circle cx="6" cy="10" r="1.6"/><circle cx="10.5" cy="10" r="1.6"/><circle cx="15" cy="10" r="1.6"/><path d="M6 10V5.5M15 10v4.5"/>',
+  draw:   '<path d="M4.5 15.5l1-4L13.5 3.5a1.6 1.6 0 0 1 2.2 2.2L7.7 13.7l-4 1z"/><path d="M11.5 5.5l3 3"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -184,6 +189,10 @@ function buildNav() {
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases &amp; Mood Boards</span></div>
+      <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
+      <div class="nav-item" data-route="#/sheets">${svg("sheet")}<span>Sheets</span></div>
+      <div class="nav-item" data-route="#/study">${svg("cards")}<span>Flashcards &amp; Quiz</span></div>
+      <div class="nav-item" data-route="#/timeline">${svg("timeline")}<span>Timeline</span></div>
       <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Task Manager</span></div>
       <div class="nav-item" data-route="#/import">${svg("import")}<span>Import &amp; Add Lore</span></div>
       <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity Feed</span></div>
@@ -1131,6 +1140,12 @@ function route() {
   else if (path === "deck") window.CodexEditor && CodexEditor.deckOpen(parts[1]);
   else if (path === "canvases") window.CodexCanvas && CodexCanvas.list(parts[1] || null);
   else if (path === "canvas") window.CodexCanvas && CodexCanvas.open(parts[1]);
+  else if (path === "mindmaps") window.CodexMindmap && CodexMindmap.list(parts[1] || null);
+  else if (path === "mindmap") window.CodexMindmap && CodexMindmap.open(parts[1]);
+  else if (path === "sheets") window.CodexSheets && CodexSheets.list(parts[1] || null);
+  else if (path === "sheet") window.CodexSheets && CodexSheets.open(parts[1]);
+  else if (path === "study") window.CodexStudy && CodexStudy.view();
+  else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
   else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
@@ -1170,6 +1185,20 @@ async function init() {
   $("#sidebarToggle").onclick = () => collapseSidebar();
   if (innerWidth < 860) collapseSidebar(true);
 
+  // export menu
+  $("#exportOpen").onclick = () => { $("#exportMenu").hidden = false; };
+  $("#exportClose").onclick = () => { $("#exportMenu").hidden = true; };
+  $("#exportMenu").addEventListener("click", e => { if (e.target.id === "exportMenu") $("#exportMenu").hidden = true; });
+  $("#exportPagePrint").onclick = () => {
+    const orient = $("#exportOrientation").value;
+    let styleEl = document.getElementById("printOrientStyle");
+    if (!styleEl) { styleEl = document.createElement("style"); styleEl.id = "printOrientStyle"; document.head.appendChild(styleEl); }
+    styleEl.textContent = `@media print { @page { size: ${orient}; margin: 14mm; } }`;
+    $("#exportMenu").hidden = true;
+    setTimeout(() => window.print(), 80);
+  };
+  $("#exportSiteJson").onclick = () => { backupAll(); $("#exportMenu").hidden = true; };
+
   $("#assistantToggle").onclick = () => $("#assistant").hidden ? openAssistant() : closeAssistant();
   $("#assistantClose").onclick = closeAssistant;
   assistantIdle();
@@ -1203,5 +1232,5 @@ function isEditing(t) { return t && (t.isContentEditable || /input|textarea/i.te
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries };
 })();

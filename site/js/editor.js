@@ -94,6 +94,7 @@ async function open(id) {
       <span class="sep"></span>
       <button id="tbDictate" title="Dictate (speech to text)">Dictate</button>
       <button id="tbReadSel" title="Read selection aloud">Read aloud</button>
+      <button id="tbGrammar" title="Check grammar &amp; style">Grammar</button>
       <span class="sep"></span>
       ${folderSelect}
       <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
@@ -166,6 +167,7 @@ async function open(id) {
   };
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
   $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
+  $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
   $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
   $("#tbExport").onclick = () => exportMenu(doc);
   const fsel = $('[data-role="folder-move"]', view());
@@ -203,6 +205,42 @@ function toggleDictate(edEl, touch) {
     () => { dictateRec = null; btn.classList.remove("active"); btn.textContent = "Dictate"; }
   );
   if (dictateRec) { btn.classList.add("active"); btn.textContent = "Stop dictating"; }
+}
+
+/* ---------- lightweight, offline grammar & style check ---------- */
+const TYPOS = {
+  "teh": "the", "adn": "and", "recieve": "receive", "seperate": "separate", "definately": "definitely",
+  "occured": "occurred", "alot": "a lot", "wich": "which", "thier": "their", "becuase": "because",
+  "untill": "until", "accomodate": "accommodate", "wierd": "weird", "goverment": "government",
+  "beleive": "believe", "concious": "conscious", "existance": "existence", "publically": "publicly",
+};
+function runGrammarCheck(text) {
+  const issues = [];
+  const doubleSpace = text.match(/ {2,}/g); if (doubleSpace) issues.push({ msg: `${doubleSpace.length} place${doubleSpace.length === 1 ? "" : "s"} with double spaces.` });
+  const repeated = text.match(/\b(\w+)\s+\1\b/gi); if (repeated) issues.push({ msg: `Repeated word: "${repeated[0]}".` });
+  const openParen = (text.match(/\(/g) || []).length, closeParen = (text.match(/\)/g) || []).length;
+  if (openParen !== closeParen) issues.push({ msg: `Unmatched parentheses (${openParen} "(" vs ${closeParen} ")").` });
+  const quotes = (text.match(/"/g) || []).length;
+  if (quotes % 2 !== 0) issues.push({ msg: `An odd number of straight quotes (${quotes}) — one may be unclosed.` });
+  Object.keys(TYPOS).forEach(t => { if (new RegExp("\\b" + t + "\\b", "i").test(text)) issues.push({ msg: `Possible typo: "${t}" → "${TYPOS[t]}".` }); });
+  const sentences = text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) || [];
+  sentences.forEach(s => {
+    const words = s.trim().split(/\s+/).filter(Boolean);
+    if (words.length > 42) issues.push({ msg: `A ${words.length}-word sentence may be hard to follow: "${s.trim().slice(0, 60)}…"` });
+    const first = s.trim()[0];
+    if (first && /[a-z]/.test(first)) issues.push({ msg: `Sentence doesn't start with a capital: "${s.trim().slice(0, 40)}…"` });
+  });
+  showGrammarPanel(issues, text);
+}
+function showGrammarPanel(issues, text) {
+  let panel = document.getElementById("grammarPanel");
+  if (!panel) { panel = document.createElement("div"); panel.id = "grammarPanel"; panel.className = "grammar-panel"; document.body.appendChild(panel); }
+  const words = (text || "").trim().split(/\s+/).filter(Boolean).length;
+  panel.innerHTML = `<button class="grammar-close" id="grammarClose">✕</button>
+    <b style="font-family:var(--serif);font-size:15px">Grammar &amp; style</b>
+    <p class="faint" style="font-size:12px;margin:6px 0 10px">${words} words checked · offline, rule-based — use judgement, it isn't exhaustive.</p>
+    ${issues.length ? issues.map(i => `<div class="grammar-item">${i.msg}</div>`).join("") : `<div class="grammar-item">No issues spotted.</div>`}`;
+  document.getElementById("grammarClose").onclick = () => panel.remove();
 }
 
 /* ---------- writing timer ---------- */
@@ -354,6 +392,12 @@ function renderDeck() {
   view().innerHTML = `
     <div class="doc-toolbar">
       <input class="doc-title" style="font-size:20px;width:auto;flex:1" id="deckTitle" value="${esc(d.title)}">
+      <select id="slideLayout" title="Slide layout">
+        <option value="title-body">Title &amp; Body</option>
+        <option value="title-only">Title Only</option>
+        <option value="quote">Quote</option>
+        <option value="two-col">Two Column</option>
+      </select>
       <button class="btn ghost sm" id="addSlide">+ Slide</button>
       <button class="btn ghost sm" id="delSlide">Delete slide</button>
       <button class="btn sm" id="present">Present</button>
@@ -363,29 +407,37 @@ function renderDeck() {
     <div class="deck-stage">
       <div class="slide-strip" id="strip"></div>
       <div class="slide-editor-wrap">
-        <div class="slide-canvas">
+        <div class="slide-canvas" id="slideCanvas">
           <div class="s-title" contenteditable="true" id="sTitle"></div>
           <div class="s-body" contenteditable="true" id="sBody"></div>
         </div>
-        <p class="faint" style="text-align:center;margin-top:14px;font-size:12px">Click the title or body to edit · arrow keys navigate slides in Present mode</p>
+        <p class="faint" style="text-align:center;margin-top:14px;font-size:12px">Click the title or body to edit ·
+          for Two Column, separate the halves with a <code>|</code> · arrow keys navigate slides in Present mode</p>
       </div>
     </div>`;
   const persist = async () => { await S().put("decks", d); $("#saveState").textContent = "Saved"; };
   const touch = () => { $("#saveState").textContent = "Saving…"; clearTimeout(renderDeck._t); renderDeck._t = setTimeout(persist, 500); };
 
   $("#deckTitle").oninput = e => { d.title = e.target.value; touch(); };
-  $("#addSlide").onclick = () => { d.slides.splice(curSlide + 1, 0, { title: "New slide", body: "" }); curSlide++; persist(); renderDeck(); };
+  $("#addSlide").onclick = () => { d.slides.splice(curSlide + 1, 0, { title: "New slide", body: "", layout: "title-body" }); curSlide++; persist(); renderDeck(); };
   $("#delSlide").onclick = () => {
     if (d.slides.length <= 1) return toast("A deck needs at least one slide");
     d.slides.splice(curSlide, 1); curSlide = Math.max(0, curSlide - 1); persist(); renderDeck();
   };
   $("#present").onclick = present;
   $("#deckExport").onclick = () => exportDeckPdf(d);
+  $("#slideLayout").onchange = e => { d.slides[curSlide].layout = e.target.value; touch(); applyLayout(); drawStrip(); };
 
   const sTitle = $("#sTitle"), sBody = $("#sBody");
+  function applyLayout() {
+    const layout = d.slides[curSlide].layout || "title-body";
+    $("#slideCanvas").className = "slide-canvas layout-" + layout;
+    $("#slideLayout").value = layout;
+  }
   const loadSlide = () => {
     sTitle.textContent = d.slides[curSlide].title;
     sBody.textContent = d.slides[curSlide].body;
+    applyLayout();
   };
   sTitle.oninput = () => { d.slides[curSlide].title = sTitle.textContent; touch(); drawStrip(); };
   sBody.oninput = () => { d.slides[curSlide].body = sBody.textContent; touch(); drawStrip(); };
@@ -402,14 +454,30 @@ function renderDeck() {
   }
   drawStrip();
 }
+function bodyHtml(s, forExport) {
+  const layout = s.layout || "title-body";
+  if (layout === "title-only") return "";
+  if (layout === "two-col") {
+    const [left, right] = (s.body || "").split("|");
+    return `<div style="display:flex;gap:${forExport ? "6%" : "40px"}">
+      <div style="flex:1">${esc((left || "").trim()).replace(/\n/g, "<br>")}</div>
+      <div style="flex:1">${esc((right || "").trim()).replace(/\n/g, "<br>")}</div>
+    </div>`;
+  }
+  if (layout === "quote") return `<div style="font-style:italic;text-align:center">${esc(s.body).replace(/\n/g, "<br>")}</div>`;
+  return `${esc(s.body).replace(/\n/g, "<br>")}`;
+}
 function present() {
   const d = curDeck; let i = curSlide;
   const el = document.createElement("div");
   el.className = "present";
-  const draw = () => el.innerHTML = `
-    <div class="s-title">${esc(d.slides[i].title)}</div>
-    <div class="s-body">${esc(d.slides[i].body).replace(/\n/g, "<br>")}</div>
+  const draw = () => {
+    const s = d.slides[i];
+    el.innerHTML = `
+    <div class="s-title" style="${s.layout === "quote" ? "font-style:italic" : ""}">${esc(s.title)}</div>
+    <div class="s-body">${bodyHtml(s, false)}</div>
     <div class="p-nav">${i + 1} / ${d.slides.length} · ← → to move · Esc to exit</div>`;
+  };
   draw();
   document.body.appendChild(el);
   const key = e => {
@@ -424,9 +492,9 @@ function exportDeckPdf(d) {
   const w = window.open("", "_blank");
   const slides = d.slides.map(s => `
     <section style="width:100%;aspect-ratio:16/9;page-break-after:always;display:flex;flex-direction:column;
-      justify-content:center;padding:6%;box-sizing:border-box;border-bottom:1px solid #eee">
-      <h1 style="font-size:40px;font-family:Georgia,serif;margin:0 0 16px">${esc(s.title)}</h1>
-      <div style="font-size:22px;color:#444">${esc(s.body).replace(/\n/g, "<br>")}</div>
+      justify-content:center;padding:6%;box-sizing:border-box;border-bottom:1px solid #eee;text-align:${s.layout === "quote" ? "center" : "left"}">
+      <h1 style="font-size:40px;font-family:Georgia,serif;margin:0 0 16px;font-style:${s.layout === "quote" ? "italic" : "normal"}">${esc(s.title)}</h1>
+      <div style="font-size:22px;color:#444">${bodyHtml(s, true)}</div>
     </section>`).join("");
   w.document.write(`<!doctype html><title>${esc(d.title)}</title><style>body{margin:0;font-family:Georgia,serif}</style>${slides}`);
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);

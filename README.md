@@ -75,15 +75,19 @@ can open from any device:
 - **Name Index** — an A–Z of every cross-linked name in the world.
 - **Documents** — a Google-Docs-style editor: bold/italic/underline, **alignment,
   indent, and line spacing**, bullet & numbered lists, **tables**, links, images
-  (saved properly via IndexedDB — they no longer vanish), a live **word count**, a
-  **writing timer**, **dictation** (speak your notes in), and **read-aloud**.
+  (saved properly via IndexedDB — they no longer vanish, and are resizable by
+  dragging their corner), a live **word count**, a **writing timer**, **dictation**
+  (speak your notes in), **read-aloud**, and an offline **grammar &amp; style check**
+  (repeated words, common typos, unmatched punctuation, run-on sentences).
   Export to Word (.doc), Markdown, or PDF (print).
-- **Slide Decks** — build simple presentations, present fullscreen, export to PDF.
-- **Canvases & Mood Boards** — freeform boards, Notion-style: pin images, videos
+- **Slide Decks** — build simple presentations with **layout presets** (Title &
+  Body, Title Only, Quote, Two Column), present fullscreen, export to PDF.
+- **Canvases & Mood Boards** — freeform boards, Notion-style: pin images
+  (resizable), a **drawing mode** (freehand sketch, downloadable as PNG), videos
   (YouTube / Vimeo / .mp4), links, and text notes, and drag them wherever you like.
-  Images/links/videos can carry a **caption** describing what they are and how the
-  assistant should use them. Any text you write on a canvas is picked up by search
-  and the assistant, the same as a document.
+  Images/links/videos/drawings can carry a **caption** describing what they are and
+  how the assistant should use them. Any text you write on a canvas is picked up by
+  search and the assistant, the same as a document.
 - **Projects (folders)** — file Documents, Decks, and Canvases under a project so
   several books/worlds stay untangled.
 - **Import & Add Lore** — drag in **PDFs** (both the text *and* the page images
@@ -92,10 +96,23 @@ can open from any device:
   readable by the assistant. File anything into "My Notes" or one of your own
   sections.
 - **Task Manager** — a real-time to-do list: add, check off, edit, delete.
+- **Mind Maps** — nodes you add, drag, and connect with lines; make as many maps as
+  you want for plot threads, relationship webs, cause and effect.
+- **Sheets** — a small spreadsheet with formulas (`=SUM(...)`, `=AVERAGE(...)`,
+  cell arithmetic) and **pie/bar charts** built from a selected range.
+- **Flashcards & Quiz** — give it a topic (a category, a name, or nothing for
+  everything) and a count; it builds cards or a quiz (multiple-choice or
+  type-it-yourself) straight from your canon's facts and summaries, regenerate
+  as often as you like.
+- **Timeline** — enter events as **BR** (Before Reckoning) or **AR** (After
+  Reckoning) years and they're placed and re-ordered on a line automatically;
+  click any point to write or read its notes.
 - **Activity Feed** — a running log of what's changed lately.
 - **Settings** — pick any **accent colour** (a full colour wheel, not just presets),
   adjust base font size and interface/reading fonts, restore deleted entries, and
   leave standing instructions for how the assistant should behave.
+- **Export** (top-right) — print/save the current page as a PDF with a **portrait
+  or landscape** toggle, or download a full backup of everything as one file.
 - **Canon Assistant** (the ✦ button, top-right) — your canon at your fingertips.
   - Look up a name for a **natural-reading summary** (not a raw quote) with related
     names and sources.
@@ -138,12 +155,3 @@ That re-extracts text, re-detects cross-reference names, and regenerates
 `tools/words.txt` — one word per line — so ordinary words are filtered out and
 only your coined names become links. The script works fine without it.)
 
----
-
-## Still on the list
-
-Requested and not yet built: mind maps, a spreadsheet/pie-chart tool, a drawing
-mode on the canvas, flashcards & a quiz mode, a computed BR/AR timeline with
-per-date notes, whole-site/page export with page-orientation control, slide
-presets, richer embeds with resizable images, and a grammar checker. These are
-tracked and coming in a future pass.

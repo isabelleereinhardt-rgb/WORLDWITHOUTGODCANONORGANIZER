@@ -108,6 +108,7 @@ async function open(id) {
       <button class="btn ghost sm" id="addText">+ Note</button>
       <button class="btn ghost sm" id="addLink">+ Link</button>
       <button class="btn ghost sm" id="addVideo">+ Video</button>
+      <button class="btn ghost sm" id="addDraw">+ Draw</button>
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="canvas-scroll">
@@ -128,6 +129,7 @@ async function open(id) {
     const url = prompt("Paste a video URL (YouTube, Vimeo, or a direct .mp4):"); if (!url) return;
     addCard({ type: "video", data: { url } });
   };
+  $("#addDraw").onclick = () => addCard({ type: "draw", data: { src: null }, w: 340, h: 260 });
 
   renderCards();
 
@@ -200,6 +202,14 @@ function captionField(c) {
     value="${esc(c.data.caption || "")}"></div>`;
 }
 function cardInner(c) {
+  if (c.type === "draw") return `
+    <div class="cc-draw-toolbar">
+      <input type="color" class="cc-draw-color" data-id="${c.id}" value="#2c2a26">
+      <input type="range" class="cc-draw-size" data-id="${c.id}" min="1" max="14" value="3">
+      <button class="cc-draw-clear" data-id="${c.id}">Clear</button>
+      <button class="cc-draw-dl" data-id="${c.id}">Download</button>
+    </div>
+    <canvas class="cc-draw-canvas" data-id="${c.id}" width="${c.w || 340}" height="${c.h || 220}"></canvas>` + captionField(c);
   if (c.type === "image") return `<img src="${c.data.src}" alt="${esc(c.data.name || "")}" draggable="false">` + captionField(c);
   if (c.type === "video") return `<div class="cc-video">${videoEmbed(c.data.url)}</div>` + captionField(c);
   if (c.type === "link") {
@@ -245,10 +255,42 @@ function renderCards() {
       note.addEventListener("input", () => { c.data.html = note.innerHTML; touch(); });
       note.addEventListener("mousedown", e => e.stopPropagation()); // let text selection work
     }
+    // drawing surface
+    if (c.type === "draw") initDrawCanvas(el, c);
     // drag (from handle, or anywhere on media cards)
     const handle = el.querySelector(".cc-handle");
     dragify(el, handle, c);
   });
+}
+
+/* ---------- drawing mode: freehand sketch saved as a PNG, per card ---------- */
+function initDrawCanvas(el, c) {
+  const canvas = el.querySelector(".cc-draw-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fffdf8"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (c.data.src) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height); img.src = c.data.src; }
+  let drawing = false, color = "#2c2a26", size = 3;
+  const colorInp = el.querySelector(".cc-draw-color"), sizeInp = el.querySelector(".cc-draw-size");
+  [colorInp, sizeInp].forEach(i => i && i.addEventListener("mousedown", e => e.stopPropagation()));
+  if (colorInp) colorInp.oninput = () => { color = colorInp.value; };
+  if (sizeInp) sizeInp.oninput = () => { size = +sizeInp.value; };
+  el.querySelector(".cc-draw-clear").onmousedown = e => e.stopPropagation();
+  el.querySelector(".cc-draw-clear").onclick = () => {
+    ctx.fillStyle = "#fffdf8"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    c.data.src = canvas.toDataURL("image/png"); touch();
+  };
+  el.querySelector(".cc-draw-dl").onmousedown = e => e.stopPropagation();
+  el.querySelector(".cc-draw-dl").onclick = () => {
+    const a = document.createElement("a"); a.href = canvas.toDataURL("image/png");
+    a.download = (cur.title || "drawing").replace(/\s+/g, "-") + ".png"; a.click();
+  };
+  const posFrom = e => { const r = canvas.getBoundingClientRect(); const pt = e.touches ? e.touches[0] : e; return { x: (pt.clientX - r.left) * (canvas.width / r.width), y: (pt.clientY - r.top) * (canvas.height / r.height) }; };
+  const start = e => { e.stopPropagation(); e.preventDefault(); drawing = true; const p = posFrom(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineCap = "round"; ctx.strokeStyle = color; ctx.lineWidth = size; };
+  const move = e => { if (!drawing) return; e.stopPropagation(); e.preventDefault(); const p = posFrom(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+  const end = () => { if (!drawing) return; drawing = false; c.data.src = canvas.toDataURL("image/png"); touch(); };
+  canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move);
+  canvas.addEventListener("mouseup", end); canvas.addEventListener("mouseleave", end);
+  canvas.addEventListener("touchstart", start, { passive: false }); canvas.addEventListener("touchmove", move, { passive: false }); canvas.addEventListener("touchend", end);
 }
 
 function dragify(el, handle, c) {
