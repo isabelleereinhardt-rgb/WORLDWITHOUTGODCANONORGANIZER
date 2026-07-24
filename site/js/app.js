@@ -27,6 +27,13 @@ const IC = {
   search: '<circle cx="9" cy="9" r="5"/><path d="M16 16l-3.2-3.2"/>',
   spark:  '<path d="M10 3.2l1.6 4.8 4.8 1.6-4.8 1.6L10 16l-1.6-4.8L3.6 9.6l4.8-1.6z"/>',
   link:   '<path d="M8 12l4-4"/><path d="M11 6.5l1-1a3 3 0 0 1 4.2 4.2l-1.6 1.6"/><path d="M9 13.5l-1 1A3 3 0 0 1 3.8 10.3l1.6-1.6"/>',
+  check:  '<rect x="3.5" y="3.5" width="13" height="13" rx="2.5"/><path d="M6.5 10l2.3 2.3L14 7.5"/>',
+  feed:   '<path d="M4 4v12h12"/><path d="M7 13l3-4 2.5 2.5L16 7"/>',
+  settings:'<circle cx="10" cy="10" r="2.6"/><path d="M10 3.5v2M10 14.5v2M16.5 10h-2M5.5 10h-2M14.8 5.2l-1.4 1.4M6.6 13.4l-1.4 1.4M14.8 14.8l-1.4-1.4M6.6 6.6L5.2 5.2"/>',
+  mic:    '<rect x="8" y="3" width="4" height="8" rx="2"/><path d="M5.5 9.5a4.5 4.5 0 0 0 9 0"/><path d="M10 14v3"/>',
+  speaker:'<path d="M4 8v4h3l4 3V5L7 8z"/><path d="M13.5 8a3 3 0 0 1 0 4"/>',
+  timer:  '<circle cx="10" cy="11" r="6.2"/><path d="M10 7.5V11l3 1.6"/><path d="M8 3h4"/>',
+  table:  '<rect x="3.5" y="4" width="13" height="12" rx="1"/><path d="M3.5 8.3h13M3.5 12.6h13M9 4v12"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -49,11 +56,31 @@ const CAT = {
 };
 const catColor = c => CAT[c] || "var(--accent)";
 const catDot = c => `<span class="cdot" style="background:${catColor(c)}"></span>`;
+const CANON_ORDER = ["Characters", "Noble Houses", "Maps & Locations", "Religion & Faith",
+  "Magic System", "Timeline & History", "Culture & Fashion", "Books & Stories",
+  "Reference & Lexicon", "Canon & Continuity"];
+
+/* soft-deleted (hidden) entries + custom sections */
+function isHidden(e) { return window.CodexExtra && CodexExtra.hidden.has(e.id); }
+function visibleEntries() { return DB.entries.filter(e => !isHidden(e)); }
+function customCats() { return (window.CodexExtra ? CodexExtra.cats : []).map(c => c.name); }
+function categoriesList() {
+  const counts = {};
+  visibleEntries().forEach(e => { counts[e.category] = (counts[e.category] || 0) + 1; });
+  const list = [];
+  CANON_ORDER.forEach(n => { if (counts[n]) list.push({ name: n, count: counts[n] }); });
+  list.push({ name: "My Notes", count: counts["My Notes"] || 0 });          // always present
+  customCats().forEach(n => { if (n !== "My Notes" && !CANON_ORDER.includes(n)) list.push({ name: n, count: counts[n] || 0, custom: true }); });
+  Object.keys(counts).forEach(n => { if (!CANON_ORDER.includes(n) && n !== "My Notes" && !customCats().includes(n)) list.push({ name: n, count: counts[n] }); });
+  return list;
+}
+function refresh() { buildIndexes(); buildNav(); route(); }
 
 /* ---------- indexes (rebuildable, so imported notes fold in) ---------- */
 const byId = {};
 let entitySet = new Set(), sortedEntities = [], ENT_RE = null;
 function buildIndexes() {
+  if (typeof rebuildEntries === "function") rebuildEntries();
   Object.keys(byId).forEach(k => delete byId[k]);
   DB.entries.forEach(e => { byId[e.id] = e; e._hay = (e.title + " " + e.text).toLowerCase(); });
   entitySet = new Set(DB.entities);
@@ -76,49 +103,59 @@ const store = {
 
 /* ============================================================
    IMPORTED NOTES  (user-added canon, indexed like everything else)
+   Entries are rebuilt from ORIG_ENTRIES + notesCache on every
+   refresh, minus whatever's in CodexExtra.hidden — this is what
+   makes soft-delete/restore work uniformly for canon AND notes,
+   and what keeps "My Notes" always present even at zero items.
    ============================================================ */
+const ORIG_ENTRIES = DB.entries.slice();
+const ORIG_ENTITIES = DB.entities.slice();
+let notesCache = [];
+
 async function loadNotes() {
   if (!window.CodexStore) return;
   await CodexStore.ready;
-  const notes = (await CodexStore.all("notes")).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  // drop any previously-merged notes before re-merging
-  for (let i = DB.entries.length - 1; i >= 0; i--) if (DB.entries[i]._user) DB.entries.splice(i, 1);
-  notes.forEach(mergeNote);
-  const cat = DB.categories.find(c => c.name === "My Notes");
-  if (notes.length) { if (cat) cat.count = notes.length; else DB.categories.push({ name: "My Notes", count: notes.length }); }
-  DB.stats.entries = DB.entries.length;
+  notesCache = (await CodexStore.all("notes")).sort((a, b) => (b.updated || 0) - (a.updated || 0));
 }
-function mergeNote(n) {
+function noteToEntry(n) {
   const text = n.text || "";
-  const e = {
+  return {
     id: n.id, title: n.title || "Untitled note", text,
     summary: text.replace(/\s+/g, " ").slice(0, 180),
-    category: "My Notes", type: "note",
+    category: n.category || "My Notes", type: "note",
     wordcount: text.split(/\s+/).filter(Boolean).length,
-    images: n.images || [], source: null, _user: true,
+    images: n.images || [], links: n.links || [], source: null, _user: true,
   };
-  DB.entries.push(e);
-  if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title);
-  return e;
 }
-async function addNote(title, text, images) {
+function rebuildEntries() {
+  const hidden = window.CodexExtra ? CodexExtra.hidden : new Set();
+  const noteEntries = notesCache.map(noteToEntry);
+  DB.entries = ORIG_ENTRIES.filter(e => !hidden.has(e.id)).concat(noteEntries.filter(e => !hidden.has(e.id)));
+  DB.entities = ORIG_ENTITIES.slice();
+  noteEntries.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  DB.stats.entries = DB.entries.length;
+}
+async function addNote(title, text, images, category) {
   const note = {
     id: "note-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    title: title || "Untitled note", text: text || "", images: images || [],
+    title: title || "Untitled note", text: text || "", images: images || [], category: category || "My Notes",
   };
   await CodexStore.put("notes", note);
-  mergeNote(note);
-  const cat = DB.categories.find(c => c.name === "My Notes");
-  if (cat) cat.count++; else DB.categories.push({ name: "My Notes", count: 1 });
-  DB.stats.entries = DB.entries.length;
-  buildIndexes(); buildNav();
+  notesCache.unshift(note);
+  refresh();
+  window.CodexFeed && CodexFeed.log("Added note", note.title);
   return note;
+}
+async function updateNote(id, patch) {
+  const note = notesCache.find(n => n.id === id); if (!note) return;
+  Object.assign(note, patch);
+  await CodexStore.put("notes", note);
+  refresh();
 }
 async function deleteNote(id) {
   await CodexStore.del("notes", id);
-  const i = DB.entries.findIndex(e => e.id === id); if (i >= 0) DB.entries.splice(i, 1);
-  const cat = DB.categories.find(c => c.name === "My Notes"); if (cat) cat.count = Math.max(0, cat.count - 1);
-  buildIndexes(); buildNav();
+  notesCache = notesCache.filter(n => n.id !== id);
+  refresh();
 }
 
 /* ============================================================
@@ -126,7 +163,7 @@ async function deleteNote(id) {
    ============================================================ */
 function buildNav() {
   const nav = $("#nav");
-  const cats = DB.categories.map(c =>
+  const cats = categoriesList().map(c =>
     `<div class="nav-item" data-route="#/browse/${encodeURIComponent(c.name)}">
        <span class="dot" style="background:${catColor(c.name)}"></span>
        <span>${esc(c.name)}</span><span class="count">${c.count}</span>
@@ -138,17 +175,22 @@ function buildNav() {
       <div class="nav-item" data-route="#/index">${svg("index")}<span>Name Index</span></div>
     </div>
     <div class="nav-section">
-      <div class="nav-title">The Canon</div>${cats}
+      <div class="nav-title-row"><div class="nav-title">The Canon</div>
+        <button class="nav-plus" id="navAddCat" title="Add a section">+</button></div>
+      ${cats}
     </div>
     <div class="nav-section">
       <div class="nav-title">Your Workspace</div>
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases &amp; Mood Boards</span></div>
+      <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Task Manager</span></div>
       <div class="nav-item" data-route="#/import">${svg("import")}<span>Import &amp; Add Lore</span></div>
+      <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity Feed</span></div>
     </div>
     <div class="nav-section">
       <div class="nav-title">Data</div>
+      <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
       <div class="nav-item mini" id="navExport">${svg("backup")}<span>Back up my work</span></div>
       <div class="nav-item mini" id="navImport">${svg("restore")}<span>Restore backup</span></div>
     </div>`;
@@ -156,6 +198,14 @@ function buildNav() {
     el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
   $("#navExport").onclick = backupAll;
   $("#navImport").onclick = restoreAll;
+  $("#navAddCat").onclick = async (ev) => {
+    ev.stopPropagation();
+    const name = prompt("Name this new section (it'll appear under The Canon):");
+    if (!name || !name.trim()) return;
+    await CodexExtra.addCat(name.trim());
+    buildNav();
+    toast("Section added — file notes into it from Import & Add Lore");
+  };
   markActive();
 }
 function markActive() {
@@ -316,7 +366,8 @@ const view = $("#view");
 
 function viewHome() {
   const s = DB.stats;
-  const cards = DB.categories.map(c => `
+  const catList = categoriesList();
+  const cards = catList.map(c => `
     <a class="cat-card" href="#/browse/${encodeURIComponent(c.name)}">
       <span class="bar" style="background:${catColor(c.name)}"></span>
       <span class="cdot lg" style="background:${catColor(c.name)}"></span>
@@ -325,7 +376,7 @@ function viewHome() {
     </a>`).join("");
   view.innerHTML = `
     <div class="hero">
-      <div class="page-kicker">Your worldbuilding codex</div>
+      <div class="page-kicker">Your worldbuilding organizer</div>
       <h1>Everything you've built, calm and findable.</h1>
       <p>One quiet home for every character, house, map, and myth in <em>World Without God</em>.
          Search across it all, follow names wherever they lead, and write new lore right inside it.</p>
@@ -334,10 +385,10 @@ function viewHome() {
         <button class="btn" onclick="location.hash='#/docs'">New document</button>
       </div>
       <div class="stat-row">
-        <div><b>${s.entries || 0}</b> entries</div>
+        <div><b>${DB.entries.length || 0}</b> entries</div>
         <div><b>${s.entities || 0}</b> cross-linked names</div>
         <div><b>${s.images || 0}</b> images &amp; maps</div>
-        <div><b>${(DB.categories || []).length}</b> collections</div>
+        <div><b>${catList.length}</b> collections</div>
       </div>
     </div>
     <div class="cat-grid">${cards}</div>`;
@@ -346,14 +397,70 @@ function viewHome() {
   hs.addEventListener("input", () => { if (hs.value.trim().length >= 2) openSearch(hs.value.trim()); });
 }
 
+let browseSelectMode = false, browseSelected = new Set();
 function viewBrowse(cat) {
+  browseSelectMode = false; browseSelected = new Set();
+  renderBrowse(cat);
+}
+function renderBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
-  const cards = items.map(e => entryCard(e)).join("") || `<div class="empty-state">Nothing here yet.</div>`;
+  const isNotesLike = cat === "My Notes" || customCats().includes(cat);
+  const cards = items.map(e => entryCardSelectable(e)).join("") ||
+    `<div class="empty-state">Nothing here yet.${isNotesLike ? " Add one below, or from Import &amp; Add Lore." : ""}</div>`;
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${catDot(cat)} Collection</div>
-    <h1>${esc(cat)}</h1>
+    <div class="browse-head">
+      <h1>${esc(cat)}</h1>
+      <div class="browse-actions">
+        ${isNotesLike ? `<button class="btn sm" id="quickAddNote">New note</button>` : ""}
+        ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${browseSelectMode ? "Cancel" : "Select"}</button>` : ""}
+      </div>
+    </div>
     <p class="muted">${items.length} ${items.length === 1 ? "entry" : "entries"}</p>
+    ${browseSelectMode ? `<div class="select-bar">
+      <label class="sel-all"><input type="checkbox" id="selAll" ${items.length && browseSelected.size === items.length ? "checked" : ""}> Select all</label>
+      <span class="faint" id="selCount">${browseSelected.size} selected</span>
+      <button class="btn danger sm" id="deleteSelected" ${browseSelected.size ? "" : "disabled"}>Delete selected</button>
+    </div>` : ""}
     <div class="list-grid">${cards}</div>
+  </div>`;
+
+  if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { browseSelectMode = !browseSelectMode; if (!browseSelectMode) browseSelected.clear(); renderBrowse(cat); };
+  if ($("#quickAddNote")) $("#quickAddNote").onclick = async () => {
+    const note = await addNote("", "", [], cat === "My Notes" ? "My Notes" : cat);
+    location.hash = "#/entry/" + note.id;
+  };
+  if (browseSelectMode) {
+    $("#selAll").onchange = e => { browseSelected = e.target.checked ? new Set(items.map(i => i.id)) : new Set(); renderBrowse(cat); };
+    $$(".entry-card.selectable", view).forEach(card => {
+      const cb = card.querySelector(".ec-check");
+      const toggle = () => {
+        if (cb.checked) browseSelected.add(card.dataset.id); else browseSelected.delete(card.dataset.id);
+        $("#selCount").textContent = browseSelected.size + " selected";
+        $("#deleteSelected").disabled = !browseSelected.size;
+        card.classList.toggle("checked", cb.checked);
+      };
+      cb.onchange = toggle;
+      card.onclick = e => { if (e.target === cb) return; cb.checked = !cb.checked; toggle(); };
+    });
+    $("#deleteSelected").onclick = async () => {
+      if (!browseSelected.size) return;
+      if (!confirm(`Delete ${browseSelected.size} item${browseSelected.size === 1 ? "" : "s"} from "${cat}"? You can restore them anytime from Settings → Deleted entries.`)) return;
+      await CodexExtra.hide(Array.from(browseSelected));
+      browseSelected.clear(); browseSelectMode = false;
+      refresh();
+    };
+  }
+}
+function entryCardSelectable(e) {
+  const preview = e.type === "gallery" ? `${e.images.length} images` : esc((e.summary || "").slice(0, 160));
+  if (!browseSelectMode) return entryCard(e);
+  const checked = browseSelected.has(e.id);
+  return `<div class="entry-card selectable ${checked ? "checked" : ""}" data-id="${e.id}">
+    <input type="checkbox" class="ec-check" ${checked ? "checked" : ""}>
+    <h3>${esc(e.title)}</h3>
+    <p>${preview}</p>
+    <div class="meta">${catDot(e.category)} ${esc(e.category)}${e.type === "pdf" || e.type === "note" ? " · " + (e.wordcount || 0) + " words" : ""}</div>
   </div>`;
 }
 
@@ -384,19 +491,29 @@ function viewEntry(id) {
   const relImgs = (e.images || []).length ? galleryHtml(e.images) : "";
   const pdfLink = e.source && e.source.endsWith(".pdf")
     ? `<a class="btn ghost sm" href="${imgSrc(e.source)}" target="_blank">Original PDF</a>` : "";
-  const noteControls = e._user ? `<button class="btn ghost sm" id="delNote">Delete note</button>` : "";
+  const fileLink = (e._user && e.fileHref) ? `<a class="btn ghost sm" href="${e.fileHref}" target="_blank">Open original file</a>` : "";
+  const linksHtml = (e.links && e.links.length) ? `<div class="note-links">
+    <div class="sc-rel-label">Links</div>
+    ${e.links.map(l => `<a class="note-link" href="${esc(l)}" target="_blank" rel="noopener">${esc(l)}</a>`).join("")}
+  </div>` : "";
+  const catSelector = e._user ? `<select class="folder-select" id="entryCatMove" title="Move to a section">
+    <option value="My Notes" ${e.category === "My Notes" ? "selected" : ""}>My Notes</option>
+    ${customCats().map(c => `<option value="${esc(c)}" ${e.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+  </select>` : "";
 
   view.innerHTML = `<div class="wrap">
     <div class="reading">
-      <div class="entry-head"><div class="page-kicker" style="margin:0">${catDot(e.category)} ${esc(e.category)}</div></div>
+      <div class="entry-head"><div class="page-kicker" style="margin:0">${catDot(e.category)} ${esc(e.category)}</div>${catSelector}</div>
       <h1>${esc(e.title)}</h1>
       <div class="entry-actions">
         <button class="btn sm" id="askAssistant">${svg("spark")} Ask the assistant about this</button>
-        ${pdfLink}
+        ${pdfLink}${fileLink}
         <button class="btn ghost sm" id="copyText">Copy text</button>
-        ${noteControls}
+        <button class="btn ghost sm" id="readAloud">${svg("speaker")} Read aloud</button>
+        <button class="btn ghost sm" id="delEntry">Delete</button>
       </div>
       ${body}
+      ${linksHtml}
       ${relImgs}
       ${backHtml}
     </div>
@@ -406,7 +523,13 @@ function viewEntry(id) {
   bindGallery();
   $("#askAssistant").onclick = () => { openAssistant(); assistantLookup(e.title); };
   $("#copyText").onclick = () => { navigator.clipboard.writeText(e.text); toast("Copied to clipboard"); };
-  if ($("#delNote")) $("#delNote").onclick = async () => { if (confirm("Delete this note?")) { await deleteNote(e.id); location.hash = "#/browse/" + encodeURIComponent("My Notes"); } };
+  $("#readAloud").onclick = () => { window.CodexSpeech ? CodexSpeech.read(e.text || e.title) : toast("Speech not supported here"); };
+  $("#delEntry").onclick = async () => {
+    if (!confirm(`Delete "${e.title}"? You can restore it anytime from Settings → Deleted entries.`)) return;
+    if (e._user) await deleteNote(e.id); else { await CodexExtra.hide([e.id]); refresh(); }
+    location.hash = "#/browse/" + encodeURIComponent(e.category);
+  };
+  if ($("#entryCatMove")) $("#entryCatMove").onchange = async ev => { await updateNote(e.id, { category: ev.target.value }); toast("Moved to " + ev.target.value); };
 }
 
 /* subject hub — now leads with a synthesized summary */
@@ -491,26 +614,33 @@ function viewIndex() {
 
 /* ---------- IMPORT / add lore ---------- */
 function viewImport() {
+  const cats = customCats();
   view.innerHTML = `<div class="wrap">
     <div class="page-kicker">${svg("import")} Import &amp; Add Lore</div>
     <h1>Add to your canon</h1>
-    <p class="muted">Drop in text or Markdown files, paste writing directly, or add images. Text you add is
-      indexed straight away — it becomes searchable, cross-linked, and the assistant reads it too. Everything
-      you add here is stored privately in this browser (back it up from the sidebar).</p>
+    <p class="muted">Drop in <b>PDFs</b> (text and page images both come in, like Notion), <b>Word documents</b>
+      (.docx), text or Markdown files, or add images directly. Everything is indexed straight away — searchable,
+      cross-linked, and readable by the assistant. It's stored privately in this browser (back it up from the sidebar).</p>
 
     <div class="dropzone" id="dropzone">
       <div class="dz-inner">
         <div class="dz-title">Drag files here, or click to choose</div>
-        <div class="dz-sub">Text &amp; Markdown (.txt, .md) become searchable lore · images become a gallery ·
-          a Codex <b>.json</b> backup is restored</div>
+        <div class="dz-sub">PDF · Word (.docx) · Text &amp; Markdown · Images · a backup <b>.json</b> restores everything</div>
       </div>
-      <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,application/json,text/plain,text/markdown,image/*" hidden>
+      <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
     </div>
+    <div class="import-progress" id="importProgress" hidden></div>
 
     <h3 style="font-family:var(--serif);margin-top:34px">Or write / paste it in</h3>
     <input class="import-title" id="pasteTitle" placeholder="Title (e.g. a character, place, or note)">
     <textarea class="import-body" id="pasteBody" placeholder="Paste or type the lore here…"></textarea>
-    <div style="margin-top:12px"><button class="btn" id="addPaste">Add to my canon</button></div>
+    <div class="import-row">
+      <select class="folder-select" id="pasteCat">
+        <option value="My Notes">My Notes</option>
+        ${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}
+      </select>
+      <button class="btn" id="addPaste">Add to my canon</button>
+    </div>
 
     <div id="importLog" class="import-log"></div>
   </div>`;
@@ -523,42 +653,98 @@ function viewImport() {
   fi.onchange = () => handleFiles(fi.files);
 
   $("#addPaste").onclick = async () => {
-    const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim();
+    const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim(), c = $("#pasteCat").value;
     if (!b) { toast("Nothing to add yet"); return; }
-    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, []);
-    logImport(`Added <b>${esc(note.title)}</b> to your canon.`);
+    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c);
+    logImport(`Added <b>${esc(note.title)}</b> to <b>${esc(c)}</b>.`, c);
     $("#pasteTitle").value = ""; $("#pasteBody").value = "";
     location.hash = "#/entry/" + note.id;
   };
 }
-function logImport(msg) { const l = $("#importLog"); if (l) l.innerHTML = `<div class="import-ok">✓ ${msg} <a href="#/browse/${encodeURIComponent("My Notes")}">See “My Notes” →</a></div>` + l.innerHTML; }
+function logImport(msg, cat) { const l = $("#importLog"); if (l) l.innerHTML = `<div class="import-ok">✓ ${msg} <a href="#/browse/${encodeURIComponent(cat || "My Notes")}">See “${esc(cat || "My Notes")}” →</a></div>` + l.innerHTML; }
+function importProgress(msg) { const p = $("#importProgress"); if (!p) return; p.hidden = false; p.textContent = msg; }
 
 async function handleFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
+  const cat = ($("#pasteCat") && $("#pasteCat").value) || "My Notes";
   const images = [];
   for (const f of files) {
     const name = f.name || "file";
+    importProgress(`Reading ${name}…`);
     if (/^image\//.test(f.type)) {
       try { images.push(await window.CodexImg.fileToScaledDataURL(f)); } catch (e) { logImport(`Couldn't read image ${esc(name)}`); }
+    } else if (/\.pdf$/i.test(name) || f.type === "application/pdf") {
+      try { await importPdf(f, cat); logImport(`Imported <b>${esc(name.replace(/\.pdf$/i, ""))}</b> (text + page images).`, cat); }
+      catch (e) { logImport(`Couldn't read PDF ${esc(name)}: ${esc(e.message || "")}`); }
+    } else if (/\.docx$/i.test(name)) {
+      try { await importDocx(f, cat); logImport(`Imported <b>${esc(name.replace(/\.docx$/i, ""))}</b>.`, cat); }
+      catch (e) { logImport(`Couldn't read Word file ${esc(name)}: ${esc(e.message || "")}`); }
     } else if (/\.json$/i.test(name) || f.type === "application/json") {
       try {
         const txt = await f.text(); const data = JSON.parse(txt);
-        if (data && data._codex) { await CodexStore.importAll(data); await loadNotes(); buildIndexes(); buildNav(); logImport(`Restored your Codex backup <b>${esc(name)}</b>.`); }
-        else { const note = await addNote(name.replace(/\.json$/i, ""), txt, []); logImport(`Added <b>${esc(note.title)}</b>.`); }
+        if (data && data._codex) {
+          await CodexStore.importAll(data); await loadNotes();
+          if (window.CodexExtra) await CodexExtra.ready();
+          buildIndexes(); buildNav(); logImport(`Restored your backup <b>${esc(name)}</b>.`);
+        } else { const note = await addNote(name.replace(/\.json$/i, ""), txt, [], cat); logImport(`Added <b>${esc(note.title)}</b>.`, cat); }
       } catch (e) { logImport(`Couldn't read ${esc(name)}`); }
     } else {
       try {
         const txt = await f.text();
-        const note = await addNote(name.replace(/\.(txt|md|markdown)$/i, ""), txt, []);
-        logImport(`Added <b>${esc(note.title)}</b> (${note.text.split(/\s+/).filter(Boolean).length} words).`);
+        const note = await addNote(name.replace(/\.(txt|md|markdown)$/i, ""), txt, [], cat);
+        logImport(`Added <b>${esc(note.title)}</b> (${note.text.split(/\s+/).filter(Boolean).length} words).`, cat);
       } catch (e) { logImport(`Couldn't read ${esc(name)}`); }
     }
   }
   if (images.length) {
-    const note = await addNote("Imported images · " + new Date().toLocaleDateString(), "", images);
-    logImport(`Added ${images.length} image${images.length === 1 ? "" : "s"} as a gallery.`);
+    const note = await addNote("Imported images · " + new Date().toLocaleDateString(), "", images, cat);
+    logImport(`Added ${images.length} image${images.length === 1 ? "" : "s"} as a gallery.`, cat);
   }
+  const p = $("#importProgress"); if (p) p.hidden = true;
+}
+
+/* PDF import: extract text AND render every page to an image, Notion-style,
+   so the visuals come across, not just the words. */
+async function importPdf(file, cat) {
+  if (!window.pdfjsLib) throw new Error("PDF reader not loaded");
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  const images = [];
+  const maxPages = Math.min(pdf.numPages, 60);
+  for (let i = 1; i <= maxPages; i++) {
+    importProgress(`Reading ${file.name} — page ${i} of ${maxPages}…`);
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(it => it.str).join(" ") + "\n\n";
+    const viewport = page.getViewport({ scale: 1.6 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    images.push(canvas.toDataURL("image/jpeg", 0.82));
+  }
+  const title = file.name.replace(/\.pdf$/i, "");
+  await addNote(title, text.trim(), images, cat);
+}
+
+/* Word (.docx) import via mammoth — pulls text and any embedded images. */
+async function importDocx(file, cat) {
+  if (!window.mammoth) throw new Error("Word reader not loaded");
+  const buf = await file.arrayBuffer();
+  const images = [];
+  const result = await mammoth.convertToHtml({ arrayBuffer: buf }, {
+    convertImage: mammoth.images.imgElement(async (el) => {
+      const b64 = await el.read("base64");
+      const url = "data:" + el.contentType + ";base64," + b64;
+      images.push(url);
+      return { src: url };
+    })
+  });
+  const div = document.createElement("div"); div.innerHTML = result.value;
+  const text = div.textContent || "";
+  const title = file.name.replace(/\.docx$/i, "");
+  await addNote(title, text.trim(), images, cat);
 }
 
 /* ---------- full-page search results (roomy, with overview) ---------- */
@@ -664,7 +850,7 @@ function searchAll(q) {
 let searchSel = 0, searchList = [];
 function renderSearch(q) {
   const box = $("#searchResults");
-  if (!q.trim()) { box.innerHTML = `<div class="sr-empty">Start typing to search your whole codex.</div>`; return; }
+  if (!q.trim()) { box.innerHTML = `<div class="sr-empty">Start typing to search your whole canon.</div>`; return; }
   const results = searchAll(q);
   if (!results.length) { box.innerHTML = `<div class="sr-empty">No matches for “${esc(q)}”.</div>`; return; }
   const overview = queryOverviewHtml(q, results);
@@ -717,13 +903,23 @@ function bestEntryFor(name) {
   return hits[0];
 }
 
-/* rich blurb: summary + facts + related + sources */
+/* rich blurb: a natural-reading answer (not a raw source quote), + facts + related + sources */
 function blurbCard(name) {
   const e = bestEntryFor(name);
   if (!e) return `<div class="blurb"><div class="bt">${esc(name)}</div>
     <div class="bs faint">No canon entry yet — this name isn't in your lore.</div></div>`;
   const sents = topicSummary(name, 3);
-  const summary = sents.length ? sents.join(" ") : (firstSentenceWith(e.text, name) || e.summary || "");
+  let summary = sents.length ? sents.join(" ") : (firstSentenceWith(e.text, name) || e.summary || "");
+  // if nothing we found actually opens with the subject, lead with a plain-spoken frame so it
+  // reads as an answer to "who/what is X", not a quote dropped in from the middle of a document.
+  const opensWithName = sents.length && new RegExp("^\\s*" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(sents[0]);
+  if (summary && !opensWithName) {
+    const lede = e.category === "Noble Houses" ? `${name} is a noble house in your canon.`
+      : e.category === "Religion & Faith" ? `${name} figures into the religion of your world.`
+      : e.category === "Maps & Locations" ? `${name} is a place in your world.`
+      : `${name} appears in your ${e.category.toLowerCase()}.`;
+    summary = lede + " " + summary;
+  }
   const rel = relatedNames(name, 6);
   const others = mentionsOf(name, e.id).length;
   return `<div class="blurb">
@@ -758,10 +954,62 @@ function assistantAnswer(q) {
     <div class="ans-sources"><div class="ans-label">Drawn from</div>${sources}</div>`;
 }
 
+/* ---------- assistant recent-lookup history ---------- */
+const assistantHistory = { key: "codex.assistant.history",
+  list() { try { return JSON.parse(localStorage.getItem(this.key) || "[]"); } catch (e) { return []; } },
+  push(q) {
+    const h = this.list().filter(x => x.toLowerCase() !== q.toLowerCase());
+    h.unshift(q);
+    localStorage.setItem(this.key, JSON.stringify(h.slice(0, 10)));
+  },
+};
+
+/* ---------- task/command parsing: "list all characters in <book>" ---------- */
+function tryCommand(q) {
+  const m = q.match(/^(?:list|show|give me)\s+(?:all\s+)?(?:the\s+)?(characters?|houses?|gods?|places?|locations?)\s*(?:in|from|of)?\s*(.*)$/i);
+  if (!m) return null;
+  const kindMap = { character: "Characters", characters: "Characters", house: "Noble Houses", houses: "Noble Houses",
+    god: "Religion & Faith", gods: "Religion & Faith", place: "Maps & Locations", places: "Maps & Locations",
+    location: "Maps & Locations", locations: "Maps & Locations" };
+  const cat = kindMap[m[1].toLowerCase()];
+  const filterTerm = (m[2] || "").trim().replace(/^(my|the)\s+/i, "");
+  let pool = DB.entries.filter(e => e.category === cat && (e.type === "pdf" || e.type === "note"));
+  if (filterTerm) pool = pool.filter(e => e._hay.includes(filterTerm.toLowerCase()));
+  pool = pool.sort((a, b) => a.title.localeCompare(b.title));
+  const label = filterTerm ? `${m[1]} in “${filterTerm}”` : m[1];
+  if (!pool.length) return `<div class="assistant-hint">I couldn't find any ${esc(label)} in your canon.</div>`;
+  return `<div class="ans-label" style="margin-bottom:6px">Found ${pool.length} ${esc(label)}</div>
+    <div class="recog">${pool.map(e => `<a class="chip" href="#/entry/${e.id}">${esc(e.title)}</a>`).join("")}</div>`;
+}
+
+/* ---------- opinion mode: "what's your favourite character" ---------- */
+function tryOpinion(q) {
+  const m = q.match(/\b(favou?rite|best|most interesting)\s+(character|house|god(?:dess)?|place|location)\b/i);
+  if (!m) return null;
+  const kindMap = { character: "Characters", house: "Noble Houses", god: "Religion & Faith", goddess: "Religion & Faith", place: "Maps & Locations", location: "Maps & Locations" };
+  const cat = kindMap[m[2].toLowerCase()] || kindMap[m[2].toLowerCase().replace(/dess$/, "")];
+  const pool = DB.entries.filter(e => e.category === cat && (e.type === "pdf" || e.type === "note"));
+  if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(m[2])} entries to pick from yet.</div>`;
+  const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
+  scored.sort((a, b) => b.score - a.score);
+  const pick = scored[0].e;
+  const sents = topicSummary(pick.title, 2);
+  return `<div class="ans-label">My pick, going by what's most woven through your canon</div>
+    <div class="blurb">
+      <div class="bt">${catDot(pick.category)} ${esc(pick.title)}</div>
+      <div class="bs">${esc(sents.join(" ")) || esc(pick.summary || "")}</div>
+      <div class="bl">Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries — more cross-referenced than the rest of your ${esc(m[2])} entries, which usually means it's load-bearing for the story.</div>
+      <div style="margin-top:8px"><a class="btn sm" href="#/entry/${pick.id}">Open entry</a></div>
+    </div>`;
+}
+
 function assistantLookup(q) {
   const body = $("#assistantBody");
   q = (q || "").trim();
   if (!q) { assistantIdle(); return; }
+  assistantHistory.push(q);
+  const cmd = tryCommand(q); if (cmd) { body.innerHTML = cmd; bindAssistantLinks(body); return; }
+  const op = tryOpinion(q); if (op) { body.innerHTML = op; bindAssistantLinks(body); return; }
   const named = matchNamedSubject(q) || partialEntity(q);
   if (named) { body.innerHTML = blurbCard(named); bindAssistantLinks(body); return; }
   // multi-word / question → synthesize an answer
@@ -777,10 +1025,17 @@ function partialEntity(q) {
   return m || null;
 }
 function assistantIdle() {
+  const hist = assistantHistory.list();
+  const histHtml = hist.length ? `<div style="margin-top:14px">
+    <div class="sc-rel-label">Recent</div>
+    <div class="recog">${hist.map(h => `<span class="chip" data-recent="${esc(h)}">${esc(h)}</span>`).join("")}</div>
+  </div>` : "";
   $("#assistantBody").innerHTML = `<div class="assistant-hint">
     ${svg("spark")} I read only what <b>you've</b> written.<br><br>
-    Look up any name for an instant summary pulled from your canon, ask a question in plain words,
-    or open a Document and I'll recognise names as you type.</div>`;
+    Look up any name for an instant summary, ask a question in plain words, give me a task
+    ("list all characters in Aicruae"), ask my opinion ("favourite house"), or open a Document
+    and I'll recognise names as you type.</div>${histHtml}`;
+  $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
 }
 function assistantScan(text) {
   const found = [], seen = new Set();
@@ -808,12 +1063,13 @@ async function backupAll() {
   let data;
   if (window.CodexStore) data = await CodexStore.exportAll();
   else { data = { _codex: true, stores: {} }; }
+  data._codex = true;
   // include tiny localStorage prefs too
   data.prefs = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("codex.")) data.prefs[k] = localStorage.getItem(k); }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "codex-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.download = "world-without-god-backup-" + new Date().toISOString().slice(0, 10) + ".json";
   a.click();
   toast("Backup downloaded");
 }
@@ -829,7 +1085,9 @@ function restoreAll() {
         if (data.prefs) Object.keys(data.prefs).forEach(k => localStorage.setItem(k, data.prefs[k]));
         if (window.CodexStore && data.stores) await CodexStore.importAll(data);
         else if (data && !data.stores) Object.keys(data).forEach(k => { if (k.startsWith("codex.")) localStorage.setItem(k, data[k]); });
-        await loadNotes(); buildIndexes(); buildNav();
+        await loadNotes();
+        if (window.CodexExtra) await CodexExtra.ready();
+        buildIndexes(); buildNav();
         toast("Backup restored"); route();
       } catch (e) { toast("Could not read that file"); }
     };
@@ -873,6 +1131,9 @@ function route() {
   else if (path === "deck") window.CodexEditor && CodexEditor.deckOpen(parts[1]);
   else if (path === "canvases") window.CodexCanvas && CodexCanvas.list(parts[1] || null);
   else if (path === "canvas") window.CodexCanvas && CodexCanvas.open(parts[1]);
+  else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
+  else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
+  else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
   else viewHome();
   markActive();
 }
@@ -888,7 +1149,10 @@ function collapseSidebar(force) {
 }
 
 async function init() {
-  try { if (window.CodexStore) { await CodexStore.ready; await loadNotes(); } } catch (e) { /* non-fatal */ }
+  try {
+    if (window.CodexStore) { await CodexStore.ready; await loadNotes(); }
+    if (window.CodexExtra) await CodexExtra.ready();
+  } catch (e) { /* non-fatal */ }
   buildIndexes();
   buildNav();
   $("#app").classList.remove("loading");
@@ -939,5 +1203,5 @@ function isEditing(t) { return t && (t.isContentEditable || /input|textarea/i.te
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
 else init();
 
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList };
 })();

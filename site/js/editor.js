@@ -34,7 +34,7 @@ async function list(folderId) {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Workspace</div>
     <h1>Documents</h1>
-    <p class="muted">Write lore, drafts, and notes right inside your codex. They save automatically to this
+    <p class="muted">Write lore, drafts, and notes right inside your organizer. They save automatically to this
       browser — use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
     ${folderBar}
     <div style="margin:16px 0"><button class="btn" id="newDoc">New document</button></div>
@@ -73,12 +73,27 @@ async function open(id) {
       <button data-cmd="underline" title="Underline"><u>U</u></button>
       <button data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
       <span class="sep"></span>
+      <button data-cmd="justifyLeft" title="Align left">⯇</button>
+      <button data-cmd="justifyCenter" title="Align center">≡</button>
+      <button data-cmd="justifyRight" title="Align right">⯈</button>
+      <span class="sep"></span>
+      <button data-cmd="indent" title="Indent">→|</button>
+      <button data-cmd="outdent" title="Outdent">|←</button>
+      <select id="tbSpacing" title="Line spacing">
+        <option value="">Line spacing</option>
+        <option value="1">Single</option><option value="1.5">1.5×</option><option value="2">Double</option>
+      </select>
+      <span class="sep"></span>
       <button data-cmd="insertUnorderedList" title="Bullet list">List</button>
       <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
       <span class="sep"></span>
       <button id="tbLink" title="Insert link">Link</button>
       <button id="tbImg" title="Insert image">Image</button>
+      <button id="tbTable" title="Insert table">Table</button>
       <button id="tbHr" title="Divider">Divider</button>
+      <span class="sep"></span>
+      <button id="tbDictate" title="Dictate (speech to text)">Dictate</button>
+      <button id="tbReadSel" title="Read selection aloud">Read aloud</button>
       <span class="sep"></span>
       ${folderSelect}
       <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
@@ -89,18 +104,28 @@ async function open(id) {
       <input class="doc-title" id="docTitle" placeholder="Untitled document" value="${esc(doc.title)}">
       <div class="doc-editor" id="docEditor" contenteditable="true" spellcheck="true"
            data-ph="Start writing your lore… As you type names from your world, the assistant on the right recognises them.">${doc.html || ""}</div>
+      <div class="doc-footer">
+        <span id="wordCount">0 words</span>
+        <span class="doc-footer-sep">·</span>
+        <button class="timer-btn" id="writeTimer">Start writing timer</button>
+      </div>
     </div>`;
 
   const titleEl = $("#docTitle"), edEl = $("#docEditor"), stateEl = $("#saveState");
   edEl.focus();
 
   let saveT, scanT;
+  const updateWordCount = () => {
+    const words = (edEl.innerText || "").trim().split(/\s+/).filter(Boolean).length;
+    const wc = $("#wordCount"); if (wc) wc.textContent = words + " word" + (words === 1 ? "" : "s");
+  };
   const persist = async () => {
     doc.title = titleEl.value; doc.html = edEl.innerHTML;
     await S().put("docs", doc);
     stateEl.textContent = S().usingFallback() ? "Saved (local)" : "Saved";
   };
-  const touch = () => { stateEl.textContent = "Saving…"; clearTimeout(saveT); saveT = setTimeout(persist, 600); };
+  const touch = () => { stateEl.textContent = "Saving…"; updateWordCount(); clearTimeout(saveT); saveT = setTimeout(persist, 600); };
+  updateWordCount();
   titleEl.oninput = touch;
   edEl.oninput = () => {
     touch();
@@ -117,13 +142,35 @@ async function open(id) {
     edEl.focus(); touch();
   });
   $("#tbBlock").onchange = e => { document.execCommand("formatBlock", false, e.target.value); edEl.focus(); touch(); };
+  $("#tbSpacing").onchange = e => {
+    if (!e.target.value) return;
+    const sel = window.getSelection();
+    const applyTo = (node) => { node.style.lineHeight = e.target.value; };
+    if (sel && sel.anchorNode) {
+      let block = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      while (block && block !== edEl && !/^(P|DIV|LI|H1|H2|BLOCKQUOTE)$/.test(block.tagName || "")) block = block.parentElement;
+      applyTo(block && block !== edEl ? block : edEl);
+    } else applyTo(edEl);
+    touch();
+  };
   $("#tbLink").onclick = () => { const u = prompt("Link URL:"); if (u) document.execCommand("createLink", false, u); touch(); };
   $("#tbHr").onclick = () => { document.execCommand("insertHorizontalRule"); touch(); };
   $("#tbImg").onclick = () => insertImage(edEl, touch);
+  $("#tbTable").onclick = () => {
+    const rows = +(prompt("Rows:", "3") || 3), cols = +(prompt("Columns:", "3") || 3);
+    if (!rows || !cols) return;
+    let html = '<table class="doc-table"><tbody>';
+    for (let r = 0; r < rows; r++) { html += "<tr>"; for (let c = 0; c < cols; c++) html += "<td>&nbsp;</td>"; html += "</tr>"; }
+    html += "</tbody></table><p><br></p>";
+    document.execCommand("insertHTML", false, html); touch();
+  };
+  $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
+  $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
   $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
   $("#tbExport").onclick = () => exportMenu(doc);
   const fsel = $('[data-role="folder-move"]', view());
   if (fsel) fsel.onchange = () => { doc.folder = fsel.value || null; touch(); };
+  bindWriteTimer($("#writeTimer"));
 
   // paste images (downscaled)
   edEl.addEventListener("paste", async ev => {
@@ -138,6 +185,47 @@ async function open(id) {
       }
     }
   });
+}
+
+/* ---------- dictation (speech-to-text straight into the editor) ---------- */
+let dictateRec = null;
+function toggleDictate(edEl, touch) {
+  const btn = $("#tbDictate");
+  if (dictateRec) { dictateRec.stop(); dictateRec = null; btn.classList.remove("active"); btn.textContent = "Dictate"; return; }
+  edEl.focus();
+  let base = "";
+  dictateRec = window.CodexSpeech && CodexSpeech.dictate(
+    (finalText, interim) => {
+      document.execCommand("insertText", false, finalText.slice(base.length) || "");
+      base = finalText;
+      touch();
+    },
+    () => { dictateRec = null; btn.classList.remove("active"); btn.textContent = "Dictate"; }
+  );
+  if (dictateRec) { btn.classList.add("active"); btn.textContent = "Stop dictating"; }
+}
+
+/* ---------- writing timer ---------- */
+function bindWriteTimer(btn) {
+  if (!btn) return;
+  let t0 = null, iv = null;
+  btn.onclick = () => {
+    if (iv) {
+      clearInterval(iv); iv = null;
+      const mins = Math.round((Date.now() - t0) / 60000);
+      btn.textContent = "Start writing timer";
+      btn.classList.remove("active");
+      toast(`Writing session: ${mins < 1 ? "under a minute" : mins + " min"}`);
+      return;
+    }
+    t0 = Date.now();
+    btn.classList.add("active");
+    iv = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      const m = String(Math.floor(s / 60)).padStart(2, "0"), sec = String(s % 60).padStart(2, "0");
+      btn.textContent = `${m}:${sec} — stop`;
+    }, 1000);
+  };
 }
 
 function insertImage(edEl, touch) {

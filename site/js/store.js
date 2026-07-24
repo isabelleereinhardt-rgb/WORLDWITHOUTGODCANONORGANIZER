@@ -9,9 +9,10 @@
 (function () {
 "use strict";
 
-const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta"];
+const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta",
+  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline"];
 const DB_NAME = "codex-db";
-const DB_VER = 1;
+const DB_VER = 2;
 let db = null;
 let usingFallback = false;
 
@@ -85,7 +86,7 @@ const Store = {
     return out;
   },
   async importAll(data) {
-    if (!data || !data.stores) throw new Error("Not a Codex backup");
+    if (!data || !data.stores) throw new Error("Not a valid backup file");
     for (const s of STORES) {
       const arr = data.stores[s] || [];
       for (const obj of arr) { if (obj && obj.id) await this.put(s, obj); }

@@ -14,6 +14,41 @@ const uid = () => "c" + Date.now().toString(36) + Math.random().toString(36).sli
 const fmtDate = t => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 const S = () => window.CodexStore;
 
+/* ---------- keep the assistant/search aware of canvas content ----------
+   Every text note and every caption on the board is mirrored into the
+   regular notes store (tagged so we know it came from a canvas), so it's
+   searchable, cross-linked, and readable by the assistant just like any
+   other note — instead of silently living only inside the board. */
+function cardAIText(c) {
+  if (c.type === "text") return (c.data.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (c.data && c.data.caption) return c.data.caption.trim();
+  return "";
+}
+async function syncCardToAI(board, c) {
+  if (!S()) return;
+  await S().ready;
+  const text = cardAIText(c);
+  const noteId = "canvasnote-" + board.id + "-" + c.id;
+  if (!text) { await S().del("notes", noteId); if (window.Codex) Codex.refresh(); return; }
+  const kindLabel = c.type === "text" ? "Note" : (c.type[0].toUpperCase() + c.type.slice(1) + " caption");
+  await S().put("notes", {
+    id: noteId, title: `${board.title || "Canvas"} — ${kindLabel}`, text,
+    images: c.type === "image" && c.data.src ? [c.data.src] : [], category: "My Notes", _fromCanvas: true,
+  });
+  if (window.Codex) Codex.refresh();
+}
+async function unsyncCard(board, cardId) {
+  if (!S()) return;
+  await S().del("notes", "canvasnote-" + board.id + "-" + cardId);
+  if (window.Codex) Codex.refresh();
+}
+async function unsyncBoard(boardId) {
+  if (!S()) return;
+  const all = await S().all("notes");
+  for (const n of all) { if (n.id.startsWith("canvasnote-" + boardId + "-")) await S().del("notes", n.id); }
+  if (window.Codex) Codex.refresh();
+}
+
 /* ---------- list of boards ---------- */
 async function list(folderId) {
   await S().ready;
@@ -53,7 +88,7 @@ async function list(folderId) {
   });
   $$("[data-del]", view()).forEach(btn => btn.onclick = async e => {
     e.stopPropagation();
-    if (confirm("Delete this board?")) { await S().del("canvases", btn.dataset.del); list(folderId); }
+    if (confirm("Delete this board?")) { await unsyncBoard(btn.dataset.del); await S().del("canvases", btn.dataset.del); list(folderId); }
   });
 }
 function folderName(folders, id) { const f = folders.find(x => x.id === id); return f ? f.name : ""; }
@@ -112,7 +147,11 @@ async function open(id) {
   });
 }
 function touch() { $("#saveState") && ($("#saveState").textContent = "Saving…"); clearTimeout(saveT); saveT = setTimeout(persist, 500); }
-async function persist() { await S().put("canvases", cur); const el = $("#saveState"); if (el) el.textContent = "Saved"; }
+async function persist() {
+  await S().put("canvases", cur);
+  for (const c of cur.cards) await syncCardToAI(cur, c);
+  const el = $("#saveState"); if (el) el.textContent = "Saved";
+}
 
 function addImageCard() {
   const inp = document.createElement("input");
@@ -155,14 +194,19 @@ function videoEmbed(url) {
   return `<a class="cc-linkbody" href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`;
 }
 
+function captionField(c) {
+  return `<div class="cc-caption-wrap"><input class="cc-caption" data-cap="${c.id}"
+    placeholder="Caption — what this is, and how the assistant should use it…"
+    value="${esc(c.data.caption || "")}"></div>`;
+}
 function cardInner(c) {
-  if (c.type === "image") return `<img src="${c.data.src}" alt="${esc(c.data.name || "")}" draggable="false">`;
-  if (c.type === "video") return `<div class="cc-video">${videoEmbed(c.data.url)}</div>`;
+  if (c.type === "image") return `<img src="${c.data.src}" alt="${esc(c.data.name || "")}" draggable="false">` + captionField(c);
+  if (c.type === "video") return `<div class="cc-video">${videoEmbed(c.data.url)}</div>` + captionField(c);
   if (c.type === "link") {
     let host = ""; try { host = new URL(c.data.url).hostname.replace(/^www\./, ""); } catch (e) {}
     return `<a class="cc-link" href="${esc(c.data.url)}" target="_blank" rel="noopener">
       <span class="cc-link-host">${esc(host || "link")}</span>
-      <span class="cc-link-url">${esc(c.data.url)}</span></a>`;
+      <span class="cc-link-url">${esc(c.data.url)}</span></a>` + captionField(c);
   }
   // text / note
   return `<div class="cc-note" contenteditable="true" data-id="${c.id}">${c.data.html || ""}</div>`;
@@ -184,9 +228,17 @@ function renderCards() {
     const c = cur.cards.find(x => x.id === el.dataset.id);
     if (!c) return;
     // delete
-    el.querySelector(".cc-del").onclick = () => {
-      cur.cards = cur.cards.filter(x => x.id !== c.id); persist(); renderCards();
+    el.querySelector(".cc-del").onclick = async () => {
+      cur.cards = cur.cards.filter(x => x.id !== c.id);
+      await unsyncCard(cur, c.id);
+      persist(); renderCards();
     };
+    // caption (images/videos/links)
+    const capEl = el.querySelector(".cc-caption");
+    if (capEl) {
+      capEl.addEventListener("mousedown", e => e.stopPropagation());
+      capEl.addEventListener("input", () => { c.data.caption = capEl.value; touch(); });
+    }
     // editable notes
     const note = el.querySelector(".cc-note");
     if (note) {

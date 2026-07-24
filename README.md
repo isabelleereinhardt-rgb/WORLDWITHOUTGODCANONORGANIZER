@@ -1,4 +1,4 @@
-# The Codex — *World Without God* Worldbuilding Database
+# World Without God — Canon Organizer
 
 A calm, searchable home for your entire canon. It reads every document you've
 written, organizes it into collections, cross-links every name so you can chase a
@@ -52,54 +52,73 @@ can open from any device:
 ## What it does
 
 - **Search everything** — press `Ctrl / ⌘ + K` (or `Ctrl + F`) anywhere to search
-  across every entry by title *and* full text. This is your "find all the
-  information about one subject" tool.
+  across every entry by title *and* full text.
 - **Cross-references** — names in any entry are underlined links. Click one and
   you get a page gathering **every** passage across your canon that mentions it,
   plus a "Mentioned in" list at the bottom of each entry (backlinks, Obsidian-style).
-- **Collections** — the left sidebar groups everything into Characters, Noble
-  Houses, Maps & Locations, Religion, Magic, Timeline, Culture, Books, Reference,
-  and Canon — so it's calm to look at instead of one overwhelming pile.
+- **Summaries above every result** — search or open a cross-reference and the top
+  of the page gives you a *synthesized brief* of the topic — key sentences, facts,
+  and related names pulled together from across your canon — **before** the list
+  of individual results.
+- **Collections, plus your own** — the sidebar groups everything into Characters,
+  Noble Houses, Maps & Locations, Religion, Magic, Timeline, Culture, Books,
+  Reference, Canon, and My Notes. Click the **+** next to "The Canon" to add your
+  own sections — no code needed.
+- **Batch select & delete, everywhere** — every collection has a **Select** button:
+  check individual items, or **Select all** and unselect the ones you want to keep,
+  then delete the rest in one go. Nothing is destroyed — deleted entries are hidden
+  and can be restored anytime from **Settings → Deleted entries**.
+  "My Notes" always stays in the sidebar, even at zero entries, with its own
+  **New note** button.
 - **Atlas & galleries** — all your maps, flags, and visual reference plates in
   clean image galleries (click to zoom).
 - **Name Index** — an A–Z of every cross-linked name in the world.
-- **Summaries above every result** — search or open a cross-reference and the top
-  of the page gives you a *synthesized brief* of the topic — the key sentences,
-  facts, and related names pulled together from across your canon — **before** the
-  list of individual results. So you get the gist first, the sources second.
-- **Documents** — a Google-Docs-style editor. Write lore, format it, add images
-  (they're **saved properly now** — see below). Export to **Word (.doc)**,
-  **Markdown**, or **PDF (print)**. Autosaves as you go.
+- **Documents** — a Google-Docs-style editor: bold/italic/underline, **alignment,
+  indent, and line spacing**, bullet & numbered lists, **tables**, links, images
+  (saved properly via IndexedDB — they no longer vanish), a live **word count**, a
+  **writing timer**, **dictation** (speak your notes in), and **read-aloud**.
+  Export to Word (.doc), Markdown, or PDF (print).
 - **Slide Decks** — build simple presentations, present fullscreen, export to PDF.
-- **Canvases & Mood Boards** — freeform boards, Notion-style: pin **images, videos
-  (YouTube / Vimeo / .mp4), links, and text notes**, and drag them wherever you
-  like. Make as many boards as you want.
-- **Projects (folders)** — file your Documents, Decks, and Canvases under a project
-  so several books / worlds stay untangled. Use the **+ Project** chip at the top of
-  each workspace page.
-- **Import & Add Lore** — drag in text or Markdown files, or paste writing straight
-  in, and it's indexed immediately: searchable, cross-linked, and readable by the
-  assistant. Drop in images and they become a gallery.
-- **Codex Assistant** (the ✦ button, top-right) — your canon at your fingertips.
-  Type a name for an instant **summary** (not just a one-line blurb) with related
-  names and sources, **ask a question in plain words** and it synthesizes an answer
-  from your passages, or keep it open while writing and it recognizes names as you
-  type.
+- **Canvases & Mood Boards** — freeform boards, Notion-style: pin images, videos
+  (YouTube / Vimeo / .mp4), links, and text notes, and drag them wherever you like.
+  Images/links/videos can carry a **caption** describing what they are and how the
+  assistant should use them. Any text you write on a canvas is picked up by search
+  and the assistant, the same as a document.
+- **Projects (folders)** — file Documents, Decks, and Canvases under a project so
+  several books/worlds stay untangled.
+- **Import & Add Lore** — drag in **PDFs** (both the text *and* the page images
+  come in, so nothing goes blank), **Word (.docx)** files, text/Markdown, or paste
+  writing directly — all indexed immediately: searchable, cross-linked, and
+  readable by the assistant. File anything into "My Notes" or one of your own
+  sections.
+- **Task Manager** — a real-time to-do list: add, check off, edit, delete.
+- **Activity Feed** — a running log of what's changed lately.
+- **Settings** — pick any **accent colour** (a full colour wheel, not just presets),
+  adjust base font size and interface/reading fonts, restore deleted entries, and
+  leave standing instructions for how the assistant should behave.
+- **Canon Assistant** (the ✦ button, top-right) — your canon at your fingertips.
+  - Look up a name for a **natural-reading summary** (not a raw quote) with related
+    names and sources.
+  - **Ask questions in plain words** — it synthesizes an answer from your passages.
+  - **Give it tasks** — e.g. *"list all characters in Aicruae"* pulls a live list.
+  - **Ask its opinion** — e.g. *"what's your favourite house"* and it picks one and
+    explains its reasoning from how central that entry is to your canon.
+  - Remembers your **recent lookups** so you can jump back to one.
+  - Keep it open while writing and it recognises names as you type.
 
 > The assistant reads **only your own canon** — it never invents facts. Everything
-> it shows you comes from your own documents and the notes you add.
+> it shows you comes from your own documents, notes, and canvases.
 
 ---
 
 ## Your writing is saved in the browser
 
-Documents, decks, canvases, folders, and imported notes are stored in your
+Documents, decks, canvases, folders, tasks, and imported notes are stored in your
 browser's **IndexedDB** — which, unlike the old local-storage approach, has plenty
 of room, so **images you add actually persist** instead of vanishing. To keep a
 permanent copy or move between devices, use **Back up my work** in the sidebar (it
-now backs up everything — including your boards and imported lore) and **Restore
-backup** to load it elsewhere. Your original canon in `source/` is always safe in
-the repo regardless.
+backs up everything) and **Restore backup** to load it elsewhere. Your original
+canon in `source/` is always safe in the repo regardless.
 
 ---
 
@@ -118,3 +137,13 @@ That re-extracts text, re-detects cross-reference names, and regenerates
 (Optional: for cleaner cross-reference names, place an English word list at
 `tools/words.txt` — one word per line — so ordinary words are filtered out and
 only your coined names become links. The script works fine without it.)
+
+---
+
+## Still on the list
+
+Requested and not yet built: mind maps, a spreadsheet/pie-chart tool, a drawing
+mode on the canvas, flashcards & a quiz mode, a computed BR/AR timeline with
+per-date notes, whole-site/page export with page-orientation control, slide
+presets, richer embeds with resizable images, and a grammar checker. These are
+tracked and coming in a future pass.
