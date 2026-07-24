@@ -348,13 +348,68 @@ function viewHome() {
 
 function viewBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
-  const cards = items.map(e => entryCard(e)).join("") || `<div class="empty-state">Nothing here yet.</div>`;
+  const userItems = items.filter(e => e._user);
+  const cards = items.map(e => `<div class="entry-card-wrapper" ${e._user ? `data-id="${e.id}"` : ""}>
+    ${e._user ? `<input type="checkbox" class="entry-checkbox" data-id="${e.id}" title="Select">` : ""}
+    ${entryCard(e)}
+  </div>`).join("") || `<div class="empty-state">Nothing here yet.</div>`;
+  
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${catDot(cat)} Collection</div>
     <h1>${esc(cat)}</h1>
     <p class="muted">${items.length} ${items.length === 1 ? "entry" : "entries"}</p>
+    ${userItems.length ? `<div class="bulk-actions">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+        <input type="checkbox" id="selectAllCheckbox" title="Select all">
+        <span style="cursor:pointer">Select all</span>
+      </label>
+      <button class="btn ghost sm" id="bulkTrash" disabled style="color:var(--danger,#d9534f)">Trash selected</button>
+      <span id="selectionCount" class="muted" style="margin-left:8px;font-size:13px"></span>
+    </div>` : ""}
     <div class="list-grid">${cards}</div>
   </div>`;
+  
+  if (!userItems.length) return;
+  
+  const selectAll = $("#selectAllCheckbox");
+  const bulkTrashBtn = $("#bulkTrash");
+  const countEl = $("#selectionCount");
+  const checkboxes = $$(".entry-checkbox", view);
+  
+  function updateUI() {
+    const checked = Array.from(checkboxes).filter(c => c.checked).length;
+    bulkTrashBtn.disabled = checked === 0;
+    countEl.textContent = checked ? `${checked} selected` : "";
+    selectAll.checked = checked === userItems.length && checked > 0;
+    selectAll.indeterminate = checked > 0 && checked < userItems.length;
+  }
+  
+  selectAll.onchange = () => {
+    checkboxes.forEach(c => c.checked = selectAll.checked);
+    updateUI();
+  };
+  
+  checkboxes.forEach(c => {
+    c.onchange = updateUI;
+    c.onclick = e => e.stopPropagation();
+  });
+  
+  bulkTrashBtn.onclick = async () => {
+    const selected = Array.from(checkboxes).filter(c => c.checked);
+    if (!selected.length) return;
+    const count = selected.length;
+    if (!confirm(`Trash ${count} ${count === 1 ? "item" : "items"}? This cannot be undone.`)) return;
+    
+    for (const checkbox of selected) {
+      const id = checkbox.dataset.id;
+      if (id) await CodexStore.del("notes", id);
+    }
+    await loadNotes();
+    buildIndexes();
+    buildNav();
+    viewBrowse(cat);
+    toast(`Trashed ${count} ${count === 1 ? "item" : "items"}`);
+  };
 }
 
 function entryCard(e) {
@@ -494,17 +549,17 @@ function viewImport() {
   view.innerHTML = `<div class="wrap">
     <div class="page-kicker">${svg("import")} Import &amp; Add Lore</div>
     <h1>Add to your canon</h1>
-    <p class="muted">Drop in text or Markdown files, paste writing directly, or add images. Text you add is
+    <p class="muted">Drop in text, Markdown, or PDF files, paste writing directly, or add images. Text you add is
       indexed straight away — it becomes searchable, cross-linked, and the assistant reads it too. Everything
       you add here is stored privately in this browser (back it up from the sidebar).</p>
 
     <div class="dropzone" id="dropzone">
       <div class="dz-inner">
         <div class="dz-title">Drag files here, or click to choose</div>
-        <div class="dz-sub">Text &amp; Markdown (.txt, .md) become searchable lore · images become a gallery ·
+        <div class="dz-sub">PDFs, Text &amp; Markdown (.txt, .md, .pdf) become searchable lore · images become a gallery ·
           a Codex <b>.json</b> backup is restored</div>
       </div>
-      <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,application/json,text/plain,text/markdown,image/*" hidden>
+      <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.pdf,.json,application/json,application/pdf,text/plain,text/markdown,image/*" hidden>
     </div>
 
     <h3 style="font-family:var(--serif);margin-top:34px">Or write / paste it in</h3>
@@ -547,6 +602,12 @@ async function handleFiles(fileList) {
         if (data && data._codex) { await CodexStore.importAll(data); await loadNotes(); buildIndexes(); buildNav(); logImport(`Restored your Codex backup <b>${esc(name)}</b>.`); }
         else { const note = await addNote(name.replace(/\.json$/i, ""), txt, []); logImport(`Added <b>${esc(note.title)}</b>.`); }
       } catch (e) { logImport(`Couldn't read ${esc(name)}`); }
+    } else if (/\.pdf$/i.test(name) || f.type === "application/pdf") {
+      try {
+        const txt = await (window.CodexPDF ? window.CodexPDF.extractPdfText(f) : Promise.reject("PDF parser unavailable"));
+        const note = await addNote(name.replace(/\.pdf$/i, ""), txt, []);
+        logImport(`Added <b>${esc(note.title)}</b> from PDF (${note.text.split(/\s+/).filter(Boolean).length} words).`);
+      } catch (e) { logImport(`Couldn't read PDF ${esc(name)}: ${e.message || "unknown error"}`); }
     } else {
       try {
         const txt = await f.text();
