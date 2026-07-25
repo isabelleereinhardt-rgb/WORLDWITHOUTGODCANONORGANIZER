@@ -92,12 +92,25 @@ function generate() {
 function poolNoteHtml() { return poolNote ? `<div class="import-ok" style="margin-bottom:14px">${esc(poolNote)}</div>` : ""; }
 
 /* ---------- AI card generation (Gemini) ---------- */
+/* Gemini's newer models spend a real, size-varying chunk of the token budget on internal
+   "thinking" before writing anything (observed 300–2800+ tokens even for simple prompts).
+   If the visible JSON gets cut off partway through, a naive parse either fails outright or
+   — worse — can slice at the wrong bracket and leave a corrupted trailing object. This
+   scans char-by-char and keeps only COMPLETE {...} objects, so a truncated generation still
+   yields whatever full cards it managed to finish, never a card with a blank answer. */
 function parseJsonArray(raw) {
   if (!raw) return [];
-  let t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const s = t.indexOf("["), e = t.lastIndexOf("]");
-  if (s >= 0 && e > s) t = t.slice(s, e + 1);
-  try { const a = JSON.parse(t); return Array.isArray(a) ? a : []; } catch (_) { return []; }
+  const t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const start = t.indexOf("[");
+  if (start < 0) return [];
+  const out = [];
+  let depth = 0, objStart = -1;
+  for (let i = start + 1; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "{") { if (depth === 0) objStart = i; depth++; }
+    else if (ch === "}") { depth--; if (depth === 0 && objStart >= 0) { try { out.push(JSON.parse(t.slice(objStart, i + 1))); } catch (_) {} objStart = -1; } }
+  }
+  return out;
 }
 async function generateAI() {
   if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
@@ -112,21 +125,28 @@ async function generateAI() {
   for (const e of src) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1400)}\n\n`; if (context.length + chunk.length > 15000) break; context += chunk; }
   $("#stArea").innerHTML = `<div class="ai-thinking" style="justify-content:center;padding:30px">✦ Writing ${count} cards from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
   const system = "You write study flashcards from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
-    "Return STRICT JSON only (no markdown, no prose): an array of objects like " +
+    "Return STRICT JSON only (no markdown, no prose): an array of objects with EXACTLY these keys — " +
     `{"q":"a specific question","a":"a concise correct answer","distractors":["wrong but plausible","wrong 2","wrong 3"]}. ` +
+    "Every object must have a non-empty \"q\" and a non-empty \"a\" — never omit or leave either blank. " +
     "Questions must be answerable from the excerpts; answers short; distractors plausible-but-wrong short phrases drawn from the same world.";
   const user = `Make ${count} flashcards${topic ? ` about "${topic}"` : ""} from these excerpts. Return only the JSON array.\n\n${context}`;
   try {
-    const raw = await CodexAI.complete(system, user, { maxTokens: 3000 });
+    // scale the budget to the requested count — thinking overhead alone can run 1000-2800+
+    // tokens, so a fixed low cap silently truncates larger batches mid-array
+    const maxTokens = Math.min(8000, 1400 + count * 260);
+    const raw = await CodexAI.complete(system, user, { maxTokens });
     const arr = parseJsonArray(raw);
     const built = arr.map(o => ({
-      q: String(o.q || "").trim(), a: String(o.a || "").trim(),
-      distractors: Array.isArray(o.distractors) ? o.distractors.map(d => String(d).trim()).filter(Boolean) : [],
+      q: String(o.q || o.question || "").trim(),
+      a: String(o.a || o.answer || o.correct_answer || o.correctAnswer || "").trim(),
+      distractors: (Array.isArray(o.distractors) ? o.distractors : Array.isArray(o.options) ? o.options : Array.isArray(o.choices) ? o.choices : [])
+        .map(d => String(d).trim()).filter(Boolean),
       entry: null, factKey: null,
     })).filter(c => c.q && c.a);
     if (!built.length) throw new Error("no usable cards came back");
     cards = built.slice(0, count);
     window.CodexFeed && CodexFeed.log("Generated AI " + (mode === "quiz" ? "quiz" : "flashcards"), `${cards.length} on "${topic || "everything"}"`);
+    if (built.length < count) poolNote = `Gemini finished ${built.length} of ${count} requested cards — showing what came back.`;
     if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
   } catch (err) {
     $("#stArea").innerHTML = `<div class="empty-state">✦ AI couldn't build cards (${esc(err.message)}). Try the plain <b>Generate</b> button, or check your key in Settings.</div>`;

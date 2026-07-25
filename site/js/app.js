@@ -1204,7 +1204,10 @@ async function aiAnswer(query, deep) {
     </div><div class="ans-sources" id="aiSources"></div>`;
   const streamEl = $("#aiStream");
   try {
-    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 3200 : 1400 });
+    // Gemini's newer models spend a real, variable chunk of the token budget on internal
+    // "thinking" before writing anything — leave generous headroom so the visible answer
+    // never gets starved (measured 300-2000+ thinking tokens even on simple questions).
+    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 5000 : 2600 });
     streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try rephrasing.</p>`;
     const src = results.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
@@ -1212,6 +1215,45 @@ async function aiAnswer(query, deep) {
   } catch (err) {
     body.innerHTML = `<div class="assistant-hint" style="text-align:left">⚠️ Gemini couldn't answer: <b>${esc(err.message)}</b><br>
       <span class="faint">Check your key in <b>Settings → Assistant</b>. Here's a local result instead:</span></div>${assistantAnswer(query)}`;
+    bindAssistantLinks(body);
+  }
+}
+
+/* "favourite house / coolest character" etc. — a genuine opinion question, not a lookup.
+   The strict fact-only prompt in aiAnswer() would refuse these ("no excerpt for that"), so
+   this uses a separate, permissive prompt that explicitly invites Gemini to pick a favourite
+   and say why, using real details from the category's own entries. */
+async function aiOpinion(query) {
+  const body = $("#assistantBody");
+  const kind = findKind(query);
+  const pool = (kind ? DB.entries.filter(e => e.category === kind.cat) : DB.entries)
+    .filter(e => (e.type === "pdf" || e.type === "note") && !isHidden(e));
+  if (!pool.length) { body.innerHTML = tryOpinion(query) || `<div class="assistant-hint">Nothing in your canon to pick a favourite from yet.</div>`; bindAssistantLinks(body); return; }
+  const sample = pool.slice(0, 16);
+  let context = "";
+  for (const e of sample) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 900)}\n\n`; if (context.length + chunk.length > 14000) break; context += chunk; }
+  const sys =
+    "The author is asking for YOUR personal opinion about something in their OWN fictional world — not a factual lookup. This is playful and " +
+    "subjective, not a request that needs textual proof. Pick one genuine favourite from the excerpts provided, and explain why in 2-4 warm, " +
+    "first-person sentences ('My favourite is...', 'I love...') using specific, concrete details drawn from the excerpts. " +
+    "Never invent details that aren't in the excerpts, but DO have and state a preference — do not say you can't have favourites, and do not " +
+    "say there's no excerpt for that; a subjective pick grounded in real details from the excerpts is exactly what's being asked for." +
+    (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
+  const user = `The author asked: "${query}"\n\nPick a genuine favourite from these and say why:\n\n${context}`;
+  body.innerHTML = `<div class="ans-answer ai">
+      <div class="ans-a-label">${svg("spark")} My take · Gemini</div>
+      <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Weighing your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
+    </div><div class="ans-sources" id="aiSources"></div>`;
+  const streamEl = $("#aiStream");
+  try {
+    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: 2200 });
+    streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try asking again.</p>`;
+    const src = sample.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
+    $("#aiSources").innerHTML = src ? `<div class="ans-label">Considered from</div>${src}` : "";
+    bindAssistantLinks(body);
+  } catch (err) {
+    body.innerHTML = `<div class="assistant-hint" style="text-align:left">⚠️ Gemini couldn't answer: <b>${esc(err.message)}</b><br>
+      <span class="faint">Here's a local pick instead:</span></div>${tryOpinion(query) || ""}`;
     bindAssistantLinks(body);
   }
 }
@@ -1239,6 +1281,7 @@ const CMD_NEEDS_ARG = new Set(["find", "ask", "research", "summary", "list"]);
 function findCmd(name) { name = (name || "").toLowerCase(); return ASSIST_CMDS.find(c => c.key === name || c.aliases.includes(name)) || null; }
 
 let cmdSel = 0, cmdVisible = [];
+let assistLookupTimer = null; // debounce timer for the free local-preview on keystroke
 function renderCmdMenu(partial) {
   const menu = $("#assistCmdMenu"); if (!menu) return;
   const q = (partial || "").toLowerCase();
@@ -1270,6 +1313,10 @@ function onAssistMenu(val) {
   else hideCmdMenu();
 }
 function execAssist(val) {
+  // Cancel the pending free local-preview debounce (see the "input" listener in init()).
+  // Without this, that ~160ms timer can fire AFTER a real dispatch has already started —
+  // e.g. an in-flight AI stream — and silently overwrite it with a stale local render.
+  clearTimeout(assistLookupTimer);
   val = (val || "").trim();
   if (val.startsWith("/")) {
     const full = val.match(/^\/(\S+)\s+([\s\S]+)$/);
@@ -1279,7 +1326,20 @@ function execAssist(val) {
     if (bare) { const c = findCmd(bare[1]); if (c && !CMD_NEEDS_ARG.has(c.key)) { runAssistCommand(c.key, ""); return; } }
     return; // still typing a command — the hotbar is guiding
   }
-  // not a command: Gemini when connected, else the local lookup
+  // not a command — try the deterministic local tools first (these should never
+  // go to the AI even when connected: consistency checks, doc summaries, etc.)
+  const body = $("#assistantBody");
+  const sum = trySummarizeDoc(val); if (sum) { assistantHistory.push(val); body.innerHTML = sum; bindAssistantLinks(body); return; }
+  const con = tryConsistency(val); if (con) { assistantHistory.push(val); body.innerHTML = con; bindAssistantLinks(body); return; }
+  const cmd = tryCommand(val); if (cmd) { assistantHistory.push(val); body.innerHTML = cmd; bindAssistantLinks(body); return; }
+  // an opinion/preference question ("favourite house", "coolest character") gets a
+  // dedicated, permissive prompt — the strict fact-grounded prompt below would refuse it
+  if (OPINION_TRIGGER.test(val)) {
+    assistantHistory.push(val);
+    if (AI.on) aiOpinion(val); else { body.innerHTML = tryOpinion(val) || assistantAnswer(val); bindAssistantLinks(body); }
+    return;
+  }
+  // otherwise: Gemini when connected, else the local lookup
   if (AI.on) { assistantHistory.push(val); aiAnswer(val, false); }
   else assistantLookup(val);
 }
@@ -1300,7 +1360,10 @@ function runAssistCommand(key, arg) {
     body.innerHTML = `<div class="assistant-hint">Add something after <b>/${esc(key)}</b> — e.g. <b>${esc(findCmd(key).ex)}</b>.</div>`;
     return;
   }
-  if (key === "ask")      { AI.on ? aiAnswer(arg, false) : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return; }
+  if (key === "ask") {
+    if (OPINION_TRIGGER.test(arg)) { AI.on ? aiOpinion(arg) : (body.innerHTML = tryOpinion(arg) || assistantAnswer(arg), bindAssistantLinks(body)); return; }
+    AI.on ? aiAnswer(arg, false) : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return;
+  }
   if (key === "research") { AI.on ? aiAnswer(arg, true)  : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return; }
   if (key === "summary")  { const s = matchNamedSubject(arg) || partialEntity(arg) || arg; body.innerHTML = blurbCard(s); bindAssistantLinks(body); return; }
   if (key === "find")     { body.innerHTML = cmdFind(arg); bindAssistantLinks(body); return; }
@@ -1696,15 +1759,14 @@ async function init() {
   $("#assistantToggle").onclick = () => $("#assistant").hidden ? openAssistant() : closeAssistant();
   $("#assistantClose").onclick = closeAssistant;
   assistantIdle();
-  let aT;
   // keystrokes: show the "/" hotbar instantly, and preview local lookups — but never
   // fire a command or an AI call on keystroke. Enter (or picking a command) runs it.
   $("#assistantInput").addEventListener("input", e => {
     const v = e.target.value;
     onAssistMenu(v);
-    clearTimeout(aT);
+    clearTimeout(assistLookupTimer);
     if (v.startsWith("/")) return;                 // commands wait for Enter
-    aT = setTimeout(() => assistantLookup(v), 160); // free, instant local preview
+    assistLookupTimer = setTimeout(() => assistantLookup(v), 160); // free, instant local preview
   });
   $("#assistantInput").addEventListener("keydown", onAssistKeydown);
   $("#assistantInput").addEventListener("blur", () => setTimeout(hideCmdMenu, 150));
@@ -1737,5 +1799,5 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, deleteCustomSection };
 })();

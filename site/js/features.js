@@ -251,6 +251,17 @@ function viewSettings() {
     </section>
 
     <section class="set-block">
+      <h3>Your custom Canon sections</h3>
+      <p class="faint" style="margin:2px 0 10px">Sections you've added under "The Canon" with the <b>+</b> button. Delete one here, from the section's
+        own page, or with the ✕ next to it in the sidebar — any notes filed there move to "My Notes" first, nothing is destroyed.</p>
+      ${Extra.cats.length ? `<div class="section-mgr-list">${Extra.cats.map(c => `
+        <div class="section-mgr-row">
+          <span>${esc(c.name)}</span>
+          <button class="btn ghost sm" data-delsection="${esc(c.name)}" style="color:var(--danger)">Delete</button>
+        </div>`).join("")}</div>` : `<p class="faint">You haven't added any custom sections yet — use the <b>+</b> next to "The Canon" in the sidebar.</p>`}
+    </section>
+
+    <section class="set-block">
       <h3>Deleted entries</h3>
       <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed — restore it here.</p>
       ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
@@ -309,6 +320,10 @@ function viewSettings() {
   $("#uiFont").onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
   $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
   $("#saveAiInstr") && ($("#saveAiInstr").onclick = () => { Extra.settings.aiInstr = $("#aiInstr").value; saveSettings(); toast("Saved"); });
+  $$("[data-delsection]").forEach(b => b.onclick = async () => {
+    // deleteCustomSection() already calls refresh(), which re-renders this page via the router
+    if (window.Codex && Codex.deleteCustomSection) await Codex.deleteCustomSection(b.dataset.delsection);
+  });
 
   const aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"), aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget");
   if (aiKeyEl) {

@@ -562,12 +562,32 @@ async function deckList(folderId) {
     if (confirm("Delete this deck?")) { await S().del("decks", b.dataset.del); deckList(folderId); }
   });
 }
-function parseJsonObject(raw) {
-  if (!raw) return {};
-  let t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+/* extracts every complete {...} object appearing after `fromIndex`, tolerating a
+   truncated/unclosed enclosing array or object — used when Gemini's output gets cut
+   off mid-generation so we still recover whichever slides finished cleanly. */
+function extractObjectsFrom(text, fromIndex) {
+  const out = [];
+  let depth = 0, start = -1;
+  for (let i = fromIndex; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") { depth--; if (depth === 0 && start >= 0) { try { out.push(JSON.parse(text.slice(start, i + 1))); } catch (_) {} start = -1; } }
+  }
+  return out;
+}
+function parseDeckJson(raw) {
+  if (!raw) return { title: "", slides: [] };
+  const t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   const s = t.indexOf("{"), e = t.lastIndexOf("}");
-  if (s >= 0 && e > s) t = t.slice(s, e + 1);
-  try { return JSON.parse(t) || {}; } catch (_) { return {}; }
+  if (s >= 0 && e > s) {
+    try { const obj = JSON.parse(t.slice(s, e + 1)); if (obj && typeof obj === "object") return obj; } catch (_) {}
+  }
+  // truncated mid-array — salvage whatever complete slide objects exist
+  const slidesIdx = t.indexOf('"slides"');
+  const arrStart = slidesIdx >= 0 ? t.indexOf("[", slidesIdx) : -1;
+  const slides = arrStart >= 0 ? extractObjectsFrom(t, arrStart + 1) : [];
+  const titleMatch = t.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  return { title: titleMatch ? titleMatch[1] : "", slides };
 }
 async function generateAIDeck(folderId) {
   if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
@@ -578,13 +598,19 @@ async function generateAIDeck(folderId) {
   let context = "";
   try { context = CodexAI.context(topic || "overview", 14).context; } catch (e) {}
   const system = "You build a slide deck from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
-    "Return STRICT JSON only (no markdown, no prose): an object " +
+    "Return STRICT JSON only (no markdown, no prose): an object with EXACTLY these keys — " +
     "{\"title\":\"deck title\",\"slides\":[{\"title\":\"slide title\",\"body\":\"a few short lines, use \\n for line breaks\"}]}. " +
+    "Every slide must have a non-empty \"title\" or \"body\" — never leave both blank. " +
     "Open with a strong title slide, then 4–8 content slides. Keep each slide skimmable — a heading plus a handful of concise lines.";
   const user = `Build a presentation about "${topic || "an overview of this world"}" from these excerpts. Return only the JSON.\n\n${context}`;
   try {
-    const data = parseJsonObject(await CodexAI.complete(system, user, { maxTokens: 3200 }));
-    const slides = (data.slides || []).map(s => ({ title: String(s.title || "").slice(0, 120), body: String(s.body || "").slice(0, 1200) })).filter(s => s.title || s.body);
+    // Gemini's "thinking" overhead (often 1000-2500+ tokens) can eat the visible output —
+    // give real headroom so the JSON doesn't get cut off mid-array.
+    const data = parseDeckJson(await CodexAI.complete(system, user, { maxTokens: 4800 }));
+    const slides = (data.slides || []).map(s => ({
+      title: String(s.title || s.heading || "").slice(0, 120),
+      body: String(s.body || s.content || s.text || "").slice(0, 1200),
+    })).filter(s => s.title || s.body);
     if (!slides.length) throw new Error("no slides came back");
     const d = { id: uid(), title: (data.title || topic || "AI deck").slice(0, 120), folder: folderId || null, slides };
     await S().put("decks", d);

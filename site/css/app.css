@@ -543,7 +543,7 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
   font-size:14px;line-height:1.5;display:flex;align-items:center;text-align:center;justify-content:center;
   backface-visibility:hidden;transition:transform .4s;background:var(--bg-raised)}
 .fc-front{font-family:var(--serif);font-weight:600;font-size:15.5px}
-.fc-back{transform:rotateY(180deg);background:var(--accent-soft);color:var(--ink);flex-direction:column;gap:8px}
+.fc-back{transform:rotateY(180deg);background:var(--bg-sunken);color:var(--ink);flex-direction:column;gap:8px;border-color:var(--accent)}
 .flashcard.flipped .fc-front{transform:rotateY(180deg)}
 .flashcard.flipped .fc-back{transform:rotateY(360deg)}
 .fc-source{font-size:11px}
@@ -724,3 +724,7 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
 .cmd-help-row .chr-key{font-weight:700;color:var(--accent-ink);font-size:13px}
 .cmd-help-row .chr-hint{font-size:12px;color:var(--ink-soft);margin-top:2px}
 .cmd-help-row .chr-ex{font-size:11px;color:var(--ink-faint);margin-top:3px;font-family:var(--sans)}
+
+.section-mgr-list{display:flex;flex-direction:column;gap:8px}
+.section-mgr-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 12px;background:var(--bg-sunken);border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13.5px}
