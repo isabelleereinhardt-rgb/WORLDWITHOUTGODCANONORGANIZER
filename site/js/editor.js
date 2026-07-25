@@ -548,7 +548,7 @@ async function deckList(folderId) {
     ${folderBar}
     <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" id="newDeck">New deck</button>
-      <button class="btn ghost" id="aiDeck" title="Let Gemini draft a deck from your canon">✦ AI deck from my canon</button>
+      <button class="btn ghost" id="aiDeck" title="Let your connected AI draft a deck from your canon">✦ AI deck from my canon</button>
     </div>
     <div id="aiDeckMsg"></div>
     ${decks.length ? `<div class="list-grid">${cards}</div>` :
@@ -596,7 +596,7 @@ function parseDeckJson(raw) {
   return { title: titleMatch ? titleMatch[1] : "", slides };
 }
 async function generateAIDeck(folderId) {
-  if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first — Settings → Assistant"); location.hash = "#/settings"; return; }
   const topic = prompt("What should the deck be about? (a character, house, place, event, or a theme from your canon)");
   if (topic === null) return;
   const msg = $("#aiDeckMsg");

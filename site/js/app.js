@@ -1106,21 +1106,30 @@ function assistantAnswer(q) {
 }
 
 /* ============================================================
-   AI (Gemini) — bring-your-own-key, grounded in your own canon.
-   The key lives ONLY in this browser: never uploaded, never in a
-   backup. Answers fire on Enter (not per keystroke) so a free-tier
-   key is never spammed. With no key, everything falls back to the
-   local synthesis above.
+   AI — bring-your-own-key, grounded in your own canon. Two providers
+   are supported (Google Gemini, DeepSeek); each keeps its own key and
+   model choice in localStorage so switching providers never loses the
+   other one's saved key. Keys live ONLY in this browser: never
+   uploaded, never in a backup. Answers fire on Enter (not per
+   keystroke) so a key is never spammed. With no key, everything
+   falls back to the local synthesis above.
    ============================================================ */
 const AI_DEAD_MODELS = new Set(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]);
 const AI = {
-  get key()   { return localStorage.getItem("codex.aiKey") || ""; },
+  get provider() { return localStorage.getItem("codex.aiProvider") || "gemini"; },
+  get key() {
+    return this.provider === "deepseek"
+      ? (localStorage.getItem("codex.deepseekKey") || "")
+      : (localStorage.getItem("codex.aiKey") || "");
+  },
   get model() {
+    if (this.provider === "deepseek") return localStorage.getItem("codex.deepseekModel") || "deepseek-v4-flash";
     const m = localStorage.getItem("codex.aiModel");
     // remap models that Google has retired for new accounts to the always-current alias
     return (!m || AI_DEAD_MODELS.has(m)) ? "gemini-flash-latest" : m;
   },
   get on()    { return !!this.key; },
+  get label() { return this.provider === "deepseek" ? "DeepSeek" : "Gemini"; },
   instr()     { try { return (window.CodexExtra && CodexExtra.settings && CodexExtra.settings.aiInstr) || ""; } catch (e) { return ""; } },
 };
 
@@ -1165,9 +1174,17 @@ function renderMarkdownLite(t) {
   return html;
 }
 
-/* stream a completion from Google Gemini directly from the browser (BYO key) */
-async function callGeminiStream(system, userContent, onDelta, opts) {
+/* stream a completion from the connected provider directly from the browser (BYO key).
+   Gemini and DeepSeek use different request shapes and SSE event shapes, so this
+   dispatches to one of two small per-provider parsers that both feed the same
+   onDelta(fullTextSoFar) callback and resolve to the final full text. */
+async function callAIStream(system, userContent, onDelta, opts) {
   opts = opts || {};
+  return AI.provider === "deepseek"
+    ? callDeepSeekStream(system, userContent, onDelta, opts)
+    : callGeminiStream(system, userContent, onDelta, opts);
+}
+async function callGeminiStream(system, userContent, onDelta, opts) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(AI.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(AI.key)}`;
   const res = await fetch(url, {
     method: "POST",
@@ -1203,20 +1220,69 @@ async function callGeminiStream(system, userContent, onDelta, opts) {
   }
   return full;
 }
+/* DeepSeek's API is OpenAI-compatible: POST /chat/completions with a Bearer key,
+   SSE lines shaped like {"choices":[{"delta":{"content":"..."}}]}, terminated by
+   a literal "data: [DONE]" line rather than a JSON payload. */
+async function callDeepSeekStream(system, userContent, onDelta, opts) {
+  const res = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": `Bearer ${AI.key}` },
+    body: JSON.stringify({
+      model: AI.model,
+      messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
+      stream: true,
+      temperature: 0.4,
+      max_tokens: opts.maxTokens || 2048,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    let msg = `HTTP ${res.status}`;
+    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", full = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      let ev; try { ev = JSON.parse(data); } catch (e) { continue; }
+      if (ev.error) throw new Error(ev.error.message || "stream error");
+      const delta = ev.choices && ev.choices[0] && ev.choices[0].delta && ev.choices[0].delta.content;
+      if (delta) { full += delta; onDelta(full); }
+    }
+  }
+  return full;
+}
 
 /* Google's "-pro" Gemini models return this exact shape when the connected
    key has no billing enabled — a permanent block on that model, not a
    transient rate limit, so the fix is switching models, not waiting. */
 function aiIsProQuotaError(err) {
   const msg = (err && err.message) || String(err || "");
-  return /free_tier/i.test(msg) && /limit:\s*0/i.test(msg);
+  return AI.provider === "gemini" && /free_tier/i.test(msg) && /limit:\s*0/i.test(msg);
+}
+/* DeepSeek is pay-as-you-go, not free — an empty key balance returns this
+   exact message, and it won't clear up by waiting or retrying either. */
+function aiIsDeepSeekBalanceError(err) {
+  const msg = (err && err.message) || String(err || "");
+  return AI.provider === "deepseek" && /insufficient balance/i.test(msg);
 }
 function aiErrorHtml(err) {
   if (aiIsProQuotaError(err)) {
     return `⚠️ <b>${esc(AI.model)}</b> has no free-tier quota — "Pro" Gemini models require billing enabled on your Google account; this won't clear up by waiting.
       <button class="btn sm" id="aiSwitchFlashBtn" style="margin-left:8px">Switch to Flash &amp; retry</button>`;
   }
-  return `⚠️ Gemini couldn't answer: <b>${esc((err && err.message) || String(err))}</b><br><span class="faint">Check your key in <b>Settings → Assistant</b>.</span>`;
+  if (aiIsDeepSeekBalanceError(err)) {
+    return `⚠️ Your DeepSeek key has no balance — DeepSeek is pay-as-you-go, not free. Add funds at <a href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">platform.deepseek.com</a>, then ask again.`;
+  }
+  return `⚠️ ${esc(AI.label)} couldn't answer: <b>${esc((err && err.message) || String(err))}</b><br><span class="faint">Check your key in <b>Settings → Assistant</b>.</span>`;
 }
 function aiWireRetry(retry) {
   const btn = document.getElementById("aiSwitchFlashBtn");
@@ -1239,7 +1305,7 @@ async function aiAnswer(query, deep) {
             : `Question: ${query}\n\nCanon excerpts:\n${context}`)
     : `Question: ${query}\n\n(There are no matching excerpts in the canon. Say so, and suggest what the author could search for or add.)`;
   body.innerHTML = `<div class="ans-answer ai">
-      <div class="ans-a-label">${svg("spark")} ${deep ? "Deep research" : "Answer"} · Gemini</div>
+      <div class="ans-a-label">${svg("spark")} ${deep ? "Deep research" : "Answer"} · ${AI.label}</div>
       <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Reading your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
     </div><div class="ans-sources" id="aiSources"></div>`;
   const streamEl = $("#aiStream");
@@ -1247,7 +1313,7 @@ async function aiAnswer(query, deep) {
     // Gemini's newer models spend a real, variable chunk of the token budget on internal
     // "thinking" before writing anything — leave generous headroom so the visible answer
     // never gets starved (measured 300-2000+ thinking tokens even on simple questions).
-    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 5000 : 2600 });
+    const full = await callAIStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 5000 : 2600 });
     streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try rephrasing.</p>`;
     const src = results.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
@@ -1286,12 +1352,12 @@ async function aiOpinion(query) {
     (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
   const user = `The author asked: "${query}"\n\nPick a genuine ${pickWord} from these and say why:\n\n${context}`;
   body.innerHTML = `<div class="ans-answer ai">
-      <div class="ans-a-label">${svg("spark")} My take · Gemini</div>
+      <div class="ans-a-label">${svg("spark")} My take · ${AI.label}</div>
       <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Weighing your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
     </div><div class="ans-sources" id="aiSources"></div>`;
   const streamEl = $("#aiStream");
   try {
-    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: 2200 });
+    const full = await callAIStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: 2200 });
     streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try asking again.</p>`;
     const src = sample.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Considered from</div>${src}` : "";
@@ -1307,8 +1373,9 @@ window.CodexAI = {
   answer: aiAnswer,
   get on() { return AI.on; },
   get model() { return AI.model; },
+  get label() { return AI.label; },
   // one-shot completion (collects the stream) — used by flashcards & slide generation
-  complete: (system, user, opts) => callGeminiStream(system, user, () => {}, opts),
+  complete: (system, user, opts) => callAIStream(system, user, () => {}, opts),
   context: gatherContext,
   errorHtml: aiErrorHtml,
   wireRetry: aiWireRetry,
@@ -1443,7 +1510,7 @@ function cmdHelpHtml() {
       <div class="chr-hint">${esc(c.hint)}</div>
       <div class="chr-ex">${esc(c.ex)}</div>
     </div>`).join("")}</div>
-    <div class="ai-idle-note">${AI.on ? "✦ Gemini is connected — /ask and /research write real answers." : "Connect Gemini in Settings (free) so /ask and /research can reason for you."}</div>`;
+    <div class="ai-idle-note">${AI.on ? `✦ ${AI.label} is connected — /ask and /research write real answers.` : "Connect Gemini or DeepSeek in Settings so /ask and /research can reason for you."}</div>`;
 }
 function bindCmdHelp(root) {
   $$(".cmd-help-row", root).forEach(el => el.onclick = () => {
@@ -1637,8 +1704,8 @@ function assistantIdle() {
       <div class="recog">${QUICK_ACTIONS.map(a => `<span class="chip" data-quick="${esc(a.q)}">${esc(a.label)}</span>`).join("")}</div>
     </div>${histHtml}
     <div class="ai-idle-note">${AI.on
-      ? `✦ <b>Gemini is connected.</b> Type a question and press <b>Enter</b> for a written, reasoned answer — grounded in your canon.`
-      : `Want real AI answers? <span class="ai-connect-link" id="aiConnectLink">Connect Gemini</span> in Settings (it's free) — then press <b>Enter</b> on any question.`}</div>`;
+      ? `✦ <b>${esc(AI.label)} is connected.</b> Type a question and press <b>Enter</b> for a written, reasoned answer — grounded in your canon.`
+      : `Want real AI answers? <span class="ai-connect-link" id="aiConnectLink">Connect Gemini or DeepSeek</span> in Settings — then press <b>Enter</b> on any question.`}</div>`;
   $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
   $$('[data-quick]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.quick; assistantLookup(c.dataset.quick); });
   const cl = $("#aiConnectLink"); if (cl) cl.onclick = () => { location.hash = "#/settings"; };

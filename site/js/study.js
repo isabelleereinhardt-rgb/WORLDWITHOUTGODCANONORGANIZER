@@ -65,7 +65,7 @@ function view_() {
       <select id="stMode"><option value="cards">Flashcards</option><option value="quiz">Quiz</option></select>
       <select id="stDiff"><option value="easy">Easy (multiple choice)</option><option value="hard">Hard (type it yourself)</option></select>
       <button class="btn" id="stGenerate">Generate</button>
-      <button class="btn ghost" id="stGenAI" title="Let Gemini write richer cards from your canon">✦ AI cards</button>
+      <button class="btn ghost" id="stGenAI" title="Let your connected AI write richer cards from your canon">✦ AI cards</button>
     </div>
     <div id="stArea"></div>
   </div>`;
@@ -113,7 +113,7 @@ function parseJsonArray(raw) {
   return out;
 }
 async function generateAI() {
-  if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first — Settings → Assistant"); location.hash = "#/settings"; return; }
   const topic = $("#stTopic").value.trim();
   const count = Math.max(3, Math.min(30, +$("#stCount").value || 10));
   const mode = $("#stMode").value;
@@ -146,7 +146,7 @@ async function generateAI() {
     if (!built.length) throw new Error("no usable cards came back");
     cards = built.slice(0, count);
     window.CodexFeed && CodexFeed.log("Generated AI " + (mode === "quiz" ? "quiz" : "flashcards"), `${cards.length} on "${topic || "everything"}"`);
-    if (built.length < count) poolNote = `Gemini finished ${built.length} of ${count} requested cards — showing what came back.`;
+    if (built.length < count) poolNote = `${(window.CodexAI && CodexAI.label) || "AI"} finished ${built.length} of ${count} requested cards — showing what came back.`;
     if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
   } catch (err) {
     const hint = window.CodexAI && CodexAI.errorHtml ? CodexAI.errorHtml(err) : `AI couldn't build cards (${esc(err.message)}). Check your key in Settings.`;

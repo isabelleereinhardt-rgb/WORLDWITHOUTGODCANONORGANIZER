@@ -293,24 +293,53 @@ function viewSettings() {
 
     <section class="set-block">
       <h3>Assistant — connect AI <span class="ai-conn-badge" id="aiConnBadge">Not connected</span></h3>
-      <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste a <b>Google Gemini</b> API key, then in the ✦ Assistant type a
+      <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste an API key below, then in the ✦ Assistant type a
         question and press <b>Enter</b> for a written answer — reasoned, but grounded <b>only</b> in your own canon,
-        never invented. Gemini has a <b>free tier</b>. Your key is stored <b>only in this browser</b>, is never
-        uploaded, and is deliberately kept out of your backups.</p>
+        never invented. Your key is stored <b>only in this browser</b>, is never uploaded, and is deliberately kept
+        out of your backups. Each provider keeps its own key, so switching back and forth never loses either one.</p>
       <div class="set-row">
-        <label>Gemini API key</label>
-        <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
-      </div>
-      <div class="set-row">
-        <label>Model</label>
-        <select id="aiModel">
-          <option value="gemini-flash-latest">Gemini Flash (latest) — fast, free tier, recommended</option>
-          <option value="gemini-pro-latest">Gemini Pro (latest) — most capable, needs Google billing enabled (no free tier)</option>
+        <label>Provider</label>
+        <select id="aiProvider">
+          <option value="gemini">Google Gemini</option>
+          <option value="deepseek">DeepSeek</option>
         </select>
       </div>
-      <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <a class="btn ghost sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
-        <button class="btn ghost sm" id="aiForget" ${localStorage.getItem("codex.aiKey") ? "" : "hidden"}>Disconnect</button>
+      <div id="aiProviderGemini">
+        <div class="set-row">
+          <label>Gemini API key</label>
+          <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
+        </div>
+        <div class="set-row">
+          <label>Model</label>
+          <select id="aiModel">
+            <option value="gemini-flash-latest">Gemini Flash (latest) — fast, free tier, recommended</option>
+            <option value="gemini-pro-latest">Gemini Pro (latest) — most capable, needs Google billing enabled (no free tier)</option>
+          </select>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <a class="btn ghost sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
+        </div>
+      </div>
+      <div id="aiProviderDeepseek" hidden>
+        <div class="set-row">
+          <label>DeepSeek API key</label>
+          <input type="password" id="dsKey" class="ai-key-input" placeholder="Paste your DeepSeek API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.deepseekKey") || "")}">
+        </div>
+        <div class="set-row">
+          <label>Model</label>
+          <select id="dsModel">
+            <option value="deepseek-v4-flash">DeepSeek V4 Flash — fast &amp; cheap, recommended</option>
+            <option value="deepseek-v4-pro">DeepSeek V4 Pro — more capable, costs more</option>
+          </select>
+        </div>
+        <p class="faint" style="margin:2px 0">DeepSeek is <b>pay-as-you-go, not free</b> — you'll need a small balance on your account for it to answer.</p>
+        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <a class="btn ghost sm" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Get a key →</a>
+          <a class="btn ghost sm" href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">Add balance →</a>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn ghost sm" id="aiForget" hidden>Disconnect</button>
       </div>
     </section>
 
@@ -345,23 +374,44 @@ function viewSettings() {
     toast(`"${b.dataset.unhidecat}" restored to the sidebar`);
   });
 
-  const aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"), aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget");
-  if (aiKeyEl) {
+  const aiProviderEl = $("#aiProvider"), aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"),
+        dsKeyEl = $("#dsKey"), dsModelEl = $("#dsModel"),
+        aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget"),
+        panelGemini = $("#aiProviderGemini"), panelDeepseek = $("#aiProviderDeepseek");
+  if (aiProviderEl) {
     aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-flash-latest";
+    dsModelEl.value = localStorage.getItem("codex.deepseekModel") || "deepseek-v4-flash";
+    aiProviderEl.value = localStorage.getItem("codex.aiProvider") || "gemini";
     const reflectAi = () => {
-      const on = !!localStorage.getItem("codex.aiKey");
+      const provider = localStorage.getItem("codex.aiProvider") || "gemini";
+      panelGemini.hidden = provider !== "gemini";
+      panelDeepseek.hidden = provider !== "deepseek";
+      const key = provider === "deepseek" ? localStorage.getItem("codex.deepseekKey") : localStorage.getItem("codex.aiKey");
+      const on = !!key;
       aiBadge.textContent = on ? "Connected" : "Not connected";
       aiBadge.classList.toggle("on", on);
       aiForget.hidden = !on;
     };
     reflectAi();
+    aiProviderEl.onchange = () => { localStorage.setItem("codex.aiProvider", aiProviderEl.value); reflectAi(); };
     aiKeyEl.addEventListener("input", () => {
       const v = aiKeyEl.value.trim();
       if (v) localStorage.setItem("codex.aiKey", v); else localStorage.removeItem("codex.aiKey");
       reflectAi();
     });
     aiModelEl.onchange = () => localStorage.setItem("codex.aiModel", aiModelEl.value);
-    aiForget.onclick = () => { localStorage.removeItem("codex.aiKey"); aiKeyEl.value = ""; reflectAi(); toast("Disconnected"); };
+    dsKeyEl.addEventListener("input", () => {
+      const v = dsKeyEl.value.trim();
+      if (v) localStorage.setItem("codex.deepseekKey", v); else localStorage.removeItem("codex.deepseekKey");
+      reflectAi();
+    });
+    dsModelEl.onchange = () => localStorage.setItem("codex.deepseekModel", dsModelEl.value);
+    aiForget.onclick = () => {
+      const provider = localStorage.getItem("codex.aiProvider") || "gemini";
+      if (provider === "deepseek") { localStorage.removeItem("codex.deepseekKey"); dsKeyEl.value = ""; }
+      else { localStorage.removeItem("codex.aiKey"); aiKeyEl.value = ""; }
+      reflectAi(); toast("Disconnected");
+    };
   }
 
   if (!s.typography) s.typography = defaultTypography();
