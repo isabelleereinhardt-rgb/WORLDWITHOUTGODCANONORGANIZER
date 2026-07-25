@@ -692,6 +692,7 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
 
 /* deletable custom Canon sections */
 .nav-item.nav-custom{position:relative}
+.nav-item.nav-custom .nav-del{opacity:.45}          /* always visible (works on touch too) */
 .nav-del{border:none;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:11px;
   line-height:1;padding:2px 4px;margin-left:4px;border-radius:4px;opacity:0;transition:opacity .12s,color .12s,background .12s}
 .nav-item.nav-custom:hover .nav-del{opacity:.65}

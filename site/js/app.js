@@ -226,22 +226,26 @@ function buildNav() {
     buildNav();
     toast("Section added — file notes into it from Import & Add Lore");
   };
-  $$("#nav .nav-del[data-delcat]").forEach(btn => btn.onclick = async (ev) => {
+  $$("#nav .nav-del[data-delcat]").forEach(btn => btn.onclick = (ev) => {
     ev.stopPropagation(); ev.preventDefault();
-    const name = btn.dataset.delcat;
-    const cat = (window.CodexExtra ? CodexExtra.cats : []).find(c => c.name === name);
-    if (!cat) return;
-    const inHere = notesCache.filter(n => n.category === name);
-    const msg = inHere.length
-      ? `Delete the section "${name}"?\n\n${inHere.length} note${inHere.length === 1 ? "" : "s"} filed here will move to "My Notes" — nothing is deleted.`
-      : `Delete the empty section "${name}"?`;
-    if (!confirm(msg)) return;
-    for (const n of inHere) { n.category = "My Notes"; await CodexStore.put("notes", n); }  // rehome, don't destroy
-    await CodexExtra.delCat(cat.id);
-    refresh();
-    toast(inHere.length ? `Deleted — ${inHere.length} note${inHere.length === 1 ? "" : "s"} moved to My Notes` : `Section "${name}" deleted`);
+    deleteCustomSection(btn.dataset.delcat);
   });
   markActive();
+}
+/* delete a user-added Canon section; its notes move to "My Notes" (never destroyed) */
+async function deleteCustomSection(name, onDone) {
+  const cat = (window.CodexExtra ? CodexExtra.cats : []).find(c => c.name === name);
+  if (!cat) return;
+  const inHere = notesCache.filter(n => n.category === name);
+  const msg = inHere.length
+    ? `Delete the section "${name}"?\n\n${inHere.length} note${inHere.length === 1 ? "" : "s"} filed here will move to "My Notes" — nothing is deleted.`
+    : `Delete the empty section "${name}"?`;
+  if (!confirm(msg)) return;
+  for (const n of inHere) { n.category = "My Notes"; await CodexStore.put("notes", n); }  // rehome, don't destroy
+  await CodexExtra.delCat(cat.id);
+  refresh();
+  toast(inHere.length ? `Deleted — ${inHere.length} note${inHere.length === 1 ? "" : "s"} moved to My Notes` : `Section "${name}" deleted`);
+  if (onDone) onDone();
 }
 function markActive() {
   const h = location.hash || "#/";
@@ -439,7 +443,8 @@ function viewBrowse(cat) {
 }
 function renderBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
-  const isNotesLike = cat === "My Notes" || customCats().includes(cat);
+  const isCustomSection = customCats().includes(cat);
+  const isNotesLike = cat === "My Notes" || isCustomSection;
   const cards = items.map(e => entryCardSelectable(e)).join("") ||
     `<div class="empty-state">Nothing here yet.${isNotesLike ? " Add one below, or from Import &amp; Add Lore." : ""}</div>`;
   view.innerHTML = `<div class="wrap wide">
@@ -449,6 +454,7 @@ function renderBrowse(cat) {
       <div class="browse-actions">
         ${isNotesLike ? `<button class="btn sm" id="quickAddNote">New note</button>` : ""}
         ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${browseSelectMode ? "Cancel" : "Select"}</button>` : ""}
+        ${isCustomSection ? `<button class="btn ghost sm" id="deleteSection" style="color:var(--danger)">Delete section</button>` : ""}
       </div>
     </div>
     <p class="muted">${items.length} ${items.length === 1 ? "entry" : "entries"}</p>
@@ -461,6 +467,7 @@ function renderBrowse(cat) {
   </div>`;
 
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { browseSelectMode = !browseSelectMode; if (!browseSelectMode) browseSelected.clear(); renderBrowse(cat); };
+  if ($("#deleteSection")) $("#deleteSection").onclick = () => deleteCustomSection(cat, () => { location.hash = "#/"; });
   if ($("#quickAddNote")) $("#quickAddNote").onclick = async () => {
     const note = await addNote("", "", [], cat === "My Notes" ? "My Notes" : cat);
     location.hash = "#/entry/" + note.id;
