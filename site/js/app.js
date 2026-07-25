@@ -1106,30 +1106,39 @@ function assistantAnswer(q) {
 }
 
 /* ============================================================
-   AI — bring-your-own-key, grounded in your own canon. Two providers
-   are supported (Google Gemini, DeepSeek); each keeps its own key and
-   model choice in localStorage so switching providers never loses the
-   other one's saved key. Keys live ONLY in this browser: never
+   AI — bring-your-own-key, grounded in your own canon. Three providers
+   are supported (Google Gemini, DeepSeek, Groq); each keeps its own key
+   and model choice in localStorage so switching providers never loses
+   another one's saved key. Keys live ONLY in this browser: never
    uploaded, never in a backup. Answers fire on Enter (not per
    keystroke) so a key is never spammed. With no key, everything
    falls back to the local synthesis above.
    ============================================================ */
 const AI_DEAD_MODELS = new Set(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]);
+/* every non-Gemini provider is OpenAI-compatible and follows the same
+   localStorage-key-per-provider pattern — add a new one here plus one
+   entry in AI_OPENAI_COMPAT_URLS and it's wired everywhere automatically */
+const AI_PROVIDERS = {
+  gemini:   { label: "Gemini" },
+  deepseek: { label: "DeepSeek", keyStore: "codex.deepseekKey", modelStore: "codex.deepseekModel", defaultModel: "deepseek-v4-flash" },
+  groq:     { label: "Groq", keyStore: "codex.groqKey", modelStore: "codex.groqModel", defaultModel: "llama-3.3-70b-versatile" },
+  xai:      { label: "Grok (xAI)", keyStore: "codex.xaiKey", modelStore: "codex.xaiModel", defaultModel: "grok-4" },
+};
 const AI = {
   get provider() { return localStorage.getItem("codex.aiProvider") || "gemini"; },
   get key() {
-    return this.provider === "deepseek"
-      ? (localStorage.getItem("codex.deepseekKey") || "")
-      : (localStorage.getItem("codex.aiKey") || "");
+    const p = AI_PROVIDERS[this.provider];
+    return p && p.keyStore ? (localStorage.getItem(p.keyStore) || "") : (localStorage.getItem("codex.aiKey") || "");
   },
   get model() {
-    if (this.provider === "deepseek") return localStorage.getItem("codex.deepseekModel") || "deepseek-v4-flash";
+    const p = AI_PROVIDERS[this.provider];
+    if (p && p.modelStore) return localStorage.getItem(p.modelStore) || p.defaultModel;
     const m = localStorage.getItem("codex.aiModel");
     // remap models that Google has retired for new accounts to the always-current alias
     return (!m || AI_DEAD_MODELS.has(m)) ? "gemini-flash-latest" : m;
   },
   get on()    { return !!this.key; },
-  get label() { return this.provider === "deepseek" ? "DeepSeek" : "Gemini"; },
+  get label() { return (AI_PROVIDERS[this.provider] || {}).label || "AI"; },
   instr()     { try { return (window.CodexExtra && CodexExtra.settings && CodexExtra.settings.aiInstr) || ""; } catch (e) { return ""; } },
 };
 
@@ -1178,10 +1187,16 @@ function renderMarkdownLite(t) {
    Gemini and DeepSeek use different request shapes and SSE event shapes, so this
    dispatches to one of two small per-provider parsers that both feed the same
    onDelta(fullTextSoFar) callback and resolve to the final full text. */
+const AI_OPENAI_COMPAT_URLS = {
+  deepseek: "https://api.deepseek.com/chat/completions",
+  groq: "https://api.groq.com/openai/v1/chat/completions",
+  xai: "https://api.x.ai/v1/chat/completions",
+};
 async function callAIStream(system, userContent, onDelta, opts) {
   opts = opts || {};
-  return AI.provider === "deepseek"
-    ? callDeepSeekStream(system, userContent, onDelta, opts)
+  const url = AI_OPENAI_COMPAT_URLS[AI.provider];
+  return url
+    ? callOpenAICompatStream(url, system, userContent, onDelta, opts)
     : callGeminiStream(system, userContent, onDelta, opts);
 }
 async function callGeminiStream(system, userContent, onDelta, opts) {
@@ -1220,11 +1235,13 @@ async function callGeminiStream(system, userContent, onDelta, opts) {
   }
   return full;
 }
-/* DeepSeek's API is OpenAI-compatible: POST /chat/completions with a Bearer key,
-   SSE lines shaped like {"choices":[{"delta":{"content":"..."}}]}, terminated by
-   a literal "data: [DONE]" line rather than a JSON payload. */
-async function callDeepSeekStream(system, userContent, onDelta, opts) {
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
+/* DeepSeek and Groq both speak the same OpenAI-compatible chat completions
+   shape: POST /chat/completions with a Bearer key, SSE lines shaped like
+   {"choices":[{"delta":{"content":"..."}}]}, terminated by a literal
+   "data: [DONE]" line rather than a JSON payload — only the base URL and
+   model differ per provider. */
+async function callOpenAICompatStream(url, system, userContent, onDelta, opts) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": `Bearer ${AI.key}` },
     body: JSON.stringify({
@@ -1237,8 +1254,10 @@ async function callDeepSeekStream(system, userContent, onDelta, opts) {
   });
   if (!res.ok || !res.body) {
     let msg = `HTTP ${res.status}`;
-    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (e) {}
-    throw new Error(msg);
+    // error.message covers DeepSeek/Groq's {error:{message}} shape; xAI instead
+    // sends {error:"a plain string"} — check both instead of assuming one
+    try { const e = await res.json(); msg = (e.error && e.error.message) || e.error || msg; } catch (e) {}
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
   const reader = res.body.getReader(), dec = new TextDecoder();
   let buf = "", full = "";
@@ -1274,6 +1293,19 @@ function aiIsDeepSeekBalanceError(err) {
   const msg = (err && err.message) || String(err || "");
   return AI.provider === "deepseek" && /insufficient balance/i.test(msg);
 }
+/* Groq's free tier is generous but not infinite — a burst of requests can
+   still hit a per-minute rate limit. This is transient, unlike the Gemini
+   Pro / DeepSeek balance cases, so the message says "wait" not "switch". */
+function aiIsGroqRateLimit(err) {
+  const msg = (err && err.message) || String(err || "");
+  return AI.provider === "groq" && /rate.?limit/i.test(msg);
+}
+/* xAI teams start with zero credits/licenses until you add a payment method —
+   this exact message comes back as a clean, identifiable permission error. */
+function aiIsXaiNoCredits(err) {
+  const msg = (err && err.message) || String(err || "");
+  return AI.provider === "xai" && /credits|licenses|permission-denied/i.test(msg);
+}
 function aiErrorHtml(err) {
   if (aiIsProQuotaError(err)) {
     return `⚠️ <b>${esc(AI.model)}</b> has no free-tier quota — "Pro" Gemini models require billing enabled on your Google account; this won't clear up by waiting.
@@ -1281,6 +1313,12 @@ function aiErrorHtml(err) {
   }
   if (aiIsDeepSeekBalanceError(err)) {
     return `⚠️ Your DeepSeek key has no balance — DeepSeek is pay-as-you-go, not free. Add funds at <a href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">platform.deepseek.com</a>, then ask again.`;
+  }
+  if (aiIsGroqRateLimit(err)) {
+    return `⚠️ Groq's free tier hit its per-minute rate limit — this clears up on its own after a short wait, then try again.`;
+  }
+  if (aiIsXaiNoCredits(err)) {
+    return `⚠️ Your xAI team has no credits yet — Grok is pay-as-you-go, not free. Add a payment method at <a href="https://console.x.ai" target="_blank" rel="noopener">console.x.ai</a>, then ask again.`;
   }
   return `⚠️ ${esc(AI.label)} couldn't answer: <b>${esc((err && err.message) || String(err))}</b><br><span class="faint">Check your key in <b>Settings → Assistant</b>.</span>`;
 }
@@ -1369,6 +1407,22 @@ async function aiOpinion(query) {
     bindAssistantLinks(body);
   }
 }
+/* Groq's and xAI's exact current model lineups shift over time (same lesson
+   learned the hard way with Gemini's model names earlier) — rather than
+   hardcode a guess, fetch the account's actual available models live once a
+   key is entered, so Settings always offers real, currently-working choices. */
+const AI_MODELS_LIST_URLS = {
+  groq: "https://api.groq.com/openai/v1/models",
+  xai: "https://api.x.ai/v1/models",
+};
+async function fetchOpenAICompatModels(provider, key) {
+  const url = AI_MODELS_LIST_URLS[provider];
+  const res = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
+  if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || e.error || msg; } catch (e) {} throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg)); }
+  const data = await res.json();
+  return (data.data || []).map(m => m.id).sort();
+}
+
 window.CodexAI = {
   answer: aiAnswer,
   get on() { return AI.on; },
@@ -1379,6 +1433,7 @@ window.CodexAI = {
   context: gatherContext,
   errorHtml: aiErrorHtml,
   wireRetry: aiWireRetry,
+  fetchModels: fetchOpenAICompatModels,
 };
 
 /* ============================================================

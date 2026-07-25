@@ -296,12 +296,14 @@ function viewSettings() {
       <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste an API key below, then in the ✦ Assistant type a
         question and press <b>Enter</b> for a written answer — reasoned, but grounded <b>only</b> in your own canon,
         never invented. Your key is stored <b>only in this browser</b>, is never uploaded, and is deliberately kept
-        out of your backups. Each provider keeps its own key, so switching back and forth never loses either one.</p>
+        out of your backups. Each provider keeps its own key, so switching between them never loses any of the others.</p>
       <div class="set-row">
         <label>Provider</label>
         <select id="aiProvider">
           <option value="gemini">Google Gemini</option>
           <option value="deepseek">DeepSeek</option>
+          <option value="groq">Groq</option>
+          <option value="xai">Grok (xAI)</option>
         </select>
       </div>
       <div id="aiProviderGemini">
@@ -336,6 +338,36 @@ function viewSettings() {
         <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <a class="btn ghost sm" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Get a key →</a>
           <a class="btn ghost sm" href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">Add balance →</a>
+        </div>
+      </div>
+      <div id="aiProviderGroq" hidden>
+        <div class="set-row">
+          <label>Groq API key</label>
+          <input type="password" id="groqKey" class="ai-key-input" placeholder="Paste your Groq API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.groqKey") || "")}">
+        </div>
+        <div class="set-row">
+          <label>Model</label>
+          <select id="groqModel"><option value="${esc(localStorage.getItem("codex.groqModel") || "llama-3.3-70b-versatile")}">${esc(localStorage.getItem("codex.groqModel") || "llama-3.3-70b-versatile")}</option></select>
+        </div>
+        <p class="faint" style="margin:2px 0" id="groqModelHint">Paste your key, then <b>Refresh models</b> to load your account's real current model list.</p>
+        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <a class="btn ghost sm" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a free key →</a>
+          <button class="btn ghost sm" id="groqRefreshModels">Refresh models</button>
+        </div>
+      </div>
+      <div id="aiProviderXai" hidden>
+        <div class="set-row">
+          <label>xAI (Grok) API key</label>
+          <input type="password" id="xaiKey" class="ai-key-input" placeholder="Paste your xAI API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.xaiKey") || "")}">
+        </div>
+        <div class="set-row">
+          <label>Model</label>
+          <select id="xaiModel"><option value="${esc(localStorage.getItem("codex.xaiModel") || "grok-4")}">${esc(localStorage.getItem("codex.xaiModel") || "grok-4")}</option></select>
+        </div>
+        <p class="faint" style="margin:2px 0" id="xaiModelHint">Paste your key, then <b>Refresh models</b> to load your account's real current model list. Grok is <b>pay-as-you-go, not free</b>.</p>
+        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <a class="btn ghost sm" href="https://console.x.ai" target="_blank" rel="noopener">Get a key →</a>
+          <button class="btn ghost sm" id="xaiRefreshModels">Refresh models</button>
         </div>
       </div>
       <div style="margin-top:8px">
@@ -376,8 +408,11 @@ function viewSettings() {
 
   const aiProviderEl = $("#aiProvider"), aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"),
         dsKeyEl = $("#dsKey"), dsModelEl = $("#dsModel"),
+        groqKeyEl = $("#groqKey"), groqModelEl = $("#groqModel"), groqRefreshBtn = $("#groqRefreshModels"), groqHint = $("#groqModelHint"),
+        xaiKeyEl = $("#xaiKey"), xaiModelEl = $("#xaiModel"), xaiRefreshBtn = $("#xaiRefreshModels"), xaiHint = $("#xaiModelHint"),
         aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget"),
-        panelGemini = $("#aiProviderGemini"), panelDeepseek = $("#aiProviderDeepseek");
+        panelGemini = $("#aiProviderGemini"), panelDeepseek = $("#aiProviderDeepseek"),
+        panelGroq = $("#aiProviderGroq"), panelXai = $("#aiProviderXai");
   if (aiProviderEl) {
     aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-flash-latest";
     dsModelEl.value = localStorage.getItem("codex.deepseekModel") || "deepseek-v4-flash";
@@ -386,8 +421,15 @@ function viewSettings() {
       const provider = localStorage.getItem("codex.aiProvider") || "gemini";
       panelGemini.hidden = provider !== "gemini";
       panelDeepseek.hidden = provider !== "deepseek";
-      const key = provider === "deepseek" ? localStorage.getItem("codex.deepseekKey") : localStorage.getItem("codex.aiKey");
-      const on = !!key;
+      panelGroq.hidden = provider !== "groq";
+      panelXai.hidden = provider !== "xai";
+      const keyByProvider = {
+        gemini: localStorage.getItem("codex.aiKey"),
+        deepseek: localStorage.getItem("codex.deepseekKey"),
+        groq: localStorage.getItem("codex.groqKey"),
+        xai: localStorage.getItem("codex.xaiKey"),
+      };
+      const on = !!keyByProvider[provider];
       aiBadge.textContent = on ? "Connected" : "Not connected";
       aiBadge.classList.toggle("on", on);
       aiForget.hidden = !on;
@@ -406,10 +448,49 @@ function viewSettings() {
       reflectAi();
     });
     dsModelEl.onchange = () => localStorage.setItem("codex.deepseekModel", dsModelEl.value);
+
+    /* Groq and xAI model names shift over time — "Refresh models" pulls the
+       account's real, currently-working list straight from each provider
+       rather than trusting a hardcoded guess that can go stale. */
+    async function refreshModelList(provider, keyEl, modelEl, hintEl, storeKey) {
+      const key = keyEl.value.trim();
+      if (!key) { toast(`Paste your ${provider === "groq" ? "Groq" : "xAI"} key first`); return; }
+      hintEl.textContent = "Loading models…";
+      try {
+        const models = await CodexAI.fetchModels(provider, key);
+        const cur = localStorage.getItem(storeKey);
+        modelEl.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+        if (cur && models.includes(cur)) modelEl.value = cur;
+        else localStorage.setItem(storeKey, modelEl.value);
+        hintEl.textContent = `${models.length} model${models.length === 1 ? "" : "s"} available on your account.`;
+      } catch (e) {
+        hintEl.textContent = "Couldn't load models: " + e.message;
+      }
+    }
+    groqKeyEl.addEventListener("input", () => {
+      const v = groqKeyEl.value.trim();
+      if (v) localStorage.setItem("codex.groqKey", v); else localStorage.removeItem("codex.groqKey");
+      reflectAi();
+    });
+    groqModelEl.onchange = () => localStorage.setItem("codex.groqModel", groqModelEl.value);
+    groqRefreshBtn.onclick = () => refreshModelList("groq", groqKeyEl, groqModelEl, groqHint, "codex.groqModel");
+
+    xaiKeyEl.addEventListener("input", () => {
+      const v = xaiKeyEl.value.trim();
+      if (v) localStorage.setItem("codex.xaiKey", v); else localStorage.removeItem("codex.xaiKey");
+      reflectAi();
+    });
+    xaiModelEl.onchange = () => localStorage.setItem("codex.xaiModel", xaiModelEl.value);
+    xaiRefreshBtn.onclick = () => refreshModelList("xai", xaiKeyEl, xaiModelEl, xaiHint, "codex.xaiModel");
+
     aiForget.onclick = () => {
       const provider = localStorage.getItem("codex.aiProvider") || "gemini";
-      if (provider === "deepseek") { localStorage.removeItem("codex.deepseekKey"); dsKeyEl.value = ""; }
-      else { localStorage.removeItem("codex.aiKey"); aiKeyEl.value = ""; }
+      const map = {
+        gemini: [aiKeyEl, "codex.aiKey"], deepseek: [dsKeyEl, "codex.deepseekKey"],
+        groq: [groqKeyEl, "codex.groqKey"], xai: [xaiKeyEl, "codex.xaiKey"],
+      };
+      const [el, key] = map[provider] || map.gemini;
+      localStorage.removeItem(key); el.value = "";
       reflectAi(); toast("Disconnected");
     };
   }
