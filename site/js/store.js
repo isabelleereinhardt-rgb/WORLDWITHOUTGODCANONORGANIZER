@@ -37,7 +37,14 @@ function openDB(name) {
       const d = req.result;
       STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: "id" }); });
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // if a schema bump ships while this tab is still open, let a NEWER tab's
+      // upgrade through instead of sitting on this connection and blocking it —
+      // this tab just closes its handle; store ops fall back to localStorage
+      // for the rest of this tab's life, and a normal reload picks up the rest
+      req.result.onversionchange = () => { try { req.result.close(); } catch (e) {} usingFallback = true; };
+      resolve(req.result);
+    };
     req.onerror = () => { usingFallback = true; resolve(null); };
     req.onblocked = () => { usingFallback = true; resolve(null); };
   });

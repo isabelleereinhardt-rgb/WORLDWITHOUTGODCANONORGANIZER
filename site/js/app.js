@@ -1829,7 +1829,14 @@ function collapseSidebar(force) {
 }
 
 async function init() {
-  try {
+  // IndexedDB can in principle stall waiting on another open tab (a
+  // versionchange request blocks behind a stale connection that's slow to
+  // close) — openDB()/Extra.ready() are written to always resolve, but never
+  // trust a storage layer to leave the user staring at "Opening..." forever.
+  // A hard timeout guarantees the UI unblocks either way; if storage was
+  // just slow rather than actually stuck, it finishes in the background and
+  // refresh() picks up the real data once it lands.
+  const storageInit = (async () => {
     if (window.CodexStore) {
       // if the last-active workspace isn't the default one, redirect storage
       // to that workspace's own isolated database before loading anything
@@ -1839,6 +1846,13 @@ async function init() {
       await loadNotes();
     }
     if (window.CodexExtra) await CodexExtra.ready();
+  })();
+  let timedOut = false;
+  try {
+    await Promise.race([
+      storageInit,
+      new Promise(resolve => setTimeout(() => { timedOut = true; resolve(); }, 6000)),
+    ]);
   } catch (e) { /* non-fatal */ }
   buildIndexes();
   buildNav();
@@ -1846,6 +1860,10 @@ async function init() {
   $("#app").classList.remove("loading");
   route();
   window.addEventListener("hashchange", route);
+  if (timedOut) {
+    toast("Still finishing loading your data — if it doesn't appear shortly, close any other tabs of this site and refresh.");
+    storageInit.then(() => refresh()).catch(() => {});
+  }
 
   if ($("#wsSwitchOpen")) $("#wsSwitchOpen").onclick = () => window.CodexWorkspaces && CodexWorkspaces.openSwitcher();
 
