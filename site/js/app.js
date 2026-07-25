@@ -179,9 +179,10 @@ async function deleteNote(id) {
 function buildNav() {
   const nav = $("#nav");
   const cats = categoriesList().map(c =>
-    `<div class="nav-item" data-route="#/browse/${encodeURIComponent(c.name)}">
+    `<div class="nav-item ${c.custom ? "nav-custom" : ""}" data-route="#/browse/${encodeURIComponent(c.name)}">
        <span class="dot" style="background:${catColor(c.name)}"></span>
        <span>${esc(c.name)}</span><span class="count">${c.count}</span>
+       ${c.custom ? `<button class="nav-del" data-delcat="${esc(c.name)}" title="Delete this section">✕</button>` : ""}
      </div>`).join("");
   nav.innerHTML = `
     <div class="nav-section">
@@ -225,6 +226,21 @@ function buildNav() {
     buildNav();
     toast("Section added — file notes into it from Import & Add Lore");
   };
+  $$("#nav .nav-del[data-delcat]").forEach(btn => btn.onclick = async (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    const name = btn.dataset.delcat;
+    const cat = (window.CodexExtra ? CodexExtra.cats : []).find(c => c.name === name);
+    if (!cat) return;
+    const inHere = notesCache.filter(n => n.category === name);
+    const msg = inHere.length
+      ? `Delete the section "${name}"?\n\n${inHere.length} note${inHere.length === 1 ? "" : "s"} filed here will move to "My Notes" — nothing is deleted.`
+      : `Delete the empty section "${name}"?`;
+    if (!confirm(msg)) return;
+    for (const n of inHere) { n.category = "My Notes"; await CodexStore.put("notes", n); }  // rehome, don't destroy
+    await CodexExtra.delCat(cat.id);
+    refresh();
+    toast(inHere.length ? `Deleted — ${inHere.length} note${inHere.length === 1 ? "" : "s"} moved to My Notes` : `Section "${name}" deleted`);
+  });
   markActive();
 }
 function markActive() {
