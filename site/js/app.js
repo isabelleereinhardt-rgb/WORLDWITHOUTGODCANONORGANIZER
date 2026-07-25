@@ -1394,6 +1394,20 @@ async function aiOpinion(query) {
   const sample = pool.slice(0, 16);
   let context = "";
   for (const e of sample) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 900)}\n\n`; if (context.length + chunk.length > 14000) break; context += chunk; }
+  // The excerpts above are truncated to the first ~900 chars per source —
+  // fine when a category is one-entry-per-item, but Characters especially
+  // can be just a handful of huge documents (one over 200,000 chars), so
+  // most named people never appear in that truncated head at all. Scan the
+  // FULL untruncated text of the whole pool for recognized names so the
+  // model has a real roster to choose from, not just whoever is mentioned
+  // first — this is what was causing "no character entries to pick from"
+  // even when specific characters were clearly described elsewhere.
+  const nameCounts = {};
+  pool.forEach(e => entitiesIn(e.text).forEach(n => { nameCounts[n] = (nameCounts[n] || 0) + 1; }));
+  const candidateNames = Object.keys(nameCounts).sort((a, b) => nameCounts[b] - nameCounts[a]).slice(0, 40);
+  const namesLine = candidateNames.length
+    ? `\n\nNames that actually appear across these ${kind ? kind.label : "canon"} sources — pick from here if the excerpts above don't cover enough on their own: ${candidateNames.join(", ")}.`
+    : "";
   // match the actual direction of the question — a hardcoded "pick a favourite" prompt
   // fighting a "who's your LEAST favourite" question produced confused, hedging answers
   const least = OPINION_NEGATIVE.test(query);
@@ -1403,9 +1417,11 @@ async function aiOpinion(query) {
     `subjective, not a request that needs textual proof. Pick one genuine ${pickWord} from the excerpts provided, and explain why in 2-4 warm, ` +
     `first-person sentences ('My ${least ? "least favourite is" : "favourite is..."}', ${least ? "" : "'I love...', "}) using specific, concrete details drawn from the excerpts. ` +
     "Never invent details that aren't in the excerpts, but DO have and state a preference — do not say you can't have favourites, and do not " +
-    "say there's no excerpt for that; a subjective pick grounded in real details from the excerpts is exactly what's being asked for." +
+    "say there's no excerpt for that; a subjective pick grounded in real details from the excerpts is exactly what's being asked for. " +
+    "Pick one SPECIFIC named person/place/thing, never a document or source title — if a names list is provided separately from the excerpts, " +
+    "that's exactly the roster to pick a specific name from, even if the excerpts above don't happen to cover them in detail." +
     (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
-  const user = `The author asked: "${query}"\n\nPick a genuine ${pickWord} from these and say why:\n\n${context}`;
+  const user = `The author asked: "${query}"\n\nPick a genuine ${pickWord} from these and say why:\n\n${context}${namesLine}`;
   body.innerHTML = `<div class="ans-answer ai">
       <div class="ans-a-label">${svg("spark")} My take · ${AI.label}</div>
       <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Weighing your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
@@ -1649,6 +1665,34 @@ function tryOpinion(q) {
   const pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(kind.label)} entries to pick from yet.</div>`;
   const least = OPINION_NEGATIVE.test(q);
+  // Some categories are one-entry-per-item (66 separate Noble Houses, each
+  // its own entry) but others — Characters especially — are just a handful
+  // of huge source documents that each mention MANY individual names.
+  // Picking "the top entry" in that case surfaces a DOCUMENT TITLE
+  // ("Historical Figures") as if it were a person's name. When the pool
+  // doesn't look granular, scan the full (untruncated) text of every entry
+  // for recognized names instead, and pick one of those.
+  if (pool.length < 8) {
+    const nameCounts = {};
+    pool.forEach(e => entitiesIn(e.text).forEach(n => { nameCounts[n] = (nameCounts[n] || 0) + 1; }));
+    const names = Object.keys(nameCounts).sort((a, b) => least ? nameCounts[a] - nameCounts[b] : nameCounts[b] - nameCounts[a]);
+    if (names.length) {
+      const name = names[0];
+      const home = bestEntryFor(name) || pool[0];
+      const sents = topicSummary(name, 2);
+      const label = least ? "My pick for least central — going by who's least mentioned" : "My pick, going by who's most woven through your canon";
+      const reason = least
+        ? `Reasoning: <b>${esc(name)}</b> barely turns up across your ${esc(kind.label)} sources — the lightest footprint of anyone named there.`
+        : `Reasoning: <b>${esc(name)}</b> turns up ${nameCounts[name]} time${nameCounts[name] === 1 ? "" : "s"} across your ${esc(kind.label)} sources — more than anyone else mentioned there.`;
+      return `<div class="ans-label">${label}</div>
+        <div class="blurb">
+          <div class="bt">${catDot(home.category)} ${esc(name)}</div>
+          <div class="bs">${esc(sents.join(" ")) || ""}</div>
+          <div class="bl">${reason}</div>
+          <div style="margin-top:8px"><a class="btn sm" href="#/entry/${home.id}">Open source</a></div>
+        </div>`;
+    }
+  }
   const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
   scored.sort((a, b) => least ? a.score - b.score : b.score - a.score);
   const pick = scored[0].e;
