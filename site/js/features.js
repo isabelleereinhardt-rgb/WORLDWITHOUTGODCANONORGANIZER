@@ -56,7 +56,7 @@ function defaultTypography() {
   return t;
 }
 function defaultSettings() {
-  return { accent: "", bg: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces", typography: defaultTypography() };
+  return { accent: "", bg: "", inkColor: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces", typography: defaultTypography() };
 }
 
 /* ---------- shared caches (read synchronously by app.js) ---------- */
@@ -131,6 +131,17 @@ function applySettings(s) {
   } else {
     ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
   }
+  // explicit interface text colour wins over the auto-contrast ink from the background
+  if (s.inkColor) {
+    const c = hexToRgb(s.inkColor);
+    if (c) {
+      root.setProperty("--ink", `rgb(${c.r},${c.g},${c.b})`);
+      root.setProperty("--ink-soft", `rgba(${c.r},${c.g},${c.b},.72)`);
+      root.setProperty("--ink-faint", `rgba(${c.r},${c.g},${c.b},.5)`);
+    }
+  } else if (!s.bg) {
+    ["--ink", "--ink-soft", "--ink-faint"].forEach(p => root.removeProperty(p));
+  }
   root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
   root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
@@ -162,6 +173,7 @@ function viewSettings() {
   const s = Extra.settings;
   const swatches = ["#7c5cff", "#c2603f", "#d0699a", "#3f8f6b", "#b8893b", "#3f6f8f", "#9a6bd0", "#d98b2b", "#2f9e8f", "#e0577d"];
   const bgSwatches = ["#f6f3ec", "#17151a", "#fbe9ee", "#eaf3ec", "#eef1fb", "#fff6e0", "#f1e6f7", "#2a2438"];
+  const inkSwatches = ["#2c2a26", "#111111", "#5b3fd6", "#3f6f8f", "#3f8f6b", "#b8893b", "#c2603f", "#8a3f6f", "#e8e3d8"];
   const hiddenCount = Extra.hidden.size;
   const excludedCount = Extra.excludedNames.size;
   view().innerHTML = `<div class="wrap">
@@ -203,6 +215,17 @@ function viewSettings() {
       <div class="set-row">
         <label>Reading / heading font (default)</label>
         <select id="readFont">${FONT_LIST.map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select>
+      </div>
+    </section>
+
+    <section class="set-block">
+      <h3>Interface text colour</h3>
+      <p class="faint" style="margin:2px 0 12px">The colour of the words across the interface — menus, labels, buttons, and reading text.
+        Pick any colour, or leave it <b>Automatic</b> and it follows your background so it always stays readable.</p>
+      <div class="swatch-row">
+        ${inkSwatches.map(c => `<button class="swatch" style="background:${c}" data-ink="${c}" title="${c}"></button>`).join("")}
+        <label class="swatch wheel" title="Custom colour"><input type="color" id="inkPicker" value="${s.inkColor || "#2c2a26"}"></label>
+        <button class="btn ghost sm" id="inkReset">Automatic</button>
       </div>
     </section>
 
@@ -280,6 +303,9 @@ function viewSettings() {
   $$(".swatch[data-bg]").forEach(b => b.onclick = () => { Extra.settings.bg = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
   $("#bgPicker").oninput = e => { Extra.settings.bg = e.target.value; saveSettings(); };
   $("#bgReset").onclick = () => { Extra.settings.bg = ""; saveSettings(); toast("Background reset to theme default"); };
+  $$(".swatch[data-ink]").forEach(b => b.onclick = () => { Extra.settings.inkColor = b.dataset.ink; $("#inkPicker").value = b.dataset.ink; saveSettings(); });
+  $("#inkPicker").oninput = e => { Extra.settings.inkColor = e.target.value; saveSettings(); };
+  $("#inkReset").onclick = () => { Extra.settings.inkColor = ""; saveSettings(); toast("Text colour set to automatic"); };
   $("#fontSize").oninput = e => { Extra.settings.fontSize = +e.target.value; $("#fsVal").textContent = e.target.value + "px"; saveSettings(); };
   $("#uiFont").onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
   $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };

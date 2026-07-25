@@ -1134,7 +1134,8 @@ function renderMarkdownLite(t) {
 }
 
 /* stream a completion from Google Gemini directly from the browser (BYO key) */
-async function callGeminiStream(system, userContent, onDelta) {
+async function callGeminiStream(system, userContent, onDelta, opts) {
+  opts = opts || {};
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(AI.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(AI.key)}`;
   const res = await fetch(url, {
     method: "POST",
@@ -1142,7 +1143,7 @@ async function callGeminiStream(system, userContent, onDelta) {
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: userContent }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+      generationConfig: { temperature: 0.4, maxOutputTokens: opts.maxTokens || 2048 },
     }),
   });
   if (!res.ok || !res.body) {
@@ -1171,24 +1172,27 @@ async function callGeminiStream(system, userContent, onDelta) {
   return full;
 }
 
-async function aiAnswer(query) {
+async function aiAnswer(query, deep) {
   const body = $("#assistantBody");
-  const { results, context } = gatherContext(query, 10);
+  const { results, context } = gatherContext(query, deep ? 14 : 10);
   const sys =
     "You are the Canon Assistant for a personal worldbuilding project. Answer using ONLY the canon excerpts the user provides — their own notes and lore. " +
     "Never invent names, houses, events, or facts the excerpts don't support; if the answer isn't there, say so plainly and suggest what to search for. " +
-    "Use the world's own terms and spellings. Write in clear, direct prose — no throat-clearing, no \"based on the excerpts\". Keep it as long as the question needs and no longer. Light markdown (short headings, bold, bullet lists) is welcome." +
+    "Use the world's own terms and spellings. Write in clear, direct prose — no throat-clearing, no \"based on the excerpts\". " +
+    (deep ? "This is a deep-research request: be thorough and well organised, with short markdown headings (## Overview, ## Key facts, ## Relationships, ## Timeline if any, ## Open questions)."
+          : "Keep it as long as the question needs and no longer. Light markdown (short headings, bold, bullet lists) is welcome.") +
     (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
   const user = context
-    ? `Question: ${query}\n\nCanon excerpts:\n${context}`
+    ? (deep ? `Write a thorough research dossier on: ${query}\n\nCanon excerpts:\n${context}`
+            : `Question: ${query}\n\nCanon excerpts:\n${context}`)
     : `Question: ${query}\n\n(There are no matching excerpts in the canon. Say so, and suggest what the author could search for or add.)`;
   body.innerHTML = `<div class="ans-answer ai">
-      <div class="ans-a-label">${svg("spark")} Answer · Gemini</div>
+      <div class="ans-a-label">${svg("spark")} ${deep ? "Deep research" : "Answer"} · Gemini</div>
       <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Reading your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
     </div><div class="ans-sources" id="aiSources"></div>`;
   const streamEl = $("#aiStream");
   try {
-    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; });
+    const full = await callGeminiStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 3200 : 1400 });
     streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back — try rephrasing.</p>`;
     const src = results.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
@@ -1200,6 +1204,116 @@ async function aiAnswer(query) {
   }
 }
 window.CodexAI = { answer: aiAnswer, get on() { return AI.on; } };
+
+/* ============================================================
+   SLASH COMMANDS + hotbar — type "/" in the assistant to see them.
+   /ask and /research use Gemini when connected (else local).
+   ============================================================ */
+const ASSIST_CMDS = [
+  { key: "find",     aliases: ["f"],     hint: "Find every mention of a name or term",   ex: "/find Solis" },
+  { key: "ask",      aliases: ["a"],     hint: "Ask a question — a short, direct answer", ex: "/ask who rules Solis?" },
+  { key: "research", aliases: ["r"],     hint: "Deep dive — a full dossier on a subject", ex: "/research Solis" },
+  { key: "summary",  aliases: ["s"],     hint: "A quick summary of a name or topic",      ex: "/summary House Vane" },
+  { key: "list",     aliases: ["l"],     hint: "List everything in a collection",         ex: "/list characters" },
+  { key: "help",     aliases: ["h", "?"], hint: "List everything I can do",                ex: "/help" },
+];
+const CMD_NEEDS_ARG = new Set(["find", "ask", "research", "summary", "list"]);
+function findCmd(name) { name = (name || "").toLowerCase(); return ASSIST_CMDS.find(c => c.key === name || c.aliases.includes(name)) || null; }
+
+let cmdSel = 0, cmdVisible = [];
+function renderCmdMenu(partial) {
+  const menu = $("#assistCmdMenu"); if (!menu) return;
+  const q = (partial || "").toLowerCase();
+  cmdVisible = ASSIST_CMDS.filter(c => !q || c.key.startsWith(q) || c.aliases.some(a => a.startsWith(q)) || (q.length >= 2 && c.hint.toLowerCase().includes(q)));
+  if (!cmdVisible.length) cmdVisible = ASSIST_CMDS.slice();
+  if (cmdSel >= cmdVisible.length) cmdSel = 0;
+  menu.innerHTML = `<div class="cmd-menu-hint">Commands · ↑↓ choose · Tab to pick</div>` +
+    cmdVisible.map((c, i) => `<div class="cmd-item ${i === cmdSel ? "sel" : ""}" data-i="${i}">
+      <span class="cmd-key">/${esc(c.key)}</span><span class="cmd-hint">${esc(c.hint)}</span></div>`).join("");
+  menu.hidden = false;
+  $$(".cmd-item", menu).forEach(el => {
+    el.onmouseenter = () => { cmdSel = +el.dataset.i; hiCmd(); };
+    el.onclick = () => pickCmd(cmdVisible[+el.dataset.i]);
+  });
+}
+function hiCmd() { $$("#assistCmdMenu .cmd-item").forEach((el, i) => el.classList.toggle("sel", i === cmdSel)); }
+function hideCmdMenu() { const m = $("#assistCmdMenu"); if (m) { m.hidden = true; m.innerHTML = ""; } cmdSel = 0; cmdVisible = []; }
+function pickCmd(c) {
+  if (!c) return;
+  const inp = $("#assistantInput");
+  inp.value = CMD_NEEDS_ARG.has(c.key) ? "/" + c.key + " " : "/" + c.key;
+  hideCmdMenu(); inp.focus();
+  if (CMD_NEEDS_ARG.has(c.key)) {
+    $("#assistantBody").innerHTML = `<div class="assistant-hint">${esc(c.hint)}.<br><span class="faint">e.g. <b>${esc(c.ex)}</b> — then press Enter.</span></div>`;
+  } else execAssist(inp.value);
+}
+function onAssistMenu(val) {
+  if (val.startsWith("/")) { const tok = val.match(/^\/(\S*)$/); if (tok) renderCmdMenu(tok[1]); else hideCmdMenu(); }
+  else hideCmdMenu();
+}
+function execAssist(val) {
+  val = (val || "").trim();
+  if (val.startsWith("/")) {
+    const full = val.match(/^\/(\S+)\s+([\s\S]+)$/);
+    if (full) { const c = findCmd(full[1]); if (c) { runAssistCommand(c.key, full[2].trim()); return; }
+      $("#assistantBody").innerHTML = `<div class="assistant-hint">No command <b>/${esc(full[1])}</b>. Type <b>/</b> to see the list, or <b>/help</b>.</div>`; return; }
+    const bare = val.match(/^\/(\S+)\s*$/);
+    if (bare) { const c = findCmd(bare[1]); if (c && !CMD_NEEDS_ARG.has(c.key)) { runAssistCommand(c.key, ""); return; } }
+    return; // still typing a command — the hotbar is guiding
+  }
+  // not a command: Gemini when connected, else the local lookup
+  if (AI.on) { assistantHistory.push(val); aiAnswer(val, false); }
+  else assistantLookup(val);
+}
+function onAssistKeydown(e) {
+  const menu = $("#assistCmdMenu");
+  if (menu && !menu.hidden && cmdVisible.length) {
+    if (e.key === "ArrowDown") { e.preventDefault(); cmdSel = Math.min(cmdSel + 1, cmdVisible.length - 1); hiCmd(); return; }
+    if (e.key === "ArrowUp")   { e.preventDefault(); cmdSel = Math.max(cmdSel - 1, 0); hiCmd(); return; }
+    if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); pickCmd(cmdVisible[cmdSel]); return; }
+    if (e.key === "Escape")    { e.preventDefault(); hideCmdMenu(); return; }
+  }
+  if (e.key === "Enter") { e.preventDefault(); const v = e.target.value.trim(); if (v) execAssist(v); }
+}
+function runAssistCommand(key, arg) {
+  const body = $("#assistantBody");
+  if (key === "help") { body.innerHTML = cmdHelpHtml(); bindCmdHelp(body); return; }
+  if (CMD_NEEDS_ARG.has(key) && !arg) {
+    body.innerHTML = `<div class="assistant-hint">Add something after <b>/${esc(key)}</b> — e.g. <b>${esc(findCmd(key).ex)}</b>.</div>`;
+    return;
+  }
+  if (key === "ask")      { AI.on ? aiAnswer(arg, false) : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return; }
+  if (key === "research") { AI.on ? aiAnswer(arg, true)  : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return; }
+  if (key === "summary")  { const s = matchNamedSubject(arg) || partialEntity(arg) || arg; body.innerHTML = blurbCard(s); bindAssistantLinks(body); return; }
+  if (key === "find")     { body.innerHTML = cmdFind(arg); bindAssistantLinks(body); return; }
+  if (key === "list")     { body.innerHTML = tryCommand("list all " + arg) || assistantAnswer(arg); bindAssistantLinks(body); return; }
+}
+function cmdFind(term) {
+  const hits = searchAll(term);
+  if (!hits.length) return `<div class="assistant-hint">No mentions of “${esc(term)}” in your canon yet.</div>`;
+  const list = hits.slice(0, 16).map(e => `<a class="assist-mention" href="#/entry/${e.id}">
+      <span class="am-t">${catDot(e.category)} ${esc(e.title)}</span>
+      <span class="am-s">${e.type === "gallery" ? (e.images.length + " images") : snippet(e.text, term.split(/\s+/)[0] || term, 150)}</span></a>`).join("");
+  const more = hits.length > 16 ? `<a class="btn ghost sm" href="#/search/${encodeURIComponent(term)}" style="margin-top:10px">See all ${hits.length} results →</a>` : "";
+  return `<div class="ans-answer"><div class="ans-a-label">${svg("search")} Found “${esc(term)}”</div>
+    <p class="ans-a-text" style="font-size:14px">${hits.length} ${hits.length === 1 ? "entry mentions" : "entries mention"} this.</p></div>
+    <div class="assist-section-title">Where it appears</div>${list}${more}`;
+}
+function cmdHelpHtml() {
+  return `<div class="assist-section-title">What I can do — type <b>/</b> anytime</div>
+    <div class="cmd-help-list">${ASSIST_CMDS.map(c => `<div class="cmd-help-row" data-ex="${esc(CMD_NEEDS_ARG.has(c.key) ? "/" + c.key + " " : "/" + c.key)}">
+      <div class="chr-key">/${esc(c.key)}${c.aliases.length ? ` <span class="faint" style="font-weight:400">or /${esc(c.aliases[0])}</span>` : ""}</div>
+      <div class="chr-hint">${esc(c.hint)}</div>
+      <div class="chr-ex">${esc(c.ex)}</div>
+    </div>`).join("")}</div>
+    <div class="ai-idle-note">${AI.on ? "✦ Gemini is connected — /ask and /research write real answers." : "Connect Gemini in Settings (free) so /ask and /research can reason for you."}</div>`;
+}
+function bindCmdHelp(root) {
+  $$(".cmd-help-row", root).forEach(el => el.onclick = () => {
+    const inp = $("#assistantInput"); inp.value = el.dataset.ex; inp.focus(); onAssistMenu(inp.value);
+    if (!/\s$/.test(inp.value)) execAssist(inp.value);
+  });
+}
 
 /* ---------- assistant recent-lookup history ---------- */
 const assistantHistory = { key: "codex.assistant.history",
@@ -1554,17 +1668,17 @@ async function init() {
   $("#assistantClose").onclick = closeAssistant;
   assistantIdle();
   let aT;
-  $("#assistantInput").addEventListener("input", e => { clearTimeout(aT); aT = setTimeout(() => assistantLookup(e.target.value), 160); });
-  // Enter sends a real question to Gemini when connected (never on keystroke, to spare free-tier limits)
-  $("#assistantInput").addEventListener("keydown", e => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
+  // keystrokes: show the "/" hotbar instantly, and preview local lookups — but never
+  // fire a command or an AI call on keystroke. Enter (or picking a command) runs it.
+  $("#assistantInput").addEventListener("input", e => {
+    const v = e.target.value;
+    onAssistMenu(v);
     clearTimeout(aT);
-    const v = e.target.value.trim();
-    if (!v) return;
-    if (AI.on) { assistantHistory.push(v); aiAnswer(v); }
-    else assistantLookup(v);
+    if (v.startsWith("/")) return;                 // commands wait for Enter
+    aT = setTimeout(() => assistantLookup(v), 160); // free, instant local preview
   });
+  $("#assistantInput").addEventListener("keydown", onAssistKeydown);
+  $("#assistantInput").addEventListener("blur", () => setTimeout(hideCmdMenu, 150));
 
   $("#searchOpen").onclick = () => openSearch("");
   const si = $("#searchInput"); let sT;
