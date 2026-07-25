@@ -149,7 +149,9 @@ async function generateAI() {
     if (built.length < count) poolNote = `Gemini finished ${built.length} of ${count} requested cards — showing what came back.`;
     if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
   } catch (err) {
-    $("#stArea").innerHTML = `<div class="empty-state">✦ AI couldn't build cards (${esc(err.message)}). Try the plain <b>Generate</b> button, or check your key in Settings.</div>`;
+    const hint = window.CodexAI && CodexAI.errorHtml ? CodexAI.errorHtml(err) : `AI couldn't build cards (${esc(err.message)}). Check your key in Settings.`;
+    $("#stArea").innerHTML = `<div class="empty-state">✦ ${hint}<br><span class="faint">Or try the plain <b>Generate</b> button.</span></div>`;
+    window.CodexAI && CodexAI.wireRetry && CodexAI.wireRetry(generateAI);
   }
 }
 

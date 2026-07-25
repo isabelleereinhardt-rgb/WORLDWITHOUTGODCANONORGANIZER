@@ -623,7 +623,9 @@ async function generateAIDeck(folderId) {
     window.CodexFeed && CodexFeed.log("Generated AI deck", `${slides.length} slides on "${topic || "overview"}"`);
     location.hash = "#/deck/" + d.id;
   } catch (err) {
-    if (msg) msg.innerHTML = `<div class="empty-state">✦ AI couldn't build the deck (${esc(err.message)}). Check your key in Settings, or use New deck.</div>`;
+    const hint = window.CodexAI && CodexAI.errorHtml ? CodexAI.errorHtml(err) : `AI couldn't build the deck (${esc(err.message)}). Check your key in Settings.`;
+    if (msg) msg.innerHTML = `<div class="empty-state">✦ ${hint}<br><span class="faint">Or use New deck.</span></div>`;
+    window.CodexAI && CodexAI.wireRetry && CodexAI.wireRetry(() => generateAIDeck(folderId));
   }
 }
 

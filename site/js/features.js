@@ -289,8 +289,8 @@ function viewSettings() {
       <div class="set-row">
         <label>Model</label>
         <select id="aiModel">
-          <option value="gemini-flash-latest">Gemini Flash (latest) — fast &amp; recommended</option>
-          <option value="gemini-pro-latest">Gemini Pro (latest) — most capable</option>
+          <option value="gemini-flash-latest">Gemini Flash (latest) — fast, free tier, recommended</option>
+          <option value="gemini-pro-latest">Gemini Pro (latest) — most capable, needs Google billing enabled (no free tier)</option>
         </select>
       </div>
       <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">

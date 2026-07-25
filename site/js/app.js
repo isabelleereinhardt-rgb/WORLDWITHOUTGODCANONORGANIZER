@@ -1184,6 +1184,26 @@ async function callGeminiStream(system, userContent, onDelta, opts) {
   return full;
 }
 
+/* Google's "-pro" Gemini models return this exact shape when the connected
+   key has no billing enabled — a permanent block on that model, not a
+   transient rate limit, so the fix is switching models, not waiting. */
+function aiIsProQuotaError(err) {
+  const msg = (err && err.message) || String(err || "");
+  return /free_tier/i.test(msg) && /limit:\s*0/i.test(msg);
+}
+function aiErrorHtml(err) {
+  if (aiIsProQuotaError(err)) {
+    return `⚠️ <b>${esc(AI.model)}</b> has no free-tier quota — "Pro" Gemini models require billing enabled on your Google account; this won't clear up by waiting.
+      <button class="btn sm" id="aiSwitchFlashBtn" style="margin-left:8px">Switch to Flash &amp; retry</button>`;
+  }
+  return `⚠️ Gemini couldn't answer: <b>${esc((err && err.message) || String(err))}</b><br><span class="faint">Check your key in <b>Settings → Assistant</b>.</span>`;
+}
+function aiWireRetry(retry) {
+  const btn = document.getElementById("aiSwitchFlashBtn");
+  if (!btn) return;
+  btn.onclick = () => { localStorage.setItem("codex.aiModel", "gemini-flash-latest"); toast("Switched to Gemini Flash — retrying…"); retry(); };
+}
+
 async function aiAnswer(query, deep) {
   const body = $("#assistantBody");
   const { results, context } = gatherContext(query, deep ? 14 : 10);
@@ -1213,8 +1233,9 @@ async function aiAnswer(query, deep) {
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
     bindAssistantLinks(body);
   } catch (err) {
-    body.innerHTML = `<div class="assistant-hint" style="text-align:left">⚠️ Gemini couldn't answer: <b>${esc(err.message)}</b><br>
-      <span class="faint">Check your key in <b>Settings → Assistant</b>. Here's a local result instead:</span></div>${assistantAnswer(query)}`;
+    body.innerHTML = `<div class="assistant-hint" style="text-align:left">${aiErrorHtml(err)}<br>
+      <span class="faint">Here's a local result instead:</span></div>${assistantAnswer(query)}`;
+    aiWireRetry(() => aiAnswer(query, deep));
     bindAssistantLinks(body);
   }
 }
@@ -1252,17 +1273,21 @@ async function aiOpinion(query) {
     $("#aiSources").innerHTML = src ? `<div class="ans-label">Considered from</div>${src}` : "";
     bindAssistantLinks(body);
   } catch (err) {
-    body.innerHTML = `<div class="assistant-hint" style="text-align:left">⚠️ Gemini couldn't answer: <b>${esc(err.message)}</b><br>
+    body.innerHTML = `<div class="assistant-hint" style="text-align:left">${aiErrorHtml(err)}<br>
       <span class="faint">Here's a local pick instead:</span></div>${tryOpinion(query) || ""}`;
+    aiWireRetry(() => aiOpinion(query));
     bindAssistantLinks(body);
   }
 }
 window.CodexAI = {
   answer: aiAnswer,
   get on() { return AI.on; },
+  get model() { return AI.model; },
   // one-shot completion (collects the stream) — used by flashcards & slide generation
   complete: (system, user, opts) => callGeminiStream(system, user, () => {}, opts),
   context: gatherContext,
+  errorHtml: aiErrorHtml,
+  wireRetry: aiWireRetry,
 };
 
 /* ============================================================
