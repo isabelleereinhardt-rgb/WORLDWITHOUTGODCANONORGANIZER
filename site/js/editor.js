@@ -540,7 +540,11 @@ async function deckList(folderId) {
     <p class="muted">Build simple presentations for your world — lore recaps, house profiles, pitch decks.
       Present fullscreen or export to PDF.</p>
     ${folderBar}
-    <div style="margin:16px 0"><button class="btn" id="newDeck">New deck</button></div>
+    <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="newDeck">New deck</button>
+      <button class="btn ghost" id="aiDeck" title="Let Gemini draft a deck from your canon">✦ AI deck from my canon</button>
+    </div>
+    <div id="aiDeckMsg"></div>
     ${decks.length ? `<div class="list-grid">${cards}</div>` :
       `<div class="empty-state">No decks here yet.</div>`}
   </div>`;
@@ -549,6 +553,7 @@ async function deckList(folderId) {
       slides: [{ title: "Title slide", body: "Click to edit" }] };
     await S().put("decks", d); location.hash = "#/deck/" + d.id;
   };
+  $("#aiDeck").onclick = () => generateAIDeck(folderId);
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
     if (e.target.dataset.del) return; location.hash = "#/deck/" + c.dataset.open;
   });
@@ -556,6 +561,38 @@ async function deckList(folderId) {
     e.stopPropagation();
     if (confirm("Delete this deck?")) { await S().del("decks", b.dataset.del); deckList(folderId); }
   });
+}
+function parseJsonObject(raw) {
+  if (!raw) return {};
+  let t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (s >= 0 && e > s) t = t.slice(s, e + 1);
+  try { return JSON.parse(t) || {}; } catch (_) { return {}; }
+}
+async function generateAIDeck(folderId) {
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  const topic = prompt("What should the deck be about? (a character, house, place, event, or a theme from your canon)");
+  if (topic === null) return;
+  const msg = $("#aiDeckMsg");
+  if (msg) msg.innerHTML = `<div class="ai-thinking" style="padding:10px 0">✦ Drafting your deck from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
+  let context = "";
+  try { context = CodexAI.context(topic || "overview", 14).context; } catch (e) {}
+  const system = "You build a slide deck from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
+    "Return STRICT JSON only (no markdown, no prose): an object " +
+    "{\"title\":\"deck title\",\"slides\":[{\"title\":\"slide title\",\"body\":\"a few short lines, use \\n for line breaks\"}]}. " +
+    "Open with a strong title slide, then 4–8 content slides. Keep each slide skimmable — a heading plus a handful of concise lines.";
+  const user = `Build a presentation about "${topic || "an overview of this world"}" from these excerpts. Return only the JSON.\n\n${context}`;
+  try {
+    const data = parseJsonObject(await CodexAI.complete(system, user, { maxTokens: 3200 }));
+    const slides = (data.slides || []).map(s => ({ title: String(s.title || "").slice(0, 120), body: String(s.body || "").slice(0, 1200) })).filter(s => s.title || s.body);
+    if (!slides.length) throw new Error("no slides came back");
+    const d = { id: uid(), title: (data.title || topic || "AI deck").slice(0, 120), folder: folderId || null, slides };
+    await S().put("decks", d);
+    window.CodexFeed && CodexFeed.log("Generated AI deck", `${slides.length} slides on "${topic || "overview"}"`);
+    location.hash = "#/deck/" + d.id;
+  } catch (err) {
+    if (msg) msg.innerHTML = `<div class="empty-state">✦ AI couldn't build the deck (${esc(err.message)}). Check your key in Settings, or use New deck.</div>`;
+  }
 }
 
 let curDeck = null, curSlide = 0;

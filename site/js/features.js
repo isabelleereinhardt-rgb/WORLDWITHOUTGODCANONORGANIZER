@@ -273,14 +273,13 @@ function viewSettings() {
         uploaded, and is deliberately kept out of your backups.</p>
       <div class="set-row">
         <label>Gemini API key</label>
-        <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your key (AIza…)" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
+        <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
       </div>
       <div class="set-row">
         <label>Model</label>
         <select id="aiModel">
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash — fast &amp; free</option>
-          <option value="gemini-2.0-flash">Gemini 2.0 Flash — free</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro — most capable</option>
+          <option value="gemini-flash-latest">Gemini Flash (latest) — fast &amp; recommended</option>
+          <option value="gemini-pro-latest">Gemini Pro (latest) — most capable</option>
         </select>
       </div>
       <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -313,7 +312,7 @@ function viewSettings() {
 
   const aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"), aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget");
   if (aiKeyEl) {
-    aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-2.5-flash";
+    aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-flash-latest";
     const reflectAi = () => {
       const on = !!localStorage.getItem("codex.aiKey");
       aiBadge.textContent = on ? "Connected" : "Not connected";
@@ -507,6 +506,6 @@ window.addEventListener("hashchange", () => { if (Speech.reading) Speech.stop();
 function readSelectionGlobal() { Speech.readSelection(); }
 window.CodexReadAloud = readSelectionGlobal;
 
-window.CodexUI = { viewSettings, viewTasks, viewFeed };
+window.CodexUI = { viewSettings, viewTasks, viewFeed, applySettings };
 window.CodexTypo = { STYLES: TYPO_STYLES, FONT_LIST, fontStack };
 })();

@@ -1085,9 +1085,14 @@ function assistantAnswer(q) {
    key is never spammed. With no key, everything falls back to the
    local synthesis above.
    ============================================================ */
+const AI_DEAD_MODELS = new Set(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]);
 const AI = {
   get key()   { return localStorage.getItem("codex.aiKey") || ""; },
-  get model() { return localStorage.getItem("codex.aiModel") || "gemini-2.5-flash"; },
+  get model() {
+    const m = localStorage.getItem("codex.aiModel");
+    // remap models that Google has retired for new accounts to the always-current alias
+    return (!m || AI_DEAD_MODELS.has(m)) ? "gemini-flash-latest" : m;
+  },
   get on()    { return !!this.key; },
   instr()     { try { return (window.CodexExtra && CodexExtra.settings && CodexExtra.settings.aiInstr) || ""; } catch (e) { return ""; } },
 };
@@ -1203,7 +1208,13 @@ async function aiAnswer(query, deep) {
     bindAssistantLinks(body);
   }
 }
-window.CodexAI = { answer: aiAnswer, get on() { return AI.on; } };
+window.CodexAI = {
+  answer: aiAnswer,
+  get on() { return AI.on; },
+  // one-shot completion (collects the stream) — used by flashcards & slide generation
+  complete: (system, user, opts) => callGeminiStream(system, user, () => {}, opts),
+  context: gatherContext,
+};
 
 /* ============================================================
    SLASH COMMANDS + hotbar — type "/" in the assistant to see them.
@@ -1645,6 +1656,17 @@ async function init() {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     localStorage.setItem("codex.theme", t);
+    // A custom background/text colour is an inline override that hides the light/dark switch.
+    // Clear those overrides so the toggle always visibly works (custom accent is kept).
+    const ex = window.CodexExtra;
+    if (ex && ex.settings && (ex.settings.bg || ex.settings.inkColor)) {
+      ex.settings.bg = ""; ex.settings.inkColor = "";
+      localStorage.setItem("codex.settings", JSON.stringify(ex.settings));
+      if (window.CodexUI && CodexUI.applySettings) CodexUI.applySettings(ex.settings);
+      toast(`${t === "dark" ? "Dark" : "Light"} mode — custom background cleared (re-pick it in Settings if you want it)`);
+    } else {
+      toast(t === "dark" ? "Dark mode" : "Light mode");
+    }
   };
 
   $("#sidebarToggle").onclick = () => collapseSidebar();

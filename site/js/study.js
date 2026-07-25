@@ -65,10 +65,12 @@ function view_() {
       <select id="stMode"><option value="cards">Flashcards</option><option value="quiz">Quiz</option></select>
       <select id="stDiff"><option value="easy">Easy (multiple choice)</option><option value="hard">Hard (type it yourself)</option></select>
       <button class="btn" id="stGenerate">Generate</button>
+      <button class="btn ghost" id="stGenAI" title="Let Gemini write richer cards from your canon">✦ AI cards</button>
     </div>
     <div id="stArea"></div>
   </div>`;
   $("#stGenerate").onclick = generate;
+  $("#stGenAI").onclick = generateAI;
   $("#stMode").onchange = () => { $("#stDiff").style.display = $("#stMode").value === "quiz" ? "" : "none"; };
   $("#stDiff").style.display = "none";
   $("#stArea").innerHTML = `<div class="empty-state">Set a topic (or not) and hit Generate.</div>`;
@@ -89,6 +91,48 @@ function generate() {
 }
 function poolNoteHtml() { return poolNote ? `<div class="import-ok" style="margin-bottom:14px">${esc(poolNote)}</div>` : ""; }
 
+/* ---------- AI card generation (Gemini) ---------- */
+function parseJsonArray(raw) {
+  if (!raw) return [];
+  let t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const s = t.indexOf("["), e = t.lastIndexOf("]");
+  if (s >= 0 && e > s) t = t.slice(s, e + 1);
+  try { const a = JSON.parse(t); return Array.isArray(a) ? a : []; } catch (_) { return []; }
+}
+async function generateAI() {
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect Gemini first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  const topic = $("#stTopic").value.trim();
+  const count = Math.max(3, Math.min(30, +$("#stCount").value || 10));
+  const mode = $("#stMode").value;
+  const { items, note } = pool(topic);
+  poolNote = note;
+  const src = pick(items, Math.min(16, items.length));
+  if (!src.length) { $("#stArea").innerHTML = `<div class="empty-state">Nothing in your canon matches that topic yet.</div>`; return; }
+  let context = "";
+  for (const e of src) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1400)}\n\n`; if (context.length + chunk.length > 15000) break; context += chunk; }
+  $("#stArea").innerHTML = `<div class="ai-thinking" style="justify-content:center;padding:30px">✦ Writing ${count} cards from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
+  const system = "You write study flashcards from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
+    "Return STRICT JSON only (no markdown, no prose): an array of objects like " +
+    `{"q":"a specific question","a":"a concise correct answer","distractors":["wrong but plausible","wrong 2","wrong 3"]}. ` +
+    "Questions must be answerable from the excerpts; answers short; distractors plausible-but-wrong short phrases drawn from the same world.";
+  const user = `Make ${count} flashcards${topic ? ` about "${topic}"` : ""} from these excerpts. Return only the JSON array.\n\n${context}`;
+  try {
+    const raw = await CodexAI.complete(system, user, { maxTokens: 3000 });
+    const arr = parseJsonArray(raw);
+    const built = arr.map(o => ({
+      q: String(o.q || "").trim(), a: String(o.a || "").trim(),
+      distractors: Array.isArray(o.distractors) ? o.distractors.map(d => String(d).trim()).filter(Boolean) : [],
+      entry: null, factKey: null,
+    })).filter(c => c.q && c.a);
+    if (!built.length) throw new Error("no usable cards came back");
+    cards = built.slice(0, count);
+    window.CodexFeed && CodexFeed.log("Generated AI " + (mode === "quiz" ? "quiz" : "flashcards"), `${cards.length} on "${topic || "everything"}"`);
+    if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
+  } catch (err) {
+    $("#stArea").innerHTML = `<div class="empty-state">✦ AI couldn't build cards (${esc(err.message)}). Try the plain <b>Generate</b> button, or check your key in Settings.</div>`;
+  }
+}
+
 function renderCards() {
   flipped = new Set();
   $("#stArea").innerHTML = `${poolNoteHtml()}<p class="muted">${cards.length} card${cards.length === 1 ? "" : "s"} on <b>${esc($("#stTopic").value || "your canon")}</b> — click a card to flip it.</p>
@@ -100,7 +144,7 @@ function flashcardHtml(c, i) {
   return `<div class="flashcard ${isFlipped ? "flipped" : ""}" data-i="${i}">
     <div class="fc-face fc-front">${esc(c.q)}</div>
     <div class="fc-face fc-back">${esc((c.a || "").slice(0, 260))}${(c.a || "").length > 260 ? "…" : ""}
-      <a class="fc-source" href="#/entry/${c.entry.id}">Open source →</a></div>
+      ${c.entry ? `<a class="fc-source" href="#/entry/${c.entry.id}">Open source →</a>` : ""}</div>
   </div>`;
 }
 function bindCards() {
@@ -119,6 +163,7 @@ function renderQuiz(difficulty) {
   renderQuizQuestion();
 }
 function distractorsFor(c) {
+  if (c.distractors && c.distractors.length >= 3) return pick(c.distractors.filter(v => v && v !== c.a), 3);
   const others = cards.filter(x => x !== c);
   let vals;
   if (c.factKey) vals = others.map(o => C().factsOf(o.entry, 8).find(f => f.k === c.factKey)).filter(Boolean).map(f => f.v);
