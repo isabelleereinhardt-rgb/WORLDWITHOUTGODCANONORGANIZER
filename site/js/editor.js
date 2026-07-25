@@ -96,7 +96,7 @@ async function open(id) {
       <button id="tbHr" title="Divider">Divider</button>
       <span class="sep"></span>
       <button id="tbDictate" title="Dictate (speech to text)">Dictate</button>
-      <button id="tbReadSel" title="Read selection aloud">Read aloud</button>
+      <button id="tbReadSel" title="Read the selection aloud, or the whole document if nothing's selected">Read aloud</button>
       <button id="tbGrammar" title="Check grammar &amp; style">Grammar</button>
       <span class="sep"></span>
       ${folderSelect}
@@ -163,7 +163,13 @@ async function open(id) {
   $("#tbImg").onclick = () => insertImage(edEl, touch);
   $("#tbTable").onclick = () => insertTable(touch);
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
-  $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
+  $("#tbReadSel").onclick = () => {
+    if (!window.CodexSpeech) { toast("Speech not supported here"); return; }
+    // "Read aloud" with no selection is the common case — read the whole document
+    // instead of silently doing nothing (a highlighted selection still wins if present).
+    const sel = (window.getSelection && String(window.getSelection())) || "";
+    CodexSpeech.read(sel.trim() ? sel : (edEl.innerText || ""));
+  };
   $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
   $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
   $("#tbExport").onclick = () => exportMenu(doc);
