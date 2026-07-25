@@ -442,21 +442,64 @@ async function viewFeed() {
    read, with Pause/Resume and Stop — and reading always stops the
    moment you navigate to a different page, so it never keeps
    talking about a section you've left.
+
+   Long canon entries are split into sentence-sized chunks and
+   spoken as a queue of short utterances, rather than one giant
+   utterance. Chrome has a long-standing bug where a single long
+   SpeechSynthesisUtterance silently stalls after roughly 15s, after
+   which pause()/resume() stop responding — exactly what "can't
+   pause it" on long entries looks like. Short chunks keep every
+   utterance well under that window, and a periodic pause+resume
+   "nudge" while reading works around the same Chrome bug for
+   voices/OSes where even short utterances can stall.
    ============================================================ */
+function chunkForSpeech(text) {
+  const clean = (text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const sentences = clean.match(/[^.!?]+[.!?]*\s*/g) || [clean];
+  const chunks = [];
+  let cur = "";
+  for (const s of sentences) {
+    if (cur && (cur.length + s.length) > 220) { chunks.push(cur.trim()); cur = s; }
+    else cur += s;
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks;
+}
 const Speech = {
   reading: false,
   paused: false,
+  _queue: [],
+  _idx: 0,
+  _nudgeTimer: null,
+  _startNudge() {
+    clearInterval(this._nudgeTimer);
+    this._nudgeTimer = setInterval(() => {
+      if (this.reading && !this.paused && "speechSynthesis" in window && speechSynthesis.speaking) {
+        speechSynthesis.pause();
+        speechSynthesis.resume();
+      }
+    }, 12000);
+  },
+  _stopNudge() { clearInterval(this._nudgeTimer); this._nudgeTimer = null; },
   read(text) {
     if (!("speechSynthesis" in window)) { toast("Speech not supported here"); return; }
     speechSynthesis.cancel();
-    if (!text || !text.trim()) { toast("Nothing to read — select some text first, or open an entry."); return; }
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1;
-    u.onend = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
-    u.onerror = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
-    Speech.reading = true; Speech.paused = false;
-    speechSynthesis.speak(u);
+    this._queue = chunkForSpeech(text);
+    if (!this._queue.length) { toast("Nothing to read — select some text first, or open an entry."); return; }
+    this._idx = 0;
+    this.reading = true; this.paused = false;
     showPlayer();
+    this._startNudge();
+    this._speakNext();
+  },
+  _speakNext() {
+    if (this._idx >= this._queue.length) { this.reading = false; this.paused = false; this._stopNudge(); hidePlayer(); return; }
+    const u = new SpeechSynthesisUtterance(this._queue[this._idx]);
+    u.rate = 1;
+    u.onend = () => { if (!Speech.reading) return; Speech._idx++; Speech._speakNext(); };
+    u.onerror = () => { Speech.reading = false; Speech.paused = false; Speech._stopNudge(); hidePlayer(); };
+    speechSynthesis.speak(u);
   },
   readSelection() {
     const sel = (window.getSelection && String(window.getSelection())) || "";
@@ -465,7 +508,11 @@ const Speech = {
   pause() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.pause(); this.paused = true; updatePlayer(); } },
   resume() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.resume(); this.paused = false; updatePlayer(); } },
   toggle() { this.paused ? this.resume() : this.pause(); },
-  stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.reading = false; this.paused = false; hidePlayer(); },
+  stop() {
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    this.reading = false; this.paused = false; this._queue = []; this._idx = 0;
+    this._stopNudge(); hidePlayer();
+  },
   dictate(onText, onStop) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { toast("Dictation not supported in this browser"); return null; }
