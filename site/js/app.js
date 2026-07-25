@@ -1343,14 +1343,21 @@ function execAssist(val) {
   // e.g. an in-flight AI stream — and silently overwrite it with a stale local render.
   clearTimeout(assistLookupTimer);
   val = (val || "").trim();
+  const inp = $("#assistantInput");
   if (val.startsWith("/")) {
     const full = val.match(/^\/(\S+)\s+([\s\S]+)$/);
-    if (full) { const c = findCmd(full[1]); if (c) { runAssistCommand(c.key, full[2].trim()); return; }
+    if (full) { const c = findCmd(full[1]); if (inp) inp.value = ""; if (c) { runAssistCommand(c.key, full[2].trim()); return; }
       $("#assistantBody").innerHTML = `<div class="assistant-hint">No command <b>/${esc(full[1])}</b>. Type <b>/</b> to see the list, or <b>/help</b>.</div>`; return; }
     const bare = val.match(/^\/(\S+)\s*$/);
-    if (bare) { const c = findCmd(bare[1]); if (c && !CMD_NEEDS_ARG.has(c.key)) { runAssistCommand(c.key, ""); return; } }
-    return; // still typing a command — the hotbar is guiding
+    if (bare) { const c = findCmd(bare[1]); if (c && !CMD_NEEDS_ARG.has(c.key)) { if (inp) inp.value = ""; runAssistCommand(c.key, ""); return; } }
+    return; // still typing a command — the hotbar is guiding, don't clear what they're composing
   }
+  // a real question/lookup is about to be dispatched — clear the box now (like any chat
+  // send box) so the NEXT keystroke starts a fresh question instead of appending to this
+  // one. Previously nothing ever cleared the input, so a second question typed without
+  // manually selecting-all first got silently concatenated onto the first — which is why
+  // the assistant looked like it kept "answering the previous question".
+  if (inp) inp.value = "";
   // not a command — try the deterministic local tools first (these should never
   // go to the AI even when connected: consistency checks, doc summaries, etc.)
   const body = $("#assistantBody");
