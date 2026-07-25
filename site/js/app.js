@@ -178,12 +178,17 @@ async function deleteNote(id) {
    ============================================================ */
 function buildNav() {
   const nav = $("#nav");
-  const cats = categoriesList().map(c =>
-    `<div class="nav-item ${c.custom ? "nav-custom" : ""}" data-route="#/browse/${encodeURIComponent(c.name)}">
+  const cats = categoriesList()
+    .filter(c => !(window.CodexExtra && CodexExtra.hiddenCats.has(c.name)))
+    .map(c => {
+      const canRemove = c.name !== "My Notes"; // the catch-all bucket stays pinned
+      const title = c.custom ? "Delete this section" : "Hide this section from the sidebar";
+      return `<div class="nav-item ${c.custom ? "nav-custom" : ""}" data-route="#/browse/${encodeURIComponent(c.name)}">
        <span class="dot" style="background:${catColor(c.name)}"></span>
        <span>${esc(c.name)}</span><span class="count">${c.count}</span>
-       ${c.custom ? `<button class="nav-del" data-delcat="${esc(c.name)}" title="Delete this section">✕</button>` : ""}
-     </div>`).join("");
+       ${canRemove ? `<button class="nav-del" data-delcat="${esc(c.name)}" data-custom="${c.custom ? "1" : "0"}" title="${title}">✕</button>` : ""}
+     </div>`;
+    }).join("");
   nav.innerHTML = `
     <div class="nav-section">
       <div class="nav-item" data-route="#/">${svg("home")}<span>Home</span></div>
@@ -228,9 +233,21 @@ function buildNav() {
   };
   $$("#nav .nav-del[data-delcat]").forEach(btn => btn.onclick = (ev) => {
     ev.stopPropagation(); ev.preventDefault();
-    deleteCustomSection(btn.dataset.delcat);
+    if (btn.dataset.custom === "1") deleteCustomSection(btn.dataset.delcat);
+    else hideBuiltinSection(btn.dataset.delcat);
   });
   markActive();
+}
+/* hide a built-in Canon section (Characters, Noble Houses, etc.) from the sidebar.
+   Unlike a custom section, a built-in one isn't a deletable object — it's sourced
+   from the imported canon — so "delete" here means delist from nav/browse, never
+   touching the entries themselves. Fully reversible from Settings. */
+async function hideBuiltinSection(name, onDone) {
+  if (!confirm(`Hide the section "${name}"?\n\nIts entries stay exactly as they are — searchable, linkable, still in your canon — they just won't show in this sidebar list. Restore it anytime from Settings.`)) return;
+  await CodexExtra.hideCat(name);
+  refresh();
+  toast(`"${name}" hidden from the sidebar — restore it from Settings anytime`);
+  if (onDone) onDone();
 }
 /* delete a user-added Canon section; its notes move to "My Notes" (never destroyed) */
 async function deleteCustomSection(name, onDone) {
@@ -444,6 +461,7 @@ function viewBrowse(cat) {
 function renderBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
   const isCustomSection = customCats().includes(cat);
+  const isBuiltinSection = CANON_ORDER.includes(cat);
   const isNotesLike = cat === "My Notes" || isCustomSection;
   const cards = items.map(e => entryCardSelectable(e)).join("") ||
     `<div class="empty-state">Nothing here yet.${isNotesLike ? " Add one below, or from Import &amp; Add Lore." : ""}</div>`;
@@ -455,6 +473,7 @@ function renderBrowse(cat) {
         ${isNotesLike ? `<button class="btn sm" id="quickAddNote">New note</button>` : ""}
         ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${browseSelectMode ? "Cancel" : "Select"}</button>` : ""}
         ${isCustomSection ? `<button class="btn ghost sm" id="deleteSection" style="color:var(--danger)">Delete section</button>` : ""}
+        ${isBuiltinSection ? `<button class="btn ghost sm" id="hideSection" style="color:var(--danger)">Hide section</button>` : ""}
       </div>
     </div>
     <p class="muted">${items.length} ${items.length === 1 ? "entry" : "entries"}</p>
@@ -468,6 +487,7 @@ function renderBrowse(cat) {
 
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { browseSelectMode = !browseSelectMode; if (!browseSelectMode) browseSelected.clear(); renderBrowse(cat); };
   if ($("#deleteSection")) $("#deleteSection").onclick = () => deleteCustomSection(cat, () => { location.hash = "#/"; });
+  if ($("#hideSection")) $("#hideSection").onclick = () => hideBuiltinSection(cat, () => { location.hash = "#/"; });
   if ($("#quickAddNote")) $("#quickAddNote").onclick = async () => {
     const note = await addNote("", "", [], cat === "My Notes" ? "My Notes" : cat);
     location.hash = "#/entry/" + note.id;
@@ -1253,14 +1273,18 @@ async function aiOpinion(query) {
   const sample = pool.slice(0, 16);
   let context = "";
   for (const e of sample) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 900)}\n\n`; if (context.length + chunk.length > 14000) break; context += chunk; }
+  // match the actual direction of the question — a hardcoded "pick a favourite" prompt
+  // fighting a "who's your LEAST favourite" question produced confused, hedging answers
+  const least = OPINION_NEGATIVE.test(query);
+  const pickWord = least ? "least favourite (the one that appeals to you least)" : "favourite";
   const sys =
     "The author is asking for YOUR personal opinion about something in their OWN fictional world — not a factual lookup. This is playful and " +
-    "subjective, not a request that needs textual proof. Pick one genuine favourite from the excerpts provided, and explain why in 2-4 warm, " +
-    "first-person sentences ('My favourite is...', 'I love...') using specific, concrete details drawn from the excerpts. " +
+    `subjective, not a request that needs textual proof. Pick one genuine ${pickWord} from the excerpts provided, and explain why in 2-4 warm, ` +
+    `first-person sentences ('My ${least ? "least favourite is" : "favourite is..."}', ${least ? "" : "'I love...', "}) using specific, concrete details drawn from the excerpts. ` +
     "Never invent details that aren't in the excerpts, but DO have and state a preference — do not say you can't have favourites, and do not " +
     "say there's no excerpt for that; a subjective pick grounded in real details from the excerpts is exactly what's being asked for." +
     (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
-  const user = `The author asked: "${query}"\n\nPick a genuine favourite from these and say why:\n\n${context}`;
+  const user = `The author asked: "${query}"\n\nPick a genuine ${pickWord} from these and say why:\n\n${context}`;
   body.innerHTML = `<div class="ans-answer ai">
       <div class="ans-a-label">${svg("spark")} My take · Gemini</div>
       <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Weighing your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
@@ -1477,22 +1501,28 @@ function tryCommand(q) {
 }
 
 /* ---------- opinion mode: "what's your favourite character" ---------- */
-const OPINION_TRIGGER = /\b(favou?rite|best|coolest|most interesting|most powerful|most important|top)\b/i;
+const OPINION_TRIGGER = /\b(favou?rite|best|worst|least|coolest|most interesting|most powerful|most important|top)\b/i;
+const OPINION_NEGATIVE = /\b(least|worst|less)\b/i;
 function tryOpinion(q) {
   if (!OPINION_TRIGGER.test(q)) return null;
   const kind = findKind(q);
   if (!kind) return null;
   const pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(kind.label)} entries to pick from yet.</div>`;
+  const least = OPINION_NEGATIVE.test(q);
   const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => least ? a.score - b.score : b.score - a.score);
   const pick = scored[0].e;
   const sents = topicSummary(pick.title, 2);
-  return `<div class="ans-label">My pick, going by what's most woven through your canon</div>
+  const label = least ? "My pick for least central — going by what's least woven through your canon" : "My pick, going by what's most woven through your canon";
+  const reason = least
+    ? `Reasoning: <b>${esc(pick.title)}</b> barely turns up elsewhere in your canon — the lightest footprint of your ${esc(kind.label)} entries, for whatever that's worth.`
+    : `Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries — more cross-referenced than the rest of your ${esc(kind.label)} entries, which usually means it's load-bearing for the story.`;
+  return `<div class="ans-label">${label}</div>
     <div class="blurb">
       <div class="bt">${catDot(pick.category)} ${esc(pick.title)}</div>
       <div class="bs">${esc(sents.join(" ")) || esc(pick.summary || "")}</div>
-      <div class="bl">Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries — more cross-referenced than the rest of your ${esc(kind.label)} entries, which usually means it's load-bearing for the story.</div>
+      <div class="bl">${reason}</div>
       <div style="margin-top:8px"><a class="btn sm" href="#/entry/${pick.id}">Open entry</a></div>
     </div>`;
 }
@@ -1831,5 +1861,5 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, deleteCustomSection };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, deleteCustomSection, hideBuiltinSection, CANON_ORDER };
 })();

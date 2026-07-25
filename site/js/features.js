@@ -64,12 +64,14 @@ const Extra = {
   hidden: new Set(),      // soft-deleted source-entry ids
   cats: [],               // custom sections [{id,name}]
   excludedNames: new Set(), // names removed from the Name Index / cross-linking
+  hiddenCats: new Set(),  // built-in Canon section names hidden from the sidebar (entries untouched)
   settings: defaultSettings(),
   async ready() {
     await S().ready;
     const h = await S().all("hidden"); this.hidden = new Set(h.map(x => x.id));
     this.cats = (await S().all("cats")).sort((a, b) => (a.created || 0) - (b.created || 0));
     const x = await S().all("excludedNames"); this.excludedNames = new Set(x.map(r => r.id));
+    const hc = await S().all("hiddenCats"); this.hiddenCats = new Set(hc.map(r => r.id));
     const saved = localStorage.getItem("codex.settings");
     if (saved) { try { this.settings = Object.assign(defaultSettings(), JSON.parse(saved)); } catch (e) {} }
     applySettings(this.settings);
@@ -82,6 +84,8 @@ const Extra = {
   async excludeNames(names) { for (const n of names) { this.excludedNames.add(n); await S().put("excludedNames", { id: n }); } logFeed("Removed from Name Index", names.length + " name" + (names.length === 1 ? "" : "s")); },
   async unexcludeName(n) { this.excludedNames.delete(n); await S().del("excludedNames", n); },
   async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
+  async hideCat(name) { this.hiddenCats.add(name); await S().put("hiddenCats", { id: name }); logFeed("Hid section", name); },
+  async unhideCat(name) { this.hiddenCats.delete(name); await S().del("hiddenCats", name); },
 };
 window.CodexExtra = Extra;
 
@@ -262,6 +266,17 @@ function viewSettings() {
     </section>
 
     <section class="set-block">
+      <h3>Hidden Canon sections</h3>
+      <p class="faint" style="margin:2px 0 10px">Built-in sections (Characters, Noble Houses, etc.) you've hidden from the sidebar with the ✕ or
+        "Hide section" button. Their entries were never touched — restore any of them here.</p>
+      ${Extra.hiddenCats.size ? `<div class="section-mgr-list">${Array.from(Extra.hiddenCats).map(name => `
+        <div class="section-mgr-row">
+          <span>${esc(name)}</span>
+          <button class="btn ghost sm" data-unhidecat="${esc(name)}">Restore</button>
+        </div>`).join("")}</div>` : `<p class="faint">No sections hidden.</p>`}
+    </section>
+
+    <section class="set-block">
       <h3>Deleted entries</h3>
       <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed — restore it here.</p>
       ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
@@ -323,6 +338,11 @@ function viewSettings() {
   $$("[data-delsection]").forEach(b => b.onclick = async () => {
     // deleteCustomSection() already calls refresh(), which re-renders this page via the router
     if (window.Codex && Codex.deleteCustomSection) await Codex.deleteCustomSection(b.dataset.delsection);
+  });
+  $$("[data-unhidecat]").forEach(b => b.onclick = async () => {
+    await Extra.unhideCat(b.dataset.unhidecat);
+    if (window.Codex && Codex.refresh) Codex.refresh();
+    toast(`"${b.dataset.unhidecat}" restored to the sidebar`);
   });
 
   const aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"), aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget");
