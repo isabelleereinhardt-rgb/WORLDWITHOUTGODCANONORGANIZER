@@ -982,9 +982,26 @@ function snippet(text, q, len = 160) {
   const seg = t.slice(start, start + len);
   return esc(seg).replace(new RegExp("(" + (q || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "ig"), "<mark>$1</mark>");
 }
+/* filler/question words to ignore when deciding whether an entry "matches" a
+   query — without this, a natural question like "who is Zephyrine" silently
+   required the literal words "who" and "is" to also appear in the target
+   document, so an imported document that only ever mentions a name in
+   passing (never given its own dedicated entry) would never be found by
+   anything but typing that exact bare name. */
+const SEARCH_STOPWORDS = new Set([
+  "a","an","the","is","are","was","were","be","been","being","who","whom","whose","what","which",
+  "when","where","why","how","does","do","did","done","doing","tell","me","about","of","in","on",
+  "at","to","for","and","or","this","that","these","those","my","your","our","their","his","her",
+  "its","it","i","you","he","she","they","we","find","search","look","looking","exist","exists",
+  "existed","character","characters","person","someone","anyone","named","name","called","mentioned",
+  "mention","story","canon","world","please","can","could","would","should",
+]);
 function searchAll(q) {
   q = q.trim().toLowerCase(); if (!q) return [];
-  const terms = q.split(/\s+/); const res = [];
+  const rawTerms = q.split(/\s+/);
+  let terms = rawTerms.filter(t => !SEARCH_STOPWORDS.has(t));
+  if (!terms.length) terms = rawTerms; // don't turn an all-stopword query into a match-everything search
+  const res = [];
   for (const e of DB.entries) {
     const hay = e._hay, title = e.title.toLowerCase(); let score = 0;
     for (const t of terms) {
