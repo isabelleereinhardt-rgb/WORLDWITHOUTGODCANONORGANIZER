@@ -1913,5 +1913,5 @@ else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
 window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
-  recentCount: () => store.recent.length, recentIds: () => store.recent.slice() };
+  recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll };
 })();

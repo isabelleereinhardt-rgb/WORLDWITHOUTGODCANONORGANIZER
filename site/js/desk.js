@@ -184,9 +184,13 @@ function luckySvg() {
   return window.CodexLucky ? CodexLucky.face(26) : "";
 }
 
-/* A monogram medallion stands in for the avatar until the Phase 5
-   builder exists; it reads the same settings the builder will write. */
+/* The portrait built in Settings. Falls back to a monogram if the
+   avatar module is missing, so the greeting is never empty. */
 function avatarMedallion(name) {
+  if (window.CodexAvatar && window.CodexAvatarBuilder) {
+    return `<a class="desk-avatar-link" href="#/settings" title="Change your avatar"
+      data-avatar="56">${CodexAvatar.draw(CodexAvatarBuilder.current(), 56)}</a>`;
+  }
   const initial = (name || "").trim().charAt(0).toUpperCase() || "✦";
   return `<span class="desk-avatar" aria-hidden="true">${initial}</span>`;
 }
