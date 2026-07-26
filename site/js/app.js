@@ -46,19 +46,21 @@ function svg(name) {
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[name] || ""}</svg>`;
 }
 
-/* ---------- category colours (markers are coloured dots, not emoji) ---------- */
+/* ---------- category colours (markers are coloured dots, not emoji)
+   Muted, dusty hues chosen to sit inside the rose/antique palette — bright
+   primaries fight the page and stop reading as a quiet index. ---------- */
 const CAT = {
-  "Characters":         "#7c5cff",
-  "Noble Houses":       "#b8893b",
-  "Maps & Locations":   "#3f8f6b",
-  "Religion & Faith":   "#c2603f",
-  "Magic System":       "#5c8fff",
-  "Timeline & History": "#9a6bd0",
-  "Culture & Fashion":  "#d0699a",
-  "Books & Stories":    "#6b8f3f",
-  "Reference & Lexicon":"#6a655c",
-  "Canon & Continuity": "#3f6f8f",
-  "My Notes":           "#4d8f7b",
+  "Characters":         "#b8788f",
+  "Noble Houses":       "#c9a15c",
+  "Maps & Locations":   "#6f8f7a",
+  "Religion & Faith":   "#c07a5e",
+  "Magic System":       "#8189ab",
+  "Timeline & History": "#9c7a9e",
+  "Culture & Fashion":  "#d19aac",
+  "Books & Stories":    "#8d9270",
+  "Reference & Lexicon":"#9a8b86",
+  "Canon & Continuity": "#7b8b9b",
+  "My Notes":           "#7fa093",
 };
 const catColor = c => CAT[c] || "var(--accent)";
 const catDot = c => `<span class="cdot" style="background:${catColor(c)}"></span>`;
@@ -277,6 +279,7 @@ function buildNav() {
 }
 function markActive() {
   const h = location.hash || "#/";
+  if (isNarrow()) collapseSidebar(true);
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.classList.toggle("active", el.dataset.route === h ||
       (el.dataset.route !== "#/" && h.startsWith(el.dataset.route))));
@@ -1392,7 +1395,7 @@ function route() {
   const path = parts[0];
   const arg = decodeURIComponent(parts.slice(1).join("/") || "");
   view.scrollTop = 0;
-  if (h === "#/" || path === "") viewHome();
+  if (h === "#/" || path === "") viewDesk();
   else if (path === "browse") viewBrowse(arg);
   else if (path === "entry") viewEntry(parts[1]);
   else if (path === "subject") viewSubject(arg);
@@ -1416,9 +1419,12 @@ function route() {
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
   else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
-  else viewHome();
+  else viewDesk();
   markActive();
 }
+/* The Desk is the home screen; viewHome is the pre-Desk fallback, kept so a
+   missing desk.js degrades to a working page rather than a blank one. */
+function viewDesk() { window.CodexDesk ? CodexDesk.view() : viewHome(); }
 
 /* ============================================================
    INIT
@@ -1430,7 +1436,13 @@ function collapseSidebar(force) {
   else app.classList.toggle("sidebar-collapsed");
 }
 
+/* Below 860px the sidebar is an overlay drawer, so leaving it open on a
+   narrow screen would bury the page behind it. Start it closed there, and
+   close it again whenever a nav link is followed. */
+function isNarrow() { return window.matchMedia("(max-width:860px)").matches; }
+
 async function init() {
+  if (isNarrow()) collapseSidebar(true);
   try {
     if (window.CodexStore) {
       // if the last-active workspace isn't the default one, redirect storage
@@ -1462,6 +1474,13 @@ async function init() {
   };
 
   $("#sidebarToggle").onclick = () => collapseSidebar();
+  // crossing the 860px boundary changes the sidebar from a column into an
+  // overlay, so its open/closed default has to change with it
+  let wasNarrow = isNarrow();
+  window.addEventListener("resize", () => {
+    const now = isNarrow();
+    if (now !== wasNarrow) { wasNarrow = now; collapseSidebar(now); }
+  });
   if (innerWidth < 860) collapseSidebar(true);
 
   // export menu
@@ -1513,5 +1532,5 @@ else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
 window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
-  recentCount: () => store.recent.length };
+  recentCount: () => store.recent.length, recentIds: () => store.recent.slice() };
 })();

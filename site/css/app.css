@@ -808,6 +808,104 @@ select:focus,input:focus,textarea:focus{outline:none;border-color:var(--blush)}
 .stuck{border:1px solid var(--line);background:var(--panel2);padding:14px}
 @media(max-width:1000px){.help-grid{grid-template-columns:1fr}}
 
+/* ============================================================
+   THE DESK — home screen
+   ============================================================ */
+.desk{padding:26px 34px 60px}
+.desk-top{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:26px;flex-wrap:wrap}
+.desk-hello{display:flex;align-items:center;gap:14px;min-width:0}
+.desk-greet{font-size:44px;line-height:1.04;margin-top:2px}
+.desk-avatar{width:56px;height:56px;flex:none;border-radius:50%;border:1px solid var(--gold);
+  background:var(--panel2);color:var(--gold);display:grid;place-items:center;
+  font-family:var(--serif);font-style:italic;font-size:24px}
+.name-edit{background:transparent;border:none;cursor:pointer;color:var(--dim);
+  font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  vertical-align:middle;margin-left:10px;padding:2px 0}
+.name-edit:hover{color:var(--blush)}
+.desk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:34px;align-items:start}
+.desk-col{min-width:0}
+.desk-col.side{display:flex;flex-direction:column;gap:22px}
+.desk-note{margin-top:10px;max-width:52ch;line-height:1.55}
+.rule-head.mt{margin-top:30px}
+
+/* six-month heatmap: 26 week columns, one square per day */
+.heat{display:flex;gap:3px;max-width:400px}
+.heat-w{flex:0 1 12px;max-width:12px;min-width:0;display:flex;flex-direction:column;gap:3px}
+.heat-d{width:100%;aspect-ratio:1;border-radius:2px;background:var(--panel2);display:block}
+.heat-d.l1{background:#6d4552}
+.heat-d.l2{background:#a4566f}
+.heat-d.l3{background:var(--blush)}
+.heat-d.fut{opacity:.25}
+.heat-legend{display:flex;align-items:center;gap:8px;margin-top:8px;font-family:var(--serif);
+  font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.heat-legend .heat-d{width:9px;height:9px;flex:none}
+:root[data-theme="light"] .heat-d.l1{background:#e8c3ce}
+:root[data-theme="light"] .heat-d.l2{background:#cf8ea3}
+:root[data-theme="light"] .heat-d.l3{background:var(--blush)}
+
+/* fortnight word bars */
+.bars{display:flex;align-items:flex-end;gap:8px;height:120px;padding-bottom:2px;border-bottom:1px solid var(--line)}
+.bar-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}
+/* .wbar, not .bar — the collection cards already own a .bar accent stripe */
+.wbar{width:100%;background:var(--chip);min-height:0}
+.wbar.today{background:var(--blush)}
+.bar-lab{font-family:var(--serif);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+
+/* pick up where you left off */
+.resume-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.resume-card{border:1px solid var(--line);background:var(--panel);padding:12px;text-decoration:none;
+  color:var(--ink);display:block}
+.resume-card:hover{border-color:var(--blush)}
+.rc-kind{font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--blush2)}
+.rc-title{font-family:var(--serif);font-style:italic;font-size:19px;line-height:1.15;margin-top:4px}
+.rc-where{font-size:13.5px;color:var(--dim);margin-top:5px}
+.rc-bar{height:3px;background:var(--panel2);margin-top:9px}
+.rc-bar span{display:block;height:3px;background:var(--gold)}
+
+/* since you were last here */
+.recap-row{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14.5px;line-height:1.4}
+.recap-row:last-of-type{border-bottom:none}
+.recap-row.quiet{color:var(--dim)}
+.rc-glyph{font-size:10px;padding-top:3px;flex:none}
+.rc-what{flex:1;min-width:0}
+.rc-meta{display:block;font-family:var(--serif);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim);margin-top:2px}
+.recap-foot{font-size:13.5px;color:var(--dim);line-height:1.45;margin-top:10px}
+
+/* Lucky's weekly journal */
+.lucky-card{border:1px solid var(--gold);background:var(--panel);padding:14px}
+.lucky-head{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.lucky-face{width:26px;height:26px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);
+  display:grid;place-items:center;overflow:hidden;flex:none}
+.lucky-head .k{font-family:var(--serif);font-size:9px;letter-spacing:.22em;text-transform:uppercase;color:var(--gold)}
+.lucky-body{font-size:14.5px;line-height:1.55;color:var(--ink);text-wrap:pretty}
+.lucky-meta{font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--dim);margin-top:9px}
+
+/* on this day */
+.otd-row{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);
+  color:var(--ink);font-size:14.5px;text-decoration:none}
+a.otd-row:hover{color:var(--blush)}
+.otd-year{font-family:var(--serif);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--blush2);width:56px;flex:none;padding-top:2px}
+.otd-what{flex:1;min-width:0}
+
+/* sprint pill — a real countdown, parked out of the way */
+.sprint-pill{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:290;
+  display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--gold);
+  border-radius:2px;box-shadow:var(--shadow);padding:9px 14px}
+.sprint-pill.paused{border-color:var(--line)}
+.sprint-pill .sp-k{font-family:var(--serif);font-size:9px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--gold)}
+.sprint-pill .sp-time{font-family:var(--serif);font-size:22px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.sprint-pill .sp-btn{background:var(--blush);border:none;color:var(--onblush);border-radius:2px;
+  padding:6px 11px;font-family:var(--serif);font-weight:600;font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;cursor:pointer}
+.sprint-pill .sp-btn:hover{background:var(--blush2)}
+.sprint-pill .sp-btn.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+.sprint-pill .sp-btn.ghost:hover{border-color:var(--blush);color:var(--blush)}
+@media(max-width:760px){.desk{padding:20px 18px 60px}.desk-greet{font-size:32px}.heat{max-width:100%}}
+
 /* ---------- toast: bottom-right, gold-framed, ✦ glyph, manual ✕ ---------- */
 .toast-stack{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;
   gap:8px;align-items:flex-end;pointer-events:none}

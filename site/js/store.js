@@ -18,8 +18,9 @@
 "use strict";
 
 const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta",
-  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames"];
-const DB_VER = 3;
+  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames",
+  "daylog"];
+const DB_VER = 4;
 let db = null;
 let usingFallback = false;
 let currentWorkspace = "default";

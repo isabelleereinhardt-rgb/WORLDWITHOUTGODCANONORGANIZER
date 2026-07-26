@@ -116,6 +116,7 @@ const Extra = {
   async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
 };
 window.CodexExtra = Extra;
+window.CodexSettings = { save: () => saveSettings() };
 
 /* ---------- activity feed logging ---------- */
 async function logFeed(action, detail) {

@@ -123,6 +123,8 @@ async function open(id) {
   const updateWordCount = () => {
     const words = (edEl.innerText || "").trim().split(/\s+/).filter(Boolean).length;
     const wc = $("#wordCount"); if (wc) wc.textContent = words + " word" + (words === 1 ? "" : "s");
+    // feeds the Desk heatmap and fortnight bars; only increases are logged
+    if (window.CodexDeskLog) CodexDeskLog.words(doc.id, words);
   };
   const persist = async () => {
     doc.title = titleEl.value; doc.html = edEl.innerHTML;
@@ -432,6 +434,7 @@ function bindWriteTimer(btn) {
       btn.textContent = "Start writing timer";
       btn.classList.remove("active");
       toast(`Writing session: ${mins < 1 ? "under a minute" : mins + " min"}`);
+      if (mins >= 1 && window.CodexDeskLog) CodexDeskLog.minutes(mins);
       return;
     }
     t0 = Date.now();
