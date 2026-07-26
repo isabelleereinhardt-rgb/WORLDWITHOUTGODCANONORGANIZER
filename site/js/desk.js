@@ -75,82 +75,6 @@ function noteWordCount(docId, words) {
 window.CodexDeskLog = { words: noteWordCount, minutes: (m) => Day.add(0, m, 0) };
 
 /* ============================================================
-   SPRINT  — a real 25 minute timer, not a decoration.
-   Phase 3 gives this a full overlay; for now it is a small fixed
-   pill with pause and stop that logs its minutes to the day log.
-   ============================================================ */
-const Sprint = {
-  total: 25 * 60, left: 0, running: false, tick: null, banked: 0,
-
-  start(minutes) {
-    this.total = (minutes || 25) * 60;
-    this.left = this.total;
-    this.banked = 0;
-    this.running = true;
-    this.render();
-    this.resume();
-  },
-  resume() {
-    clearInterval(this.tick);
-    this.running = true;
-    this.tick = setInterval(() => {
-      this.left--;
-      this.banked++;
-      if (this.banked >= 60) { Day.add(0, 1, 0); this.banked = 0; }
-      if (this.left <= 0) return this.finish();
-      this.paint();
-    }, 1000);
-    this.paint();
-  },
-  pause() { clearInterval(this.tick); this.running = false; this.paint(); },
-  stop() {
-    clearInterval(this.tick);
-    this.running = false;
-    if (this.banked > 30) Day.add(0, 1, 0);
-    const el = document.getElementById("sprintPill");
-    if (el) el.remove();
-    Day.flush();
-  },
-  finish() {
-    clearInterval(this.tick);
-    this.running = false;
-    Day.add(0, 1, 0);
-    Day.flush();
-    if (window.toast) toast("Sprint finished. " + Math.round(this.total / 60) + " minutes at the desk.");
-    const el = document.getElementById("sprintPill");
-    if (el) el.remove();
-    if ((location.hash || "#/") === "#/") viewDesk();
-  },
-  render() {
-    let el = document.getElementById("sprintPill");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "sprintPill";
-      el.className = "sprint-pill";
-      document.body.appendChild(el);
-    }
-    el.innerHTML = `<span class="sp-k">Sprint</span>
-      <span class="sp-time" id="spTime">--:--</span>
-      <button class="sp-btn" id="spToggle">Pause</button>
-      <button class="sp-btn ghost" id="spStop">Stop</button>`;
-    el.querySelector("#spToggle").onclick = () => (this.running ? this.pause() : this.resume());
-    el.querySelector("#spStop").onclick = () => this.stop();
-    this.paint();
-  },
-  paint() {
-    const t = document.getElementById("spTime");
-    if (!t) return;
-    const m = Math.max(0, Math.floor(this.left / 60)), s = Math.max(0, this.left % 60);
-    t.textContent = m + ":" + String(s).padStart(2, "0");
-    const b = document.getElementById("spToggle");
-    if (b) b.textContent = this.running ? "Pause" : "Resume";
-    const pill = document.getElementById("sprintPill");
-    if (pill) pill.classList.toggle("paused", !this.running);
-  },
-};
-window.CodexSprint = Sprint;
-
-/* ============================================================
    DERIVED NUMBERS
    ============================================================ */
 
@@ -250,28 +174,14 @@ function deskIdentity() {
   const s = (window.CodexExtra && CodexExtra.settings) || {};
   return {
     name: (s.writerName || "").trim(),
-    lucky: (s.luckyName || "Lucky").trim() || "Lucky",
-    skin: s.luckySkin || "calico",
+    lucky: window.CodexLucky ? CodexLucky.name() : "Lucky",
+    skin: window.CodexLucky ? CodexLucky.skin() : "tabby",
   };
 }
-
-const LUCKY_FUR = {
-  calico: { fur: "#c98b5e", head: "#e8c9a8", eye: "#4a3128", nose: "#c2708a" },
-  grey: { fur: "#7e7d86", head: "#adacb5", eye: "#3c4148", nose: "#c2708a" },
-  black: { fur: "#3a3138", head: "#54474f", eye: "#d9c07a", nose: "#a6607a" },
-  cream: { fur: "#d9b995", head: "#f0dcc4", eye: "#5c4a34", nose: "#cf8098" },
-};
-
-function luckySvg(skin) {
-  const f = LUCKY_FUR[skin] || LUCKY_FUR.calico;
-  return `<svg width="26" height="26" viewBox="7 5 26 24" fill="none" aria-hidden="true">
-    <path d="M11 12l1.5-7 6 5.4z" fill="${f.fur}"/>
-    <path d="M23 10l6-5 .4 7z" fill="${f.fur}"/>
-    <circle cx="20" cy="17" r="9" fill="${f.head}"/>
-    <circle cx="16.6" cy="17" r="1.8" fill="${f.eye}"/>
-    <circle cx="23.4" cy="17" r="1.8" fill="${f.eye}"/>
-    <path d="M18.6 20.4h2.8l-1.4 1.7z" fill="${f.nose}"/>
-  </svg>`;
+/* One drawing of the cat, owned by lucky.js, so changing his coat in
+   Settings updates the Desk, the assistant and the sprint clock alike. */
+function luckySvg() {
+  return window.CodexLucky ? CodexLucky.face(26) : "";
 }
 
 /* A monogram medallion stands in for the avatar until the Phase 5
@@ -423,11 +333,11 @@ async function viewDesk() {
 
         <div class="lucky-card">
           <div class="lucky-head">
-            <span class="lucky-face">${luckySvg(id.skin)}</span>
+            <span class="lucky-face" data-lucky-face="26" data-skin="${esc(id.skin)}">${luckySvg()}</span>
             <span class="k">${esc(id.lucky)}'s journal, this week</span>
           </div>
           <div class="lucky-body">${esc(luckyJournal(id, week))}</div>
-          <div class="lucky-meta">Week ${weekOfYear(now)} · ${weekWords.toLocaleString()} words · ${weekMinutes} min at the desk</div>
+          <div class="lucky-meta">Week ${weekOfYear(now)} · ${weekWords.toLocaleString()} words · ${weekMinutes} min at the desk${treatLine()}</div>
         </div>
 
         <div>
@@ -451,10 +361,7 @@ async function viewDesk() {
     <div class="cat-grid">${collectionCards()}</div>
   </div>`;
 
-  $("#deskSprint").onclick = () => {
-    Sprint.start(25);
-    toast("Sprint started. 25 minutes, no interruptions.");
-  };
+  $("#deskSprint").onclick = () => window.CodexSprint && CodexSprint.start(25);
   $("#deskName").onclick = () => {
     const next = prompt("What should the desk call you?", id.name || "");
     if (next === null) return;
@@ -475,6 +382,14 @@ function minutesSince(byDay, since) {
   const h = Math.floor(mins / 60), m = mins % 60;
   const dur = h ? `${h} hour${h === 1 ? "" : "s"}${m ? ` and ${m} minute${m === 1 ? "" : "s"}` : ""}` : `${m} minute${m === 1 ? "" : "s"}`;
   return `${dur} at the desk since ${new Date(since).toLocaleDateString(undefined, { weekday: "long" })}.`;
+}
+
+/* Pets and treats only appear once he has actually earned some. */
+function treatLine() {
+  if (!window.CodexLucky) return "";
+  const pets = CodexLucky.pref("luckyPetsTotal") || 0, treats = CodexLucky.pref("luckyTreats") || 0;
+  if (!pets && !treats) return "";
+  return ` · ${treats} treat${treats === 1 ? "" : "s"} · ${pets} pet${pets === 1 ? "" : "s"}`;
 }
 
 function weekOfYear(d) {

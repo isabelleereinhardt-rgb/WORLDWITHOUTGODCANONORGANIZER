@@ -128,8 +128,10 @@ kbd{font-family:var(--serif);font-size:9px;letter-spacing:.18em;background:trans
   overflow-y:auto;padding:20px 16px 40px}
 #app.sidebar-collapsed .sidebar{display:none}
 .main{grid-area:main;overflow-y:auto;scroll-behavior:smooth}
+/* The rail's controls stay put and only the thread scrolls, so a long
+   answer never pushes the question box off the top of the panel. */
 .assistant{grid-area:assist;background:var(--panel);border-left:1px solid var(--line);
-  overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  overflow:hidden;padding:16px;display:flex;flex-direction:column;gap:12px}
 
 /* ---------- top bar ---------- */
 /* brand sits in its own cell closed by a hairline, per the design */
@@ -328,15 +330,117 @@ h3{font-size:22px}
   color:var(--gold);padding:12px 14px 4px;font-weight:600;display:flex;align-items:center;gap:8px}
 .sr-group:after{content:"";flex:1;height:1px;background:var(--line)}
 
-/* ---------- assistant ---------- */
-.assistant-head{display:flex;align-items:center;justify-content:space-between}
-.assistant-head strong{font-family:var(--serif);font-style:italic;font-size:19px;font-weight:400;color:var(--ink)}
-.assistant-sub{font-size:13.5px;color:var(--dim);margin:0;line-height:1.5}
-.assistant-input{padding:9px 12px;border:1px solid var(--line);border-radius:2px;
-  background:var(--panel2);color:var(--ink);font-family:var(--sans);font-size:14px}
-.assistant-input::placeholder{color:var(--dim)}
-.assistant-input:focus{outline:none;border-color:var(--blush)}
-.assistant-body{display:flex;flex-direction:column;gap:10px}
+/* ---------- assistant rail ---------- */
+.assistant-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ah-who{display:flex;align-items:center;gap:8px;min-width:0}
+.ah-face{width:30px;height:30px;border-radius:50%;background:var(--panel2);border:1px solid var(--gold);
+  display:grid;place-items:center;overflow:hidden;flex:none}
+.ah-name{font-family:var(--serif);font-style:italic;font-size:22px;color:var(--ink)}
+.ah-tools{display:flex;align-items:center;gap:8px;flex:none}
+.ah-tool{background:transparent;border:none;color:var(--dim);font-size:13px;cursor:pointer;padding:2px 3px}
+.ah-tool:hover{color:var(--blush)}
+
+.assistant-chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.a-chip{border:1px solid var(--line);background:transparent;border-radius:2px;padding:3px 8px;
+  font-family:var(--serif);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--dim);cursor:pointer}
+.a-chip:hover{border-color:var(--blush);color:var(--blush)}
+.a-chip.model{display:inline-flex;align-items:center;gap:5px;border-color:var(--blush2);
+  color:var(--blush);cursor:default}
+.a-chip.model:hover{border-color:var(--blush2);color:var(--blush)}
+.a-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--blush)}
+
+.assistant-context{display:flex;align-items:center;gap:7px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:2px;padding:5px 9px;font-size:13.5px;color:var(--dim)}
+.ctx-glyph{color:var(--gold)}
+.ctx-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctx-text a{color:var(--ink)}
+.ctx-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:11px}
+.ctx-x:hover{color:var(--blush)}
+
+.assistant-ask{display:flex;align-items:center;gap:8px;background:var(--panel2);
+  border:1px solid var(--blush2);border-radius:2px;padding:8px 10px}
+.aa-glyph{color:var(--blush);flex:none}
+.assistant-ask input{flex:1;min-width:0;background:transparent;border:none;color:var(--ink);
+  font-family:var(--sans);font-size:14px}
+.assistant-ask input:focus{outline:none}
+.assistant-ask input::placeholder{color:var(--dim)}
+.aa-dictate{flex:none;background:transparent;border:none;color:var(--dim);font-size:11px;
+  cursor:pointer;font-family:var(--serif);letter-spacing:.1em}
+.aa-dictate:hover,.aa-dictate.on{color:var(--blush)}
+
+.assistant-commands{border:1px solid var(--blush2);background:var(--panel2);margin-top:-6px}
+.ac-head{padding:5px 9px;font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold);border-bottom:1px solid var(--line)}
+.ac-row{display:flex;gap:9px;align-items:baseline;width:100%;text-align:left;padding:6px 9px;
+  background:transparent;border:none;cursor:pointer}
+.ac-row.on,.ac-row:hover{background:var(--chip)}
+.ac-cmd{color:var(--blush);font-size:13.5px;width:96px;flex:none}
+.ac-what{flex:1;font-size:13.5px;color:var(--dim);line-height:1.35}
+
+.assistant-head,.assistant-chips,.assistant-context,.assistant-ask,.assistant-commands{flex:none}
+.assistant-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
+  margin:0 -16px -16px;padding:0 16px 16px}
+.a-sect{margin-top:4px}
+.a-sect-k{font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:7px}
+.a-chiprow{display:flex;flex-wrap:wrap;gap:6px}
+.follow-chip{border:1px solid var(--line);background:transparent;border-radius:2px;padding:4px 9px;
+  font-family:var(--serif);font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink);cursor:pointer;text-align:left}
+.follow-chip:hover{border-color:var(--blush);color:var(--blush)}
+.follow-chip.wide{display:block;width:100%;border-style:dashed;font-family:var(--sans);
+  font-size:14px;letter-spacing:0;text-transform:none;padding:6px 9px;margin-bottom:5px}
+.recent-list{display:flex;flex-direction:column}
+.recent-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 0;
+  border:none;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);
+  font-family:var(--sans);font-size:14.5px;cursor:pointer}
+.recent-row:hover{color:var(--blush)}
+.rr-glyph{color:var(--blush2);font-size:10px;flex:none}
+
+/* one question and its answer */
+.a-turn{display:flex;flex-direction:column;gap:12px}
+.a-you{align-self:flex-end;max-width:86%;background:var(--blush);color:var(--onblush);
+  border-radius:2px;padding:9px 11px;font-size:14.5px;line-height:1.45}
+.a-them{max-width:96%;background:var(--panel2);border:1px solid var(--line);border-radius:2px;
+  padding:11px;font-size:14.5px;line-height:1.55;color:var(--ink)}
+.a-cites{margin-top:11px;display:flex;flex-direction:column;gap:6px}
+.a-cite{display:flex;gap:8px;align-items:baseline;border:1px solid var(--line);border-radius:2px;
+  padding:6px 8px;color:var(--ink);text-decoration:none}
+.a-cite:hover{border-color:var(--blush)}
+.ac-n{color:var(--blush);font-family:var(--serif);font-size:10px;letter-spacing:.1em;width:12px;flex:none}
+.ac-body{flex:1;min-width:0}
+.ac-title{font-family:var(--serif);font-style:italic;font-size:16px}
+.ac-quote{display:block;font-size:13px;color:var(--dim);line-height:1.35}
+.ac-quote mark{background:transparent;color:var(--blush);font-weight:600}
+.a-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line)}
+.a-act{border:1px solid var(--line);background:transparent;border-radius:2px;padding:3px 8px;
+  font-family:var(--serif);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--dim);cursor:pointer}
+.a-act:hover{border-color:var(--blush);color:var(--blush)}
+.a-ground{margin-top:9px;font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim)}
+.a-follows{display:flex;flex-direction:column;gap:2px}
+
+/* Lucky's ledger at the foot of the rail */
+.lucky-ledger{margin-top:24px;border:1px solid var(--line);background:var(--panel2);padding:11px}
+.ll-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ll-head .k{font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
+.ll-head .hr{flex:1;height:1px;background:var(--line)}
+.ll-mood{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--blush)}
+.ll-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;text-align:center}
+.ll-n{font-family:var(--serif);font-size:23px;line-height:1;color:var(--ink)}
+.ll-lab{font-family:var(--serif);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--dim);margin-top:3px}
+.ll-line{font-size:13.5px;color:var(--dim);line-height:1.45;margin-top:9px}
+
+/* Below 1120px the rail stops being a column and becomes a drawer. */
+@media(max-width:1120px){
+  #app.assist-open{grid-template-columns:var(--side-w) 1fr}
+  #app.sidebar-collapsed.assist-open{grid-template-columns:0 1fr}
+  .assistant{position:fixed;top:56px;right:0;bottom:0;width:min(var(--assist-w),92vw);
+    z-index:46;box-shadow:-24px 0 60px rgba(0,0,0,.45)}
+}
 .blurb{background:var(--panel2);border:1px solid var(--line);border-radius:2px;padding:12px 14px}
 .blurb .bt{font-family:var(--serif);font-style:italic;font-size:19px;font-weight:400;
   display:flex;align-items:center;gap:7px}
@@ -890,21 +994,88 @@ a.otd-row:hover{color:var(--blush)}
   color:var(--blush2);width:56px;flex:none;padding-top:2px}
 .otd-what{flex:1;min-width:0}
 
-/* sprint pill — a real countdown, parked out of the way */
-.sprint-pill{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:290;
-  display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--gold);
-  border-radius:2px;box-shadow:var(--shadow);padding:9px 14px}
-.sprint-pill.paused{border-color:var(--line)}
-.sprint-pill .sp-k{font-family:var(--serif);font-size:9px;letter-spacing:.24em;
-  text-transform:uppercase;color:var(--gold)}
-.sprint-pill .sp-time{font-family:var(--serif);font-size:22px;font-variant-numeric:tabular-nums;color:var(--ink)}
-.sprint-pill .sp-btn{background:var(--blush);border:none;color:var(--onblush);border-radius:2px;
-  padding:6px 11px;font-family:var(--serif);font-weight:600;font-size:9px;letter-spacing:.18em;
-  text-transform:uppercase;cursor:pointer}
-.sprint-pill .sp-btn:hover{background:var(--blush2)}
-.sprint-pill .sp-btn.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
-.sprint-pill .sp-btn.ghost:hover{border-color:var(--blush);color:var(--blush)}
 @media(max-width:760px){.desk{padding:20px 18px 60px}.desk-greet{font-size:32px}.heat{max-width:100%}}
+
+/* ============================================================
+   THE SPRINT OVERLAY — everything else dims for twenty five minutes
+   ============================================================ */
+.sprint-overlay{position:fixed;inset:0;background:rgba(20,13,16,.88);z-index:280;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:20px}
+.sprint-clock{position:relative;width:250px;height:250px;display:grid;place-items:center;flex:none}
+.sprint-ring{position:absolute;inset:0;width:250px;height:250px}
+#sprintArc{transition:stroke-dashoffset 1s linear}
+.sprint-read{text-align:center}
+.sprint-time{font-family:var(--serif);font-size:64px;line-height:1;color:#f4e8e7;font-variant-numeric:tabular-nums}
+.sprint-sub{font-family:var(--serif);font-size:9px;letter-spacing:.26em;text-transform:uppercase;
+  color:#c4a7ab;margin-top:6px}
+.sprint-nap{position:absolute;bottom:-14px;left:50%;transform:translateX(-50%)}
+.sprint-line{font-family:var(--serif);font-style:italic;font-size:22px;color:#f0e2e1;text-align:center}
+.sprint-ambs{display:flex;gap:7px;flex-wrap:wrap;justify-content:center}
+.amb-chip{flex:none;white-space:nowrap;border:1px solid rgba(240,205,212,.3);background:transparent;
+  border-radius:2px;padding:5px 11px;font-family:var(--serif);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:#e0cdd0;cursor:pointer}
+.amb-chip:hover{border-color:#f6ccd5;color:#f6ccd5}
+.amb-chip.on{border-color:#f6ccd5;background:rgba(246,204,213,.18);color:#f6ccd5}
+.sprint-buttons{display:flex;gap:9px}
+.sprint-btn{background:#f6ccd5;border:none;color:#3a1f28;border-radius:2px;padding:8px 16px;
+  font-family:var(--serif);font-weight:600;font-size:10px;letter-spacing:.2em;text-transform:uppercase;cursor:pointer}
+.sprint-btn:hover{background:#e7b0bd}
+.sprint-btn.ghost{background:transparent;border:1px solid rgba(240,205,212,.3);color:#f0e2e1}
+.sprint-btn.ghost:hover{border-color:#f6ccd5}
+@media(max-width:520px){.sprint-clock,.sprint-ring{width:200px;height:200px}.sprint-time{font-size:48px}}
+
+/* ============================================================
+   LUCKY — he strolls along the bottom of the window
+   ============================================================ */
+.lucky-stage{position:fixed;left:0;right:0;bottom:0;height:200px;pointer-events:none;
+  z-index:25;overflow:hidden}
+.lucky-walk{position:absolute;bottom:6px;left:100vw;pointer-events:auto;cursor:pointer;
+  animation:lucky-walk 34s linear infinite}
+.lucky-bob{animation:lucky-bob .62s ease-in-out infinite}
+.lucky-leg{transform-box:fill-box;transform-origin:50% 0;animation:lucky-leg .62s ease-in-out infinite}
+.lucky-tail{transform-box:fill-box;transform-origin:0 100%;animation:lucky-tail 1.6s ease-in-out infinite}
+.lucky-eye{transform-box:fill-box;transform-origin:50% 50%;animation:lucky-blink 4.2s ease-in-out infinite}
+@keyframes lucky-walk{from{transform:translateX(0)}to{transform:translateX(calc(-100vw - 120px))}}
+@keyframes lucky-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
+@keyframes lucky-leg{0%,100%{transform:rotate(15deg)}50%{transform:rotate(-15deg)}}
+@keyframes lucky-tail{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(10deg)}}
+@keyframes lucky-blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+/* the treat: a hop, then he carries it off screen */
+@keyframes lucky-hop{0%,100%{transform:translateY(0) scaleY(1)}18%{transform:translateY(0) scaleY(.9)}
+  50%{transform:translateY(-13px) scaleY(1.04)}82%{transform:translateY(0) scaleY(.94)}}
+@keyframes lucky-hopaway{0%,52%{transform:translateX(0)}100%{transform:translateX(-92vw)}}
+.lucky-walk.treating{animation:lucky-hopaway 4.6s ease-in forwards}
+.lucky-walk.treating .lucky-bob{animation:lucky-hop .62s ease-in-out 3}
+
+/* his speech bubble */
+.lucky-tip{position:absolute;bottom:56px;left:34px;width:224px;background:var(--panel);
+  border:1px solid var(--gold);box-shadow:0 12px 28px rgba(0,0,0,.3);padding:9px 11px;
+  pointer-events:none;opacity:0;animation:tip-window 34s linear infinite}
+.lucky-tip:after{content:"";position:absolute;left:24px;bottom:-6px;width:10px;height:10px;
+  background:var(--panel);border-right:1px solid var(--gold);border-bottom:1px solid var(--gold);
+  transform:rotate(45deg)}
+.lucky-tip .k{font-family:var(--serif);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:4px}
+.lucky-tip-text{font-size:14px;line-height:1.45;color:var(--ink)}
+.lucky-tip-foot{display:flex;align-items:center;justify-content:space-between;margin-top:7px}
+.pet-meter{color:var(--blush);letter-spacing:.3em;font-size:9px}
+.pet-hint{font-family:var(--serif);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.lucky-ask{display:block;width:100%;text-align:left;margin-top:6px;padding:6px 0 0;
+  border:none;border-top:1px solid var(--line);background:transparent;pointer-events:auto;
+  font-family:var(--serif);font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--blush);cursor:pointer}
+/* the bubble only shows while he is centre-screen */
+@keyframes tip-window{0%,26%{opacity:0}34%,62%{opacity:1}70%,100%{opacity:0}}
+
+/* A cat walking back and forth forever is exactly the kind of motion
+   reduced-motion asks us to stop. Park him, still, at the left. */
+@media(prefers-reduced-motion:reduce){
+  .lucky-walk{animation:none;left:24px}
+  .lucky-bob,.lucky-leg,.lucky-tail,.lucky-eye{animation:none}
+  .lucky-tip{animation:none;opacity:1}
+  .lucky-walk.treating{animation:none}
+  #sprintArc{transition:none}
+}
 
 /* ---------- toast: bottom-right, gold-framed, ✦ glyph, manual ✕ ---------- */
 .toast-stack{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;

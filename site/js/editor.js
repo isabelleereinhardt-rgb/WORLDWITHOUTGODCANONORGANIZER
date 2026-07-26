@@ -130,6 +130,7 @@ async function open(id) {
     doc.title = titleEl.value; doc.html = edEl.innerHTML;
     await S().put("docs", doc);
     stateEl.textContent = S().usingFallback() ? "Saved (local)" : "Saved";
+    window.CodexSound && CodexSound.onSave();
   };
   const touch = () => { stateEl.textContent = "Saving…"; updateWordCount(); clearTimeout(saveT); saveT = setTimeout(persist, 600); };
   updateWordCount();
@@ -167,7 +168,12 @@ async function open(id) {
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
   $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
   $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
-  $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
+  $("#tbAssist").onclick = () => {
+    CodexAssistant.open();
+    // tell the rail what it is looking at, so answers can say so
+    CodexAssistant.context(titleEl.value || "Untitled document", "#/doc/" + encodeURIComponent(doc.id));
+    CodexAssistant.scan(edEl.innerText);
+  };
   $("#tbExport").onclick = () => exportMenu(doc);
   const fsel = $('[data-role="folder-move"]', view());
   if (fsel) fsel.onchange = () => { doc.folder = fsel.value || null; touch(); };

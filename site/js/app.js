@@ -280,6 +280,8 @@ function buildNav() {
 function markActive() {
   const h = location.hash || "#/";
   if (isNarrow()) collapseSidebar(true);
+  window.CodexSound && CodexSound.onPage();
+  if (!h.startsWith("#/doc/")) setAssistantContext(null);
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.classList.toggle("active", el.dataset.route === h ||
       (el.dataset.route !== "#/" && h.startsWith(el.dataset.route))));
@@ -1246,23 +1248,40 @@ function trySummarizeDoc(q) {
     </div>`;
 }
 
-function assistantLookup(q) {
+/* Works out an answer and hands back the pieces the rail needs to
+   frame it: the answer body, the entries it leaned on, a plain-English
+   grounding note, and follow-ups that are actually answerable.
+   Called with structured=false it keeps the old behaviour of writing
+   straight into the panel, which the in-document scanner still uses. */
+function assistantLookup(q, structured) {
   const body = $("#assistantBody");
   q = (q || "").trim();
-  if (!q) { assistantIdle(); return; }
+  if (!q) { if (!structured) assistantIdle(); return null; }
   assistantHistory.push(q);
-  const sum = trySummarizeDoc(q); if (sum) { body.innerHTML = sum; bindAssistantLinks(body); return; }
-  const con = tryConsistency(q); if (con) { body.innerHTML = con; bindAssistantLinks(body); return; }
-  const cmd = tryCommand(q); if (cmd) { body.innerHTML = cmd; bindAssistantLinks(body); return; }
-  const op = tryOpinion(q); if (op) { body.innerHTML = op; bindAssistantLinks(body); return; }
-  const named = matchNamedSubject(q) || partialEntity(q);
-  if (named) { body.innerHTML = blurbCard(named); bindAssistantLinks(body); return; }
-  // multi-word / question → synthesize an answer
-  if (q.split(/\s+/).length >= 2) { body.innerHTML = assistantAnswer(q); bindAssistantLinks(body); return; }
-  // single unknown word → try a search
-  const results = searchAll(q);
-  if (results.length) { body.innerHTML = assistantAnswer(q); bindAssistantLinks(body); return; }
-  body.innerHTML = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
+
+  let html = null;
+  const sum = trySummarizeDoc(q); if (sum) html = sum;
+  if (!html) { const con = tryConsistency(q); if (con) html = con; }
+  if (!html) { const cmd = tryCommand(q); if (cmd) html = cmd; }
+  if (!html) { const op = tryOpinion(q); if (op) html = op; }
+  if (!html) {
+    const named = matchNamedSubject(q) || partialEntity(q);
+    if (named) html = blurbCard(named);
+  }
+  if (!html && q.split(/\s+/).length >= 2) html = assistantAnswer(q);
+  if (!html && searchAll(q).length) html = assistantAnswer(q);
+  if (!html) {
+    html = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
+  }
+
+  if (!structured) { body.innerHTML = html; bindAssistantLinks(body); return null; }
+
+  const hits = searchAll(q);
+  const sources = hits.slice(0, rail.length === "brief" ? 3 : 6);
+  const grounded = hits.length
+    ? `Grounded in ${hits.length} of your own ${hits.length === 1 ? "entry" : "entries"} · nothing invented`
+    : `No matching entries · nothing invented`;
+  return { html, sources, grounded, follows: followUpsFor(q, hits) };
 }
 function partialEntity(q) {
   const ql = q.toLowerCase();
@@ -1276,24 +1295,147 @@ const QUICK_ACTIONS = [
   { label: "Check consistency", q: "check consistency" },
   { label: "Summarize this document", q: "summarize this document" },
 ];
+
+/* The slash commands the rail advertises. Each maps onto a phrasing
+   the parser above already understands, so the menu is a shortcut to
+   real behaviour rather than a second, parallel language. */
+const COMMANDS = [
+  { cmd: "/consistency", what: "Flag facts that disagree across entries", q: "check consistency" },
+  { cmd: "/summarize", what: "Brief on this entry or open document", q: "summarize this document" },
+  { cmd: "/who", what: "Everyone who appears in a subject", q: "who appears in ", open: true },
+  { cmd: "/list", what: "Live list; characters in a place, houses, dates", q: "list all ", open: true },
+  { cmd: "/namecheck", what: "Is this name already used?", q: "namecheck ", open: true },
+];
+
+/* ---------- the rail's own state ---------- */
+const rail = { scope: "canon", length: "brief", turns: 0 };
+
 function assistantIdle() {
   const hist = assistantHistory.list();
-  const histHtml = hist.length ? `<div style="margin-top:14px">
-    <div class="sc-rel-label">Recent</div>
-    <div class="recog">${hist.map(h => `<span class="chip" data-recent="${esc(h)}">${esc(h)}</span>`).join("")}</div>
-  </div>` : "";
-  $("#assistantBody").innerHTML = `<div class="assistant-hint">
-    ${svg("spark")} I read only what <b>you've</b> written.<br><br>
-    Look up any name for an instant summary, ask a question in plain words, give me a task
-    ("list all characters in Aicruae"), ask my opinion ("favourite house"), check your canon for
-    contradictions, summarize the document you're writing, or open a Document and I'll recognise
-    names as you type.</div>
-    <div style="margin-top:14px">
-      <div class="sc-rel-label">Quick actions</div>
-      <div class="recog">${QUICK_ACTIONS.map(a => `<span class="chip" data-quick="${esc(a.q)}">${esc(a.label)}</span>`).join("")}</div>
-    </div>${histHtml}`;
-  $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
-  $$('[data-quick]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.quick; assistantLookup(c.dataset.quick); });
+  $("#assistantBody").innerHTML = `
+    <div class="assistant-hint">
+      I answer from your own entries and nothing else. Look up a name, ask a question in plain
+      words, give me a task, or type <b>/</b> for commands.
+    </div>
+    <div class="a-sect">
+      <div class="a-sect-k">Try one</div>
+      <div class="a-chiprow">${QUICK_ACTIONS.map(a =>
+        `<button class="follow-chip" data-quick="${esc(a.q)}">${esc(a.label)}</button>`).join("")}</div>
+    </div>
+    ${hist.length ? `<div class="a-sect">
+      <div class="a-sect-k">Recent lookups</div>
+      <div class="recent-list">${hist.map(h =>
+        `<button class="recent-row" data-recent="${esc(h)}"><span class="rr-glyph">✧</span>${esc(h)}</button>`).join("")}</div>
+    </div>` : ""}
+    ${luckyLedgerHtml()}`;
+  bindAssistantChips($("#assistantBody"));
+}
+
+/* Lucky's ledger, shown at the foot of the rail. Every number is a
+   real count; the mood line is his voice, not a claim. */
+function luckyLedgerHtml() {
+  if (!window.CodexLucky) return "";
+  const p = CodexLucky.persona();
+  return `<div class="lucky-ledger" data-skin="${esc(CodexLucky.skin())}">
+    <div class="ll-head">
+      <span class="k">${esc(CodexLucky.name())}'s journal</span>
+      <span class="hr"></span>
+      <span class="ll-mood">${esc(p.mood)}</span>
+    </div>
+    <div class="ll-grid">${CodexLucky.ledger().map(l =>
+      `<div><div class="ll-n">${l.n}</div><div class="ll-lab">${esc(l.label)}</div></div>`).join("")}</div>
+    <div class="ll-line">${esc(p.moodLine)}</div>
+  </div>`;
+}
+
+function bindAssistantChips(root) {
+  $$("[data-quick]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.quick));
+  $$("[data-recent]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.recent));
+  $$("[data-follow]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.follow));
+}
+
+/* ---------- one question, one answer, appended as a turn ---------- */
+function askAssistant(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  const input = $("#assistantInput");
+  if (input) input.value = "";
+  hideCommands();
+  const body = $("#assistantBody");
+  if (!rail.turns) body.innerHTML = "";
+  rail.turns++;
+
+  const answer = assistantLookup(q, true);
+  const turn = document.createElement("div");
+  turn.className = "a-turn";
+  turn.innerHTML = `
+    <div class="a-you">${esc(q)}</div>
+    <div class="a-them">
+      ${answer.html}
+      ${answer.sources.length ? `<div class="a-cites">${answer.sources.map((s, i) =>
+        `<a class="a-cite" href="#/entry/${encodeURIComponent(s.id)}">
+          <span class="ac-n">${i + 1}</span>
+          <span class="ac-body"><span class="ac-title">${esc(s.title)}</span>
+          <span class="ac-quote">${snippet(s._hay || s.body || "", q, 110) || esc(s.category)}</span></span></a>`).join("")}</div>` : ""}
+      <div class="a-actions">
+        <button class="a-act" data-act="copy">Copy</button>
+        <button class="a-act" data-act="insert">Insert into document</button>
+        <button class="a-act" data-act="read">Read aloud</button>
+      </div>
+      <div class="a-ground">${answer.grounded}</div>
+    </div>
+    ${answer.follows.length ? `<div class="a-follows">
+      <div class="a-sect-k">Ask next</div>
+      ${answer.follows.map(f => `<button class="follow-chip wide" data-follow="${esc(f)}">${esc(f)}</button>`).join("")}
+    </div>` : ""}`;
+  body.appendChild(turn);
+  bindAssistantLinks(turn);
+  bindAssistantChips(turn);
+  bindAnswerActions(turn);
+  turn.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function bindAnswerActions(turn) {
+  const text = () => (turn.querySelector(".a-them").innerText || "").trim();
+  $$("[data-act]", turn).forEach(b => b.onclick = () => {
+    const act = b.dataset.act;
+    if (act === "copy") {
+      navigator.clipboard ? navigator.clipboard.writeText(text()).then(() => toast("Answer copied")) : toast("Copying isn't available here");
+    } else if (act === "insert") {
+      const ed = document.getElementById("docEditor");
+      if (!ed) return toast("Open a document first, then insert.");
+      ed.focus();
+      document.execCommand("insertText", false, text());
+      toast("Inserted into your document");
+    } else if (act === "read") {
+      window.CodexSpeech ? CodexSpeech.read(text()) : toast("Read-aloud isn't available here");
+    }
+  });
+}
+
+/* Follow-ups have to be answerable, so they are built from what the
+   answer actually found rather than from a fixed list. Imported
+   entries can carry very long headline-ish titles, which make an
+   unreadable question — only a short, name-like subject is used. */
+function followUpsFor(q, sources) {
+  const out = [];
+  const subj = usableSubject(matchNamedSubject(q)) ||
+               // the first result whose title is short enough to read as a name
+               (sources.map(s => usableSubject(s.title)).filter(Boolean)[0] || null);
+  if (subj) {
+    out.push(`Who appears alongside ${subj}?`);
+    out.push(`Check consistency for ${subj}`);
+  }
+  if (!/consistency/i.test(q)) out.push("Check my canon for contradictions");
+  if (!/\bcharacters?\b/i.test(q)) out.push("List all characters");
+  if (!/\bhouses?\b/i.test(q)) out.push("List all noble houses");
+  if (document.getElementById("docEditor")) out.push("Summarize this document");
+  return out.slice(0, 3);
+}
+function usableSubject(s) {
+  s = (s || "").trim();
+  if (!s || s.length > 34 || s.split(/\s+/).length > 4) return null;
+  return s;
 }
 function assistantScan(text) {
   const found = [], seen = new Set();
@@ -1310,8 +1452,79 @@ function assistantScan(text) {
 function bindAssistantLinks(root) {
   $$(".chip[data-subject]", root).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject));
 }
-window.CodexAssistant = { scan: assistantScan, lookup: assistantLookup, open: openAssistant };
-function openAssistant() { $("#app").classList.add("assist-open"); $("#assistant").hidden = false; }
+
+/* ---------- the slash-command menu ---------- */
+function showCommands(typed) {
+  const menu = $("#assistantCommands");
+  const term = typed.slice(1).toLowerCase();
+  const hits = COMMANDS.filter(c => c.cmd.slice(1).startsWith(term));
+  if (!hits.length) return hideCommands();
+  menu.hidden = false;
+  menu.innerHTML = `<div class="ac-head">Commands</div>` + hits.map((c, i) =>
+    `<button class="ac-row${i === 0 ? " on" : ""}" data-cmd="${esc(c.cmd)}">
+      <span class="ac-cmd">${esc(c.cmd)}</span><span class="ac-what">${esc(c.what)}</span></button>`).join("");
+  $$("[data-cmd]", menu).forEach(b => b.onclick = () => pickCommand(b.dataset.cmd));
+}
+function hideCommands() { const m = $("#assistantCommands"); if (m) { m.hidden = true; m.innerHTML = ""; } }
+
+/* A command that needs a subject leaves the input primed and waiting
+   rather than firing a half-formed question. */
+function pickCommand(cmd) {
+  const c = COMMANDS.find(x => x.cmd === cmd);
+  if (!c) return;
+  hideCommands();
+  const input = $("#assistantInput");
+  if (c.open) { input.value = c.q; input.focus(); return; }
+  askAssistant(c.q);
+}
+
+/* Enter either completes a bare command or asks the question as typed. */
+function runAssistantInput(v) {
+  v = (v || "").trim();
+  if (!v) return;
+  if (v.startsWith("/")) {
+    const exact = COMMANDS.find(c => v === c.cmd);
+    if (exact) return pickCommand(exact.cmd);
+    const partial = COMMANDS.find(c => v.startsWith(c.cmd + " "));
+    if (partial) return askAssistant(partial.q.trim() + " " + v.slice(partial.cmd.length).trim());
+    const first = COMMANDS.find(c => c.cmd.startsWith(v));
+    if (first) return pickCommand(first.cmd);
+  }
+  askAssistant(v);
+}
+
+/* The context pill: what the assistant is looking at right now. */
+function setAssistantContext(label, href) {
+  const el = $("#assistantContext");
+  if (!el) return;
+  if (!label) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="ctx-glyph">❖</span>
+    <span class="ctx-text">Reading <a href="${href || "#"}">${esc(label)}</a></span>
+    <button class="ctx-x" title="Stop using this as context">✕</button>`;
+  el.querySelector(".ctx-x").onclick = () => setAssistantContext(null);
+}
+window.CodexAssistant = { scan: assistantScan, lookup: assistantLookup, open: openAssistant,
+  ask: askAssistant, context: setAssistantContext };
+function openAssistant() {
+  $("#app").classList.add("assist-open");
+  $("#assistant").hidden = false;
+  // the header portrait is Lucky's, so it has to follow his chosen coat
+  const face = $("#assistantFace");
+  if (face && window.CodexLucky) {
+    face.setAttribute("data-skin", CodexLucky.skin());
+    face.innerHTML = CodexLucky.face(30);
+    $("#assistantName").textContent = CodexLucky.name();
+  }
+  // the ledger counts pets and entries, both of which move while the
+  // rail is closed, so an untouched thread is re-rendered on open
+  if (!rail.turns) {
+    if (window.CodexLucky) CodexLucky.refreshFacts().then(assistantIdle);
+    else assistantIdle();
+  }
+  const input = $("#assistantInput");
+  if (input) setTimeout(() => input.focus(), 60);
+}
 function closeAssistant() { $("#app").classList.remove("assist-open"); $("#assistant").hidden = true; }
 
 /* ============================================================
@@ -1499,9 +1712,36 @@ async function init() {
 
   $("#assistantToggle").onclick = () => $("#assistant").hidden ? openAssistant() : closeAssistant();
   $("#assistantClose").onclick = closeAssistant;
+  $("#assistantNew").onclick = () => { rail.turns = 0; assistantIdle(); $("#assistantInput").focus(); };
+  $("#assistantHistory").onclick = () => { rail.turns = 0; assistantIdle(); };
+  $("#assistantScope").onclick = () => {
+    rail.scope = rail.scope === "canon" ? "everything" : "canon";
+    $("#assistantScope").textContent = (rail.scope === "canon" ? "Canon only" : "Canon + notes") + " ▾";
+    toast(rail.scope === "canon" ? "Reading canon entries only" : "Reading canon entries and your notes");
+  };
+  $("#assistantLength").onclick = () => {
+    rail.length = rail.length === "brief" ? "full" : "brief";
+    $("#assistantLength").textContent = (rail.length === "brief" ? "Brief" : "Full") + " ▾";
+  };
+  $("#assistantDictate").onclick = () => {
+    if (!window.CodexSpeech || !CodexSpeech.dictate) return toast("Dictation isn't supported in this browser");
+    const btn = $("#assistantDictate");
+    btn.classList.add("on");
+    CodexSpeech.dictate(
+      text => { const i = $("#assistantInput"); i.value = (i.value + " " + text).trim(); },
+      () => btn.classList.remove("on"));
+  };
   assistantIdle();
-  let aT;
-  $("#assistantInput").addEventListener("input", e => { clearTimeout(aT); aT = setTimeout(() => assistantLookup(e.target.value), 160); });
+
+  const ai = $("#assistantInput");
+  ai.addEventListener("input", () => {
+    const v = ai.value;
+    if (v.startsWith("/")) showCommands(v); else hideCommands();
+  });
+  ai.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); runAssistantInput(ai.value); }
+    if (e.key === "Escape") hideCommands();
+  });
 
   $("#searchOpen").onclick = () => openSearch("");
   const si = $("#searchInput"); let sT;
