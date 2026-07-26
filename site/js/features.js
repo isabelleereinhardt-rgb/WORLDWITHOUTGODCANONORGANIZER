@@ -36,27 +36,35 @@ function fontStack(name) {
   return `'${name}',${serifish ? "Georgia,serif" : "system-ui,sans-serif"}`;
 }
 
-/* every text style you can pick a font/size/colour for, and where it applies */
+/* every text style you can pick a font/size/colour for, and where it applies.
+   Defaults follow the romantasy design: Cormorant Garamond for display
+   levels, Crimson Pro for body and captions. */
 const TYPO_STYLES = [
-  { key: "title", label: "Title", tag: "h1", defFont: "Fraunces", defSize: 34, defColor: "" },
-  { key: "subtitle", label: "Subtitle", tag: "h2", defFont: "Fraunces", defSize: 20, defColor: "" },
-  { key: "h1", label: "Heading 1", tag: "h1", defFont: "Fraunces", defSize: 28, defColor: "" },
-  { key: "h2", label: "Heading 2", tag: "h2", defFont: "Fraunces", defSize: 23, defColor: "" },
-  { key: "h3", label: "Heading 3", tag: "h3", defFont: "Fraunces", defSize: 19, defColor: "" },
-  { key: "h4", label: "Heading 4", tag: "h4", defFont: "Fraunces", defSize: 17, defColor: "" },
-  { key: "h5", label: "Heading 5", tag: "h5", defFont: "Fraunces", defSize: 15.5, defColor: "" },
-  { key: "h6", label: "Heading 6", tag: "h6", defFont: "Fraunces", defSize: 14, defColor: "" },
-  { key: "h7", label: "Heading 7", tag: "div", defFont: "Fraunces", defSize: 13, defColor: "" },
-  { key: "body", label: "Normal Text", tag: "p", defFont: "Fraunces", defSize: 16.5, defColor: "" },
-  { key: "caption", label: "Caption", tag: "p", defFont: "Inter", defSize: 12, defColor: "" },
+  { key: "title", label: "Title", tag: "h1", defFont: "Cormorant Garamond", defSize: 42, defColor: "" },
+  { key: "subtitle", label: "Subtitle", tag: "h2", defFont: "Cormorant Garamond", defSize: 22, defColor: "" },
+  { key: "h1", label: "Heading 1", tag: "h1", defFont: "Cormorant Garamond", defSize: 32, defColor: "" },
+  { key: "h2", label: "Heading 2", tag: "h2", defFont: "Cormorant Garamond", defSize: 26, defColor: "" },
+  { key: "h3", label: "Heading 3", tag: "h3", defFont: "Cormorant Garamond", defSize: 21, defColor: "" },
+  { key: "h4", label: "Heading 4", tag: "h4", defFont: "Cormorant Garamond", defSize: 19, defColor: "" },
+  { key: "h5", label: "Heading 5", tag: "h5", defFont: "Cormorant Garamond", defSize: 17, defColor: "" },
+  { key: "h6", label: "Heading 6", tag: "h6", defFont: "Cormorant Garamond", defSize: 15, defColor: "" },
+  { key: "h7", label: "Heading 7", tag: "div", defFont: "Cormorant Garamond", defSize: 13, defColor: "" },
+  { key: "body", label: "Normal Text", tag: "p", defFont: "Crimson Pro", defSize: 15, defColor: "" },
+  { key: "caption", label: "Caption", tag: "p", defFont: "Crimson Pro", defSize: 12, defColor: "" },
 ];
 function defaultTypography() {
   const t = {};
   TYPO_STYLES.forEach(s => { t[s.key] = { font: s.defFont, size: s.defSize, color: s.defColor }; });
   return t;
 }
+/* bumped whenever the shipped design defaults change; a saved settings
+   blob from an older design gets its *untouched* font fields migrated
+   forward (see ready()), so the revamp actually shows up instead of the
+   previous defaults being restored over it */
+const DESIGN_VERSION = 2;
 function defaultSettings() {
-  return { accent: "", bg: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces", typography: defaultTypography() };
+  return { accent: "", bg: "", fontSize: 15, uiFont: "Crimson Pro", readFont: "Cormorant Garamond",
+    typography: defaultTypography(), designVersion: DESIGN_VERSION };
 }
 
 /* ---------- shared caches (read synchronously by app.js) ---------- */
@@ -71,7 +79,31 @@ const Extra = {
     this.cats = (await S().all("cats")).sort((a, b) => (a.created || 0) - (b.created || 0));
     const x = await S().all("excludedNames"); this.excludedNames = new Set(x.map(r => r.id));
     const saved = localStorage.getItem("codex.settings");
-    if (saved) { try { this.settings = Object.assign(defaultSettings(), JSON.parse(saved)); } catch (e) {} }
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        this.settings = Object.assign(defaultSettings(), parsed);
+        // A blob saved before the revamp carries the OLD font defaults, which
+        // would be re-applied over the new design. Migrate any font field the
+        // user never deliberately changed (i.e. still equal to a previous
+        // default) up to the current one; anything genuinely customised is
+        // left alone.
+        if ((parsed.designVersion || 1) < DESIGN_VERSION) {
+          const stale = { uiFont: ["Inter"], readFont: ["Fraunces"] };
+          Object.keys(stale).forEach(k => {
+            if (stale[k].includes(parsed[k])) this.settings[k] = defaultSettings()[k];
+          });
+          const defTypo = defaultTypography();
+          const oldTypoFonts = ["Fraunces", "Inter"];
+          Object.keys(defTypo).forEach(key => {
+            const cur = this.settings.typography && this.settings.typography[key];
+            if (cur && oldTypoFonts.includes(cur.font)) this.settings.typography[key] = defTypo[key];
+          });
+          this.settings.designVersion = DESIGN_VERSION;
+          localStorage.setItem("codex.settings", JSON.stringify(this.settings));
+        }
+      } catch (e) {}
+    }
     applySettings(this.settings);
   },
   async hide(ids) { for (const id of ids) { this.hidden.add(id); await S().put("hidden", { id }); } logFeed("Deleted", ids.length + " item" + (ids.length === 1 ? "" : "s")); },

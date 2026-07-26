@@ -39,6 +39,7 @@ const IC = {
   cards:  '<rect x="4" y="6" width="10" height="12" rx="1.4" transform="rotate(-8 9 12)"/><rect x="6" y="4" width="10" height="12" rx="1.4"/>',
   timeline:'<path d="M3.5 10h13"/><circle cx="6" cy="10" r="1.6"/><circle cx="10.5" cy="10" r="1.6"/><circle cx="15" cy="10" r="1.6"/><path d="M6 10V5.5M15 10v4.5"/>',
   draw:   '<path d="M4.5 15.5l1-4L13.5 3.5a1.6 1.6 0 0 1 2.2 2.2L7.7 13.7l-4 1z"/><path d="M11.5 5.5l3 3"/>',
+  help:   '<circle cx="10" cy="10" r="6.6"/><path d="M8.2 8a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4"/><path d="M10 13.6h.01"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -183,11 +184,28 @@ function buildNav() {
        <span class="dot" style="background:${catColor(c.name)}"></span>
        <span>${esc(c.name)}</span><span class="count">${c.count}</span>
      </div>`).join("");
+  // Projects = the folders feature; Pinned = recently-opened entries
+  const folders = (window.CodexFolders && CodexFolders._cache) || [];
+  const projects = folders.map(f => {
+    const n = DB.entries.filter(e => e.folder === f.id).length;
+    return `<div class="nav-item" data-route="#/docs/${f.id}">
+       <span class="dot" style="background:var(--blush2)"></span>
+       <span>${esc(f.name)}</span><span class="count">${n || ""}</span></div>`;
+  }).join("") || `<div class="nav-item mini faint" style="cursor:default">No projects yet</div>`;
+  const pinned = store.recent.map(id => byId[id]).filter(Boolean).slice(0, 5).map(e =>
+    `<div class="nav-item mini" data-route="#/entry/${e.id}">
+       <span style="width:13px;text-align:center;font-size:9px;color:var(--gold)">✧</span>
+       <span style="flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(e.title)}</span>
+     </div>`).join("") || `<div class="nav-item mini faint" style="cursor:default">Nothing opened yet</div>`;
+
+  const wsName = window.CodexWorkspaces ? CodexWorkspaces.current().name : "Workspace";
+  const wsMeta = `${DB.entries.length} entries · ${DB.entities.length} names`;
+
   nav.innerHTML = `
-    <div class="nav-section">
-      <div class="nav-item" data-route="#/">${svg("home")}<span>Home</span></div>
-      <div class="nav-item" data-route="#/maps">${svg("atlas")}<span>Atlas &amp; Galleries</span></div>
-      <div class="nav-item" data-route="#/index">${svg("index")}<span>Name Index</span></div>
+    <div class="ws-card">
+      <div class="legend">Workspace</div>
+      <div class="name">${esc(wsName)}</div>
+      <div class="meta">${esc(wsMeta)}</div>
     </div>
     <div class="nav-section">
       <div class="nav-title-row"><div class="nav-title">The Canon</div>
@@ -195,23 +213,40 @@ function buildNav() {
       ${cats}
     </div>
     <div class="nav-section">
-      <div class="nav-title">Your Workspace</div>
+      <div class="nav-title-row"><div class="nav-title">Workroom</div></div>
+      <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
-      <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases &amp; Mood Boards</span></div>
+      <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
       <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
       <div class="nav-item" data-route="#/sheets">${svg("sheet")}<span>Sheets</span></div>
       <div class="nav-item" data-route="#/study">${svg("cards")}<span>Flashcards &amp; Quiz</span></div>
       <div class="nav-item" data-route="#/timeline">${svg("timeline")}<span>Timeline</span></div>
-      <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Task Manager</span></div>
-      <div class="nav-item" data-route="#/import">${svg("import")}<span>Import &amp; Add Lore</span></div>
-      <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity Feed</span></div>
+      <div class="nav-item" data-route="#/maps">${svg("atlas")}<span>Atlas</span></div>
+      <div class="nav-item" data-route="#/index">${svg("index")}<span>Name Index</span></div>
+      <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Tasks</span></div>
+      <div class="nav-item" data-route="#/import">${svg("import")}<span>Add Lore</span></div>
+      <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity</span></div>
+      <div class="nav-item" data-route="#/help">${svg("help")}<span>Help</span></div>
     </div>
     <div class="nav-section">
-      <div class="nav-title">Data</div>
+      <div class="nav-title-row"><div class="nav-title">Projects</div>
+        <button class="nav-plus" id="navAddFolder" title="New project">+</button></div>
+      ${projects}
+    </div>
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Pinned</div></div>
+      ${pinned}
+    </div>
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Data</div></div>
       <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
       <div class="nav-item mini" id="navExport">${svg("backup")}<span>Back up my work</span></div>
       <div class="nav-item mini" id="navImport">${svg("restore")}<span>Restore backup</span></div>
+    </div>
+    <div class="nav-section">
+      <button class="nav-cta" id="navNewNote">+ New note</button>
+      <div class="ornament" style="margin-top:20px">✦✧✦</div>
     </div>`;
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
@@ -223,7 +258,20 @@ function buildNav() {
     if (!name || !name.trim()) return;
     await CodexExtra.addCat(name.trim());
     buildNav();
-    toast("Section added — file notes into it from Import & Add Lore");
+    toast("Section added — file notes into it from Add Lore");
+  };
+  $("#navAddFolder").onclick = async (ev) => {
+    ev.stopPropagation();
+    const name = prompt("Name this project:");
+    if (!name || !name.trim()) return;
+    await CodexStore.put("folders", { id: "f" + Date.now().toString(36), name: name.trim() });
+    if (window.CodexFolders) await CodexFolders.ensureCache(true);
+    buildNav();
+    toast(`Project “${name.trim()}” created`);
+  };
+  $("#navNewNote").onclick = async () => {
+    const note = await addNote("", "", [], "My Notes");
+    location.hash = "#/entry/" + note.id;
   };
   markActive();
 }
@@ -987,6 +1035,7 @@ function renderSearch(q) {
 }
 function hiSearch() { $$(".sr-item").forEach((it, i) => it.classList.toggle("sel", i === searchSel)); }
 function openSearch(prefill) {
+  window.CodexHelp && CodexHelp.markMilestone("searched");
   $("#searchOverlay").hidden = false;
   const inp = $("#searchInput");
   if (prefill != null) inp.value = prefill;
@@ -1275,8 +1324,9 @@ async function backupAll() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "world-without-god-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.download = "beep-beep-backup-" + new Date().toISOString().slice(0, 10) + ".json";
   a.click();
+  window.CodexHelp && CodexHelp.markMilestone("backup");
   toast("Backup downloaded");
 }
 function restoreAll() {
@@ -1302,15 +1352,34 @@ function restoreAll() {
   inp.click();
 }
 
-/* ---------- toast ---------- */
-let toastT;
+/* ---------- toast ----------
+   Bottom-right gold-framed panel with a ✦ glyph, ~5s auto-dismiss and a
+   manual ✕. Toasts stack rather than replacing one another, so a burst
+   (e.g. importing several files) doesn't swallow all but the last. */
 function toast(msg) {
-  let el = $("#toast");
-  if (!el) { el = document.createElement("div"); el.id = "toast";
-    el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:20px;font-size:13px;z-index:300;box-shadow:var(--shadow);transition:opacity .3s";
-    document.body.appendChild(el); }
-  el.textContent = msg; el.style.opacity = "1";
-  clearTimeout(toastT); toastT = setTimeout(() => el.style.opacity = "0", 1800);
+  let stack = $("#toastStack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "toastStack"; stack.className = "toast-stack";
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = `<span class="tglyph">✦</span><span class="tmsg"></span>
+    <button class="tx" title="Dismiss" aria-label="Dismiss">✕</button>`;
+  el.querySelector(".tmsg").textContent = msg;   // textContent: messages can carry user text
+  let done = false;
+  const dismiss = () => {
+    if (done) return; done = true;
+    clearTimeout(t);
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 260);
+  };
+  el.querySelector(".tx").onclick = dismiss;
+  const t = setTimeout(dismiss, 5000);
+  stack.appendChild(el);
+  // keep the stack from growing without bound in a long burst
+  while (stack.children.length > 4) stack.firstChild.remove();
 }
 window.toast = toast;
 
@@ -1343,6 +1412,7 @@ function route() {
   else if (path === "sheet") window.CodexSheets && CodexSheets.open(parts[1]);
   else if (path === "study") window.CodexStudy && CodexStudy.view();
   else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
+  else if (path === "help") window.CodexHelp && CodexHelp.view();
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
   else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
@@ -1371,6 +1441,8 @@ async function init() {
       await loadNotes();
     }
     if (window.CodexExtra) await CodexExtra.ready();
+    // the sidebar's Projects section renders from this cache
+    if (window.CodexFolders) await CodexFolders.ensureCache(true);
   } catch (e) { /* non-fatal */ }
   buildIndexes();
   buildNav();
@@ -1440,5 +1512,6 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
+  recentCount: () => store.recent.length };
 })();
