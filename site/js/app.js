@@ -129,12 +129,27 @@ function noteToEntry(n) {
   const text = n.text || "";
   return {
     id: n.id, title: n.title || "Untitled note", text,
-    summary: text.replace(/\s+/g, " ").slice(0, 180),
+    // a brief written at import time wins over the raw first line
+    summary: n.brief || text.replace(/\s+/g, " ").slice(0, 180),
+    brief: n.brief || "",
     category: n.category || "My Notes", type: "note",
     wordcount: text.split(/\s+/).filter(Boolean).length,
     images: n.images || [], links: n.links || [], source: null, _user: true,
+    // false when "Let the assistant read it" was switched off at import
+    aiRead: n.aiRead === false ? false : true,
   };
 }
+/* A short brief written once at import: the most descriptive sentences
+   from the top of the text, not a truncation of its first line. */
+function briefOf(text) {
+  const sents = sentencesOf(text || "").filter(s => s.length > 40 && s.length < 300);
+  if (!sents.length) return "";
+  const scored = sents.slice(0, 25).map((s, i) => ({
+    s: s.trim(), score: (DESCRIPTIVE.test(s) ? 1.5 : 0) - i * 0.03,
+  })).sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map(x => x.s).join(" ");
+}
+
 function rebuildEntries() {
   const hidden = window.CodexExtra ? CodexExtra.hidden : new Set();
   // only the workspace(s) flagged hasCanon=true ship with the pre-extracted
@@ -153,11 +168,15 @@ function rebuildEntries() {
   DB.stats.entities = DB.entities.length;
   DB.stats.images = hasCanon ? (window.WORLD_DB && window.WORLD_DB.stats && window.WORLD_DB.stats.images) || 0 : 0;
 }
-async function addNote(title, text, images, category) {
+async function addNote(title, text, images, category, opts) {
+  opts = opts || {};
   const note = {
     id: "note-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     title: title || "Untitled note", text: text || "", images: images || [], category: category || "My Notes",
+    created: Date.now(), updated: Date.now(),
   };
+  if (opts.summarize) note.brief = briefOf(note.text);
+  if (opts.aiRead === false) note.aiRead = false;
   await CodexStore.put("notes", note);
   notesCache.unshift(note);
   refresh();
@@ -426,9 +445,10 @@ function subjectsOf(entry) {
   entry.title.split(/\s+/).forEach(w => { if (entitySet.has(w)) subs.add(w); });
   return Array.from(subs);
 }
-function mentionsOf(name, excludeId) {
+function mentionsOf(name, excludeId, forAssistant) {
   const n = name.toLowerCase();
-  return DB.entries.filter(e => e.id !== excludeId && (e.type === "pdf" || e.type === "note") && e._hay.includes(n));
+  return DB.entries.filter(e => e.id !== excludeId && (e.type === "pdf" || e.type === "note") &&
+    e._hay.includes(n) && (!forAssistant || readableByAI(e)));
 }
 
 /* ============================================================
@@ -775,48 +795,87 @@ function viewImport() {
   // "My Notes", and any custom sections you've made with the + button
   const allCats = categoriesList().map(c => c.name);
   const custom = customCats();
-  view.innerHTML = `<div class="wrap">
-    <div class="page-kicker">${svg("import")} Import &amp; Add Lore</div>
-    <h1>Add to your canon</h1>
-    <p class="muted">Drop in <b>PDFs</b> (text and page images both come in, like Notion), <b>Word documents</b>
-      (.docx), text or Markdown files, or add images directly. Everything is indexed straight away — searchable,
-      cross-linked, and readable by the assistant. It's stored privately in this browser (back it up from the sidebar).</p>
+  const recent = notesCache.slice(0, 5);
+  view.innerHTML = `<div class="wrap wide add-lore">
+    <div class="page-kicker">Import PDF · Word · Markdown · paste · dictate</div>
+    <h1 class="display">Add lore</h1>
 
     <div class="dropzone" id="dropzone">
       <div class="dz-inner">
-        <div class="dz-title">Drag files here, or click to choose</div>
-        <div class="dz-sub">PDF · Word (.docx) · Text &amp; Markdown · Images · a backup <b>.json</b> restores everything</div>
+        <div class="ornament">✦ ✧ ✦</div>
+        <div class="dz-title">Drop files here</div>
+        <div class="dz-sub">PDFs come in with both their text and page images · .docx · .txt · .md · images
+          · a backup <b>.json</b> restores everything</div>
+        <div class="dz-actions">
+          <button class="btn sm" id="chooseFiles">Choose files</button>
+          <button class="btn ghost sm" id="dictateLore">✧ Dictate instead</button>
+        </div>
       </div>
       <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
     </div>
     <div class="import-progress" id="importProgress" hidden></div>
 
-    <h3 style="font-family:var(--serif);margin-top:34px">Or write / paste it in</h3>
-    <input class="import-title" id="pasteTitle" placeholder="Title (e.g. a character, place, or note)">
-    <textarea class="import-body" id="pasteBody" placeholder="Paste or type the lore here…"></textarea>
-    <div class="import-row">
-      <select class="folder-select" id="pasteCat" title="Which section this gets filed under">
-        ${allCats.map(c => `<option value="${esc(c)}" ${c === "My Notes" ? "selected" : ""}>${esc(c)}</option>`).join("")}
-      </select>
-      <button class="btn" id="addPaste">Add to my canon</button>
+    <div class="lore-grid">
+      <div>
+        <div class="rule-head"><span class="k">Or paste writing</span><span class="hr"></span></div>
+        <input class="import-title" id="pasteTitle" placeholder="Give it a title — a character, a place, a note">
+        <textarea class="import-body" id="pasteBody" placeholder="Paste a chapter, a note, a scrap of dialogue. It is indexed the moment you save it; searchable, cross-linked, and readable by the assistant."></textarea>
+      </div>
+      <div class="lore-side">
+        <div class="rule-head"><span class="k">File it under</span><span class="hr"></span></div>
+        <select class="folder-select" id="pasteCat" title="Which section this gets filed under">
+          ${allCats.map(c => `<option value="${esc(c)}" ${c === "My Notes" ? "selected" : ""}>${esc(c)}</option>`).join("")}
+        </select>
+        <div class="rule-head mt"><span class="k">On import</span><span class="hr"></span></div>
+        <label class="lore-opt"><input type="checkbox" id="optSummarize" checked>
+          <span>Write a brief<em>Three telling sentences, kept at the top of the entry.</em></span></label>
+        <label class="lore-opt"><input type="checkbox" id="optAiRead" checked>
+          <span>Let the assistant read it<em>Off keeps it out of answers. It stays searchable either way.</em></span></label>
+        <button class="btn" id="addPaste" style="width:100%;margin-top:14px">Save &amp; index</button>
+        ${custom.length ? "" : `<p class="faint" style="margin-top:10px;font-size:12px">Want a section of your own?
+          Use the <b>+</b> beside "The Canon" in the sidebar; it appears in this list too.</p>`}
+      </div>
     </div>
-    ${custom.length ? "" : `<p class="faint" style="margin-top:8px;font-size:12px">Want a section of your own (not one of the built-in ones)?
-      Click the <b>+</b> next to "The Canon" in the sidebar to create one — it'll show up in this list too.</p>`}
 
     <div id="importLog" class="import-log"></div>
+
+    ${recent.length ? `<div class="rule-head mt"><span class="k">Recent imports</span><span class="hr"></span>
+      <span class="meta">${notesCache.length} added in this workspace</span></div>
+      <div class="recent-imports">${recent.map(n => {
+        const words = (n.text || "").split(/\s+/).filter(Boolean).length;
+        return `<a class="ri-row" href="#/entry/${encodeURIComponent(n.id)}">
+          <span class="ri-kind">${esc(n.category || "My Notes")}</span>
+          <span class="ri-name">${esc(n.title || "Untitled")}</span>
+          <span class="ri-meta">${words.toLocaleString()} words${n.brief ? " · brief written" : ""}${n.aiRead === false ? " · assistant off" : ""}</span>
+          <span class="ri-open">Open</span></a>`;
+      }).join("")}</div>` : ""}
   </div>`;
 
   const dz = $("#dropzone"), fi = $("#fileInput");
-  dz.onclick = () => fi.click();
+  const openPicker = e => { e && e.stopPropagation(); fi.click(); };
+  dz.onclick = openPicker;
+  $("#chooseFiles").onclick = openPicker;
   dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
   dz.ondragleave = () => dz.classList.remove("over");
   dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); handleFiles(e.dataTransfer.files); };
   fi.onchange = () => handleFiles(fi.files);
 
+  $("#dictateLore").onclick = e => {
+    e.stopPropagation();
+    if (!window.CodexSpeech || !CodexSpeech.dictate) return toast("Dictation isn't supported in this browser");
+    const btn = $("#dictateLore"), body = $("#pasteBody");
+    btn.classList.add("active");
+    body.focus();
+    CodexSpeech.dictate(
+      text => { body.value = (body.value + " " + text).trim(); },
+      () => btn.classList.remove("active"));
+  };
+
   $("#addPaste").onclick = async () => {
     const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim(), c = $("#pasteCat").value;
     if (!b) { toast("Nothing to add yet"); return; }
-    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c);
+    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c,
+      { summarize: $("#optSummarize").checked, aiRead: $("#optAiRead").checked });
     logImport(`Added <b>${esc(note.title)}</b> to <b>${esc(c)}</b>.`, c);
     $("#pasteTitle").value = ""; $("#pasteBody").value = "";
     location.hash = "#/entry/" + note.id;
@@ -917,7 +976,7 @@ function viewSearchPage(q) {
   const body = Object.keys(groups).map(cat => `
     <div class="sr-group">${catDot(cat)} ${esc(cat)}</div>
     <div class="list-grid">${groups[cat].map(e => `<a class="entry-card" href="#/entry/${e.id}" style="min-height:auto">
-      <h3>${esc(e.title)}</h3><p>${e.type === "gallery" ? e.images.length + " images" : "…" + snippet(e.text, q.split(/\s+/)[0], 200) + "…"}</p>
+      <h3>${esc(e.title)}</h3><p>${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, q.split(/\s+/)[0], 200)}</p>
       <div class="meta">${catDot(e.category)} ${esc(e.category)}</div></a>`).join("")}</div>`).join("");
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${svg("search")} Search</div>
@@ -969,14 +1028,29 @@ function topEntitiesAcross(entries, terms, limit) {
   }));
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, limit);
 }
-function matchNamedSubject(q) {
+/* "Let the assistant read it", switched off at import, has to hold on
+   every path into an entry — not just full-text search. These helpers
+   take forAssistant so the same lookups can stay complete for the
+   pages you browse while staying closed to the assistant. */
+function readableByAI(e) { return e.aiRead !== false; }
+/* the one pool every assistant answer is built from */
+function aiEntries() { return DB.entries.filter(readableByAI); }
+function aiBlockedTitles() {
+  const s = new Set();
+  DB.entries.forEach(e => { if (e.aiRead === false) s.add(e.title.toLowerCase()); });
+  return s;
+}
+
+function matchNamedSubject(q, forAssistant) {
   const ql = q.trim().toLowerCase();
-  const entry = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === ql);
+  const pool = forAssistant ? DB.entries.filter(readableByAI) : DB.entries;
+  const entry = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === ql);
   if (entry) return entry.title;
-  const ent = DB.entities.find(n => n.toLowerCase() === ql);
+  const blocked = forAssistant ? aiBlockedTitles() : null;
+  const ent = DB.entities.find(n => n.toLowerCase() === ql && !(blocked && blocked.has(n.toLowerCase())));
   if (ent) return ent;
   // "House X" convenience
-  const h = DB.entries.find(e => e.title.toLowerCase() === "house " + ql);
+  const h = pool.find(e => e.title.toLowerCase() === "house " + ql);
   if (h) return h.title;
   return null;
 }
@@ -987,15 +1061,26 @@ function matchNamedSubject(q) {
 function snippet(text, q, len = 160) {
   const t = (text || "").replace(/\s+/g, " ");
   const i = t.toLowerCase().indexOf((q || "").toLowerCase());
-  if (i < 0) return esc(t.slice(0, len));
-  const start = Math.max(0, i - len / 3 | 0);
-  const seg = t.slice(start, start + len);
+  if (i < 0) return esc(trimToWords(t.slice(0, len), false, len < t.length));
+  let start = Math.max(0, i - len / 3 | 0);
+  const seg = trimToWords(t.slice(start, start + len), start > 0, start + len < t.length);
   return esc(seg).replace(new RegExp("(" + (q || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "ig"), "<mark>$1</mark>");
 }
-function searchAll(q) {
+/* Slicing a string at a character offset lands mid-word and reads as a
+   typo, so snap both ends to whitespace and mark where text was cut. */
+function trimToWords(seg, cutHead, cutTail) {
+  if (cutHead) { const s = seg.indexOf(" "); if (s > -1 && s < 24) seg = seg.slice(s + 1); }
+  if (cutTail) { const e = seg.lastIndexOf(" "); if (e > seg.length - 24) seg = seg.slice(0, e); }
+  return (cutHead ? "…" : "") + seg.trim() + (cutTail ? "…" : "");
+}
+/* Search reaches everything; the assistant only reads what you let it.
+   Passing forAssistant=true honours the "Let the assistant read it"
+   switch set when the entry was imported. */
+function searchAll(q, forAssistant) {
   q = q.trim().toLowerCase(); if (!q) return [];
   const terms = q.split(/\s+/); const res = [];
-  for (const e of DB.entries) {
+  const pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
+  for (const e of pool) {
     const hay = e._hay, title = e.title.toLowerCase(); let score = 0;
     for (const t of terms) {
       if (!hay.includes(t)) { score = -1; break; }
@@ -1011,23 +1096,38 @@ function searchAll(q) {
 let searchSel = 0, searchList = [];
 function renderSearch(q) {
   const box = $("#searchResults");
-  if (!q.trim()) { box.innerHTML = `<div class="sr-empty">Start typing to search your whole canon.</div>`; return; }
+  if (!q.trim()) {
+    box.innerHTML = `<div class="sr-empty">Start typing. Every entry, note, document and caption is searched at once.</div>`;
+    searchList = []; return;
+  }
   const results = searchAll(q);
-  if (!results.length) { box.innerHTML = `<div class="sr-empty">No matches for “${esc(q)}”.</div>`; return; }
-  const overview = queryOverviewHtml(q, results);
-  const groups = {};
-  results.forEach(e => (groups[e.category] = groups[e.category] || []).push(e));
-  let html = overview ? `<div class="sr-overview">${overview}
-    <a class="sr-fulllink" href="#/search/${encodeURIComponent(q)}">Open full results →</a></div>` : "", flat = [];
-  Object.keys(groups).forEach(cat => {
-    html += `<div class="sr-group">${catDot(cat)} ${esc(cat)}</div>`;
-    groups[cat].forEach(e => {
-      const idx = flat.length; flat.push(e);
-      html += `<a class="sr-item" data-i="${idx}" href="#/entry/${e.id}">
-        <div><span class="t">${esc(e.title)}</span></div>
-        <div class="s">${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, q.split(/\s+/)[0], 150)}</div>
-      </a>`;
-    });
+  if (!results.length) {
+    box.innerHTML = `<div class="sr-empty">Nothing in the canon mentions “${esc(q)}” yet.
+      It will appear here the moment you write it.</div>`;
+    searchList = []; return;
+  }
+
+  /* The Brief sits above the results: what your own passages say about
+     this, assembled before you have to open anything. */
+  const brief = briefTextFor(q, results);
+  let html = brief ? `<div class="sr-brief">
+      <div class="sr-brief-k">✦ Brief</div>
+      <p>${brief}</p>
+      <a class="sr-fulllink" href="#/search/${encodeURIComponent(q)}">Open full results →</a>
+    </div>` : "";
+
+  const flat = [];
+  const term = q.trim().split(/\s+/)[0];
+  results.forEach(e => {
+    const idx = flat.length; flat.push(e);
+    const matches = countMatches(e, q);
+    html += `<a class="sr-item" data-i="${idx}" href="#/entry/${e.id}">
+      <span class="sr-kind">${esc(e.category)}</span>
+      <span class="sr-body">
+        <span class="sr-title">${esc(e.title)}</span>
+        <span class="sr-snip">${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, term, 150)}</span>
+        <span class="sr-matches">${matches} mention${matches === 1 ? "" : "s"}${e.aiRead === false ? " · assistant off" : ""}</span>
+      </span></a>`;
   });
   searchList = flat; searchSel = 0;
   box.innerHTML = html;
@@ -1037,6 +1137,44 @@ function renderSearch(q) {
   });
   bindSummaryChips(box);
   hiSearch();
+}
+
+/* how many times the query actually appears in an entry */
+function countMatches(e, q) {
+  const hay = e._hay || "";
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return 0;
+  return Math.max(...terms.map(t => hay.split(t).length - 1));
+}
+
+/* Plain sentences for the Brief band. Reuses the summary machinery but
+   returns text, since the band has its own frame. */
+function briefTextFor(q, results) {
+  const named = matchNamedSubject(q);
+  if (named) {
+    const sents = topicSummary(named, 3);        // returns sentences, not a string
+    if (sents.length) return esc(sents.join(" "));
+  }
+  const terms = q.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  const cands = [];
+  results.slice(0, 8).forEach((e, ei) => {
+    sentencesOf(e.text).forEach((s, idx) => {
+      const sl = s.toLowerCase();
+      const hit = terms.filter(t => sl.includes(t)).length;
+      if (hit && s.length > 30 && s.length < 320) {
+        cands.push({ s: s.trim(), score: hit * 2 - ei * 0.2 - idx * 0.01 + (DESCRIPTIVE.test(s) ? 0.5 : 0) });
+      }
+    });
+  });
+  cands.sort((a, b) => b.score - a.score);
+  const out = [], seen = new Set();
+  for (const c of cands) {
+    const k = c.s.slice(0, 44).toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(c.s);
+    if (out.length >= 3) break;
+  }
+  return out.length ? esc(out.join(" ")) : "";
 }
 function hiSearch() { $$(".sr-item").forEach((it, i) => it.classList.toggle("sel", i === searchSel)); }
 function openSearch(prefill) {
@@ -1052,13 +1190,14 @@ function closeSearch() { $("#searchOverlay").hidden = true; }
 /* ============================================================
    ASSISTANT — local canon retrieval + summaries + Q&A
    ============================================================ */
-function bestEntryFor(name) {
+function bestEntryFor(name, forAssistant) {
   const n = name.toLowerCase();
-  let exact = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === n);
+  const pool = forAssistant ? DB.entries.filter(readableByAI) : DB.entries;
+  let exact = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === n);
   if (exact) return exact;
-  let houses = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === "house " + n);
+  let houses = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === "house " + n);
   if (houses) return houses;
-  const hits = mentionsOf(name, null);
+  const hits = mentionsOf(name, null, forAssistant);
   if (!hits.length) return null;
   const metaPenalty = e => (e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") ? 1 : 0;
   hits.sort((a, b) => metaPenalty(a) - metaPenalty(b) || (b._hay.split(n).length) - (a._hay.split(n).length));
@@ -1067,7 +1206,7 @@ function bestEntryFor(name) {
 
 /* rich blurb: a natural-reading answer (not a raw source quote), + facts + related + sources */
 function blurbCard(name) {
-  const e = bestEntryFor(name);
+  const e = bestEntryFor(name, true);
   if (!e) return `<div class="blurb"><div class="bt">${esc(name)}</div>
     <div class="bs faint">No canon entry yet — this name isn't in your lore.</div></div>`;
   const sents = topicSummary(name, 3);
@@ -1083,7 +1222,7 @@ function blurbCard(name) {
     summary = lede + " " + summary;
   }
   const rel = relatedNames(name, 6);
-  const others = mentionsOf(name, e.id).length;
+  const others = mentionsOf(name, e.id, true).length;
   return `<div class="blurb">
     <div class="bt">${catDot(e.category)} ${esc(name)}</div>
     <div class="bc">${esc(e.category)}</div>
@@ -1107,7 +1246,7 @@ function firstSentenceWith(text, name) {
 
 /* answer a free-text question by synthesizing across passages */
 function assistantAnswer(q) {
-  const results = searchAll(q);
+  const results = searchAll(q, true);
   if (!results.length) return `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.</div>`;
   const overview = queryOverviewHtml(q, results);
   const sources = results.slice(0, 6).map(e =>
@@ -1155,7 +1294,7 @@ function tryCommand(q) {
   // strip trailing filler that isn't actually a topic — "how many houses ARE THERE", "characters DO I HAVE"
   after = after.replace(/\s*(are there|is there|do i have|does it have|exist|are in my canon|do you have|are in the canon|are there\?)\s*$/i, "").trim();
   const filterTerm = after;
-  let pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
+  let pool = aiEntries().filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (filterTerm) pool = pool.filter(e => e._hay.includes(filterTerm.toLowerCase()));
   pool = pool.sort((a, b) => a.title.localeCompare(b.title));
   const label = filterTerm ? `${kind.cat} in "${filterTerm}"` : kind.cat;
@@ -1170,9 +1309,9 @@ function tryOpinion(q) {
   if (!OPINION_TRIGGER.test(q)) return null;
   const kind = findKind(q);
   if (!kind) return null;
-  const pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
+  const pool = aiEntries().filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(kind.label)} entries to pick from yet.</div>`;
-  const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
+  const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id, true).length + (e.wordcount || 0) / 200 }));
   scored.sort((a, b) => b.score - a.score);
   const pick = scored[0].e;
   const sents = topicSummary(pick.title, 2);
@@ -1196,10 +1335,10 @@ function tryConsistency(q) {
   // happens to name-drop it in passing, which would compare apples to oranges
   const sl = subject.toLowerCase();
   const pool = subject
-    ? DB.entries.filter(e => (e.type === "pdf" || e.type === "note") &&
+    ? aiEntries().filter(e => (e.type === "pdf" || e.type === "note") &&
         (e.title.toLowerCase().includes(sl) ||
          ((e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") && e._hay.includes(sl))))
-    : DB.entries.filter(e => e.type === "pdf" || e.type === "note");
+    : aiEntries().filter(e => e.type === "pdf" || e.type === "note");
   const uniq = Array.from(new Set(pool)).filter(e => e && (e.type === "pdf" || e.type === "note")).slice(0, 40);
   if (!uniq.length) return `<div class="assistant-hint">I couldn't find anything to check${subject ? ` for "${esc(subject)}"` : ""}.</div>`;
   // gather every entry's own declared facts, grouped by fact key
@@ -1265,27 +1404,28 @@ function assistantLookup(q, structured) {
   if (!html) { const cmd = tryCommand(q); if (cmd) html = cmd; }
   if (!html) { const op = tryOpinion(q); if (op) html = op; }
   if (!html) {
-    const named = matchNamedSubject(q) || partialEntity(q);
+    const named = matchNamedSubject(q, true) || partialEntity(q, true);
     if (named) html = blurbCard(named);
   }
   if (!html && q.split(/\s+/).length >= 2) html = assistantAnswer(q);
-  if (!html && searchAll(q).length) html = assistantAnswer(q);
+  if (!html && searchAll(q, true).length) html = assistantAnswer(q);
   if (!html) {
     html = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
   }
 
   if (!structured) { body.innerHTML = html; bindAssistantLinks(body); return null; }
 
-  const hits = searchAll(q);
+  const hits = searchAll(q, true);
   const sources = hits.slice(0, rail.length === "brief" ? 3 : 6);
   const grounded = hits.length
     ? `Grounded in ${hits.length} of your own ${hits.length === 1 ? "entry" : "entries"} · nothing invented`
     : `No matching entries · nothing invented`;
   return { html, sources, grounded, follows: followUpsFor(q, hits) };
 }
-function partialEntity(q) {
+function partialEntity(q, forAssistant) {
   const ql = q.toLowerCase();
-  const m = DB.entities.find(n => n.toLowerCase().includes(ql));
+  const blocked = forAssistant ? aiBlockedTitles() : null;
+  const m = DB.entities.find(n => n.toLowerCase().includes(ql) && !(blocked && blocked.has(n.toLowerCase())));
   return m || null;
 }
 const QUICK_ACTIONS = [
@@ -1419,7 +1559,7 @@ function bindAnswerActions(turn) {
    unreadable question — only a short, name-like subject is used. */
 function followUpsFor(q, sources) {
   const out = [];
-  const subj = usableSubject(matchNamedSubject(q)) ||
+  const subj = usableSubject(matchNamedSubject(q, true)) ||
                // the first result whose title is short enough to read as a name
                (sources.map(s => usableSubject(s.title)).filter(Boolean)[0] || null);
   if (subj) {
@@ -1744,6 +1884,7 @@ async function init() {
   });
 
   $("#searchOpen").onclick = () => openSearch("");
+  $("#searchEsc").onclick = closeSearch;
   const si = $("#searchInput"); let sT;
   si.addEventListener("input", () => { clearTimeout(sT); sT = setTimeout(() => renderSearch(si.value), 90); });
   si.addEventListener("keydown", e => {
