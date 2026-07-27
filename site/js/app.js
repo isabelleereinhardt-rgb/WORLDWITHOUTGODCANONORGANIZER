@@ -246,6 +246,12 @@ function buildNav() {
   const wsName = window.CodexWorkspaces ? CodexWorkspaces.current().name : "Workspace";
   const wsMeta = `${DB.entries.length} entries · ${DB.entities.length} names`;
 
+  // The Community Space is a place, not a page: publishing, readers and
+  // comments have nothing to do with the filing cabinet, and mixing them
+  // into one sidebar made both harder to read. In that mode the whole
+  // left rail changes, with one way back out at the top.
+  if (inSpace()) { buildSpaceNav(nav); return; }
+
   nav.innerHTML = `
     <div class="ws-card">
       <div class="legend">Workspace</div>
@@ -262,8 +268,6 @@ function buildNav() {
       <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
       <div class="nav-item" data-route="#/read">${svg("read")}<span>Read Through</span></div>
-      <div class="nav-item" data-route="#/work">${svg("book")}<span>My Works</span></div>
-      <div class="nav-item" data-route="#/community">${svg("people")}<span>Reading Room</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
       <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
@@ -1950,6 +1954,65 @@ window.toast = toast;
 /* ============================================================
    ROUTER
    ============================================================ */
+/* ============================================================
+   THE COMMUNITY SPACE
+   A separate place with its own home, its own sections, and one door
+   back to the workspace. Everything outward-facing lives here.
+   ============================================================ */
+const SPACE_ROUTES = ["space", "work", "community"];
+function inSpace(hash) {
+  const h = hash || location.hash || "#/";
+  const path = h.replace(/^#\//, "").split("/")[0];
+  return SPACE_ROUTES.indexOf(path) > -1;
+}
+function buildSpaceNav(nav) {
+  const here = (location.hash || "").replace(/^#\//, "").split("/")[0];
+  const item = (route, icon, label, match) =>
+    `<div class="nav-item${here === (match || route.replace(/^#\//, "").split("/")[0]) ? " active" : ""}"
+       data-route="${route}">${svg(icon)}<span>${label}</span></div>`;
+  const name = window.CodexWorkspaces ? CodexWorkspaces.current().name : "your workspace";
+
+  nav.innerHTML = `
+    <button class="space-back" id="spaceBack">
+      <span class="sb-arrow">←</span>
+      <span class="sb-text"><span class="sb-k">Return to</span>
+      <span class="sb-n">${esc(name)}</span></span>
+    </button>
+
+    <div class="ws-card space-card">
+      <div class="legend">You are in</div>
+      <div class="name">Community Space</div>
+      <div class="meta">Publishing &amp; readers</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">The Space</div></div>
+      ${item("#/space", "home", "Space home")}
+      ${item("#/work", "book", "My Works")}
+      ${item("#/community", "people", "Reading Room")}
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Your shelf</div></div>
+      <div class="nav-item" data-route="#/community/shelf">${svg("read")}<span>Saved to read</span></div>
+      <div class="nav-item" data-route="#/community/chat">${svg("people")}<span>Notes &amp; replies</span></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Account</div></div>
+      <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="ornament" style="margin-top:20px">✦✧✦</div>
+    </div>`;
+
+  $$("#nav .nav-item[data-route]").forEach(el =>
+    el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
+  const back = $("#spaceBack");
+  if (back) back.onclick = () => { location.hash = "#/"; };
+}
+
 function route() {
   const h = location.hash || "#/";
   // a reading link is somebody else's view of one work: no sidebar,
@@ -1959,6 +2022,13 @@ function route() {
   const reader = h.startsWith("#/shared/");
   document.getElementById("app").classList.toggle("reader-mode", reader);
   document.body.classList.toggle("reader-mode", reader);
+  // entering or leaving the Space swaps the whole left rail
+  const space = inSpace(h);
+  const app = document.getElementById("app");
+  if (space !== app.classList.contains("space-mode")) {
+    app.classList.toggle("space-mode", space);
+    buildNav();
+  }
   const parts = h.replace(/^#\//, "").split("/");
   const path = parts[0];
   const arg = decodeURIComponent(parts.slice(1).join("/") || "");
@@ -1985,6 +2055,7 @@ function route() {
   else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
   else if (path === "help") window.CodexHelp && CodexHelp.view();
   else if (path === "read") window.CodexPages && CodexPages.read(parts[1] || "");
+  else if (path === "space") window.CodexCommunity && CodexCommunity.spaceHome();
   else if (path === "work") window.CodexPublish && CodexPublish.work(parts[1] || "");
   else if (path === "community") window.CodexCommunity && CodexCommunity.view(parts[1] || "");
   else if (path === "shared") window.CodexPublish && CodexPublish.shared(parts[1] || "");

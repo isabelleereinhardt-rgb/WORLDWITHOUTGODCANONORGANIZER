@@ -195,5 +195,83 @@ function renderRooms(el, st) {
   </div>`;
 }
 
-window.CodexCommunity = { view: viewCommunity };
+/* ============================================================
+   THE SPACE HOME
+   The front door of the Community Space: what you have out in the
+   world, what came back from readers, and the one honest note that
+   the public side needs an account before anything leaves this
+   machine.
+   ============================================================ */
+async function spaceHome() {
+  await S().ready;
+  const folders = await S().all("folders").catch(() => []);
+  const docs = await S().all("docs").catch(() => []);
+  const st = C() ? C().state() : { signedIn: false };
+
+  const works = folders.map(f => {
+    const chapters = docs.filter(d => d.folder === f.id);
+    const written = chapters.filter(d => words(plain(d.html)) > 0).length;
+    const total = chapters.reduce((n, d) => n + words(plain(d.html)), 0);
+    return { f, chapters: chapters.length, written, total, pub: f.publish || {} };
+  }).sort((a, b) => b.total - a.total);
+
+  const published = works.filter(w => w.pub.blurb || w.pub.author);
+  const totalWords = works.reduce((n, w) => n + w.total, 0);
+  const totalCh = works.reduce((n, w) => n + w.chapters, 0);
+
+  view().innerHTML = `<div class="wrap wide space-home">
+    <div class="page-kicker">Community Space</div>
+    <h1 class="display" style="font-size:44px;margin:4px 0 8px">Your work, facing outward</h1>
+    <p class="muted" style="max-width:64ch;font-size:15.5px;line-height:1.55;margin:0 0 24px">
+      Everything here is about readers. Your workspace stays private; a work only leaves this
+      machine when you make a reading link for it, and revoking the link ends it.</p>
+
+    <div class="space-stats">
+      ${[[works.length, "work" + (works.length === 1 ? "" : "s")],
+         [totalCh, "chapter" + (totalCh === 1 ? "" : "s")],
+         [totalWords.toLocaleString(), "words written"],
+         [published.length, "with a blurb"]].map(([n, label]) =>
+        `<div class="space-stat"><div class="ss-n">${n}</div><div class="ss-l">${esc(label)}</div></div>`).join("")}
+    </div>
+
+    <div class="space-cards">
+      <a class="space-card-lg" href="#/work">
+        <div class="sc-glyph">✦</div>
+        <div class="sc-name">My Works</div>
+        <div class="sc-note">Covers, blurbs, chapters and reading links.
+          ${works.length ? works.length + " work" + (works.length === 1 ? "" : "s") + " so far." : "Nothing started yet."}</div>
+      </a>
+      <a class="space-card-lg" href="#/community">
+        <div class="sc-glyph">❖</div>
+        <div class="sc-name">Reading Room</div>
+        <div class="sc-note">Your shelf, published chapters, and what readers have said back.</div>
+      </a>
+      <a class="space-card-lg" href="#/settings">
+        <div class="sc-glyph">✧</div>
+        <div class="sc-name">${st.signedIn ? "Your account" : "Sign in to publish"}</div>
+        <div class="sc-note">${st.signedIn
+          ? "Signed in. Reading links and comments are available."
+          : "A reading link needs an account, because someone else has to be able to open it."}</div>
+      </a>
+    </div>
+
+    ${works.length ? `
+      <div class="rule-head mt"><span class="k">Your works</span><span class="hr"></span>
+        <span class="meta">${works.length}</span></div>
+      <div class="space-works">
+        ${works.slice(0, 8).map(w => `<a class="work-card" href="#/work/${encodeURIComponent(w.f.id)}">
+          <span class="wc-title">${esc(w.f.name)}</span>
+          <span class="wc-meta">${w.chapters} chapter${w.chapters === 1 ? "" : "s"} ·
+            ${w.total.toLocaleString()} words${w.pub.status ? " · " + esc(w.pub.status) : ""}</span>
+          <span class="wc-blurb">${w.pub.blurb ? esc(w.pub.blurb.slice(0, 120)) + (w.pub.blurb.length > 120 ? "…" : "")
+            : `<span class="faint">No blurb yet.</span>`}</span>
+        </a>`).join("")}
+      </div>`
+    : `<div class="empty-state" style="margin-top:26px">No works yet.
+        A work is a project with chapters filed into it — make one from
+        <a href="#/work">My Works</a>.</div>`}
+  </div>`;
+}
+
+window.CodexCommunity = { view: viewCommunity, spaceHome };
 })();

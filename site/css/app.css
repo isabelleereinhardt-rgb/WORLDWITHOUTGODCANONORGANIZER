@@ -1767,3 +1767,46 @@ body.reader-mode .lucky-stage{display:none}
 .era-span input{background:var(--bg-sunken,rgba(0,0,0,.18));border:1px solid var(--line);
   border-radius:2px;padding:8px 10px;color:var(--ink);font-size:14.5px;width:130px;font-family:inherit}
 .era-span input:focus{outline:none;border-color:var(--blush)}
+
+/* ============================================================
+   THE COMMUNITY SPACE — a separate place, with its own way back
+   ============================================================ */
+.space-btn{text-decoration:none}
+.space-back{display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:transparent;border:1px solid var(--line);border-radius:2px;padding:9px 11px;
+  margin-bottom:14px;color:var(--ink);transition:border-color .19s var(--ease),transform .19s var(--ease)}
+.space-back:hover{border-color:var(--blush)}
+.space-back:hover .sb-arrow{transform:translateX(-3px)}
+.space-back .sb-arrow{font-size:17px;color:var(--gold);flex:none;transition:transform .19s var(--ease)}
+.space-back .sb-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.space-back .sb-k{font-family:var(--serif);font-size:8.5px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim)}
+.space-back .sb-n{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink);
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ws-card.space-card{border-color:var(--gold)}
+
+/* the space home page */
+.space-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;margin-bottom:26px}
+.space-stat{border:1px solid var(--line);border-radius:2px;padding:15px 17px;background:var(--panel)}
+.space-stat .ss-n{font-family:var(--serif);font-size:30px;line-height:1;color:var(--blush)}
+.space-stat .ss-l{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim);margin-top:7px}
+.space-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.space-card-lg{display:block;border:1px solid var(--line);border-radius:2px;padding:20px;
+  background:var(--panel);text-decoration:none;
+  transition:border-color .19s var(--ease),transform .19s var(--ease),box-shadow .19s var(--ease)}
+.space-card-lg:hover{border-color:var(--blush);transform:translateY(-2px);
+  box-shadow:0 12px 26px rgba(0,0,0,.26);text-decoration:none}
+.space-card-lg .sc-glyph{font-size:20px;color:var(--gold);margin-bottom:9px}
+.space-card-lg .sc-name{font-family:var(--serif);font-style:italic;font-size:22px;color:var(--ink);margin-bottom:6px}
+.space-card-lg .sc-note{font-size:13.5px;line-height:1.5;color:var(--dim)}
+.space-works{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.work-card{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:2px;
+  padding:16px 18px;background:var(--panel);text-decoration:none}
+.work-card:hover{border-color:var(--blush);text-decoration:none}
+.work-card .wc-title{font-family:var(--serif);font-style:italic;font-size:20px;color:var(--ink)}
+.work-card .wc-meta{font-family:var(--serif);font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--gold)}
+.work-card .wc-blurb{font-size:13.5px;line-height:1.5;color:var(--dim)}
+:root[data-motion="calm"] .space-back:hover .sb-arrow,
+:root[data-motion="calm"] .space-card-lg:hover{transform:none}
