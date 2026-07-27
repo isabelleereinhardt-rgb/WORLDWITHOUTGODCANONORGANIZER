@@ -42,10 +42,19 @@ begin
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Creating a trigger on auth.users needs ownership of that table, which
+-- some Supabase projects do not grant the SQL editor. When it is refused
+-- the error must NOT abort this file (everything below still needs to
+-- run), so it is guarded: refused means skipped with a notice, and the
+-- backfill at the end of this file covers profile creation instead.
+do $$ begin
+  execute 'drop trigger if exists on_auth_user_created on auth.users';
+  execute 'create trigger on_auth_user_created
+    after insert on auth.users
+    for each row execute function public.handle_new_user()';
+exception when others then
+  raise notice 'skipped the auth.users trigger (%); profiles are backfilled at the end of this file instead', sqlerrm;
+end $$;
 
 -- ============================================================
 -- WORKSPACES ; a project. Each has its own entries, documents,
@@ -244,6 +253,12 @@ drop policy if exists "update own profile" on public.profiles;
 create policy "update own profile" on public.profiles
   for update using (id = auth.uid()) with check (id = auth.uid());
 
+-- if the auth.users trigger could not be installed, the app itself may
+-- create the signed-in user's profile row
+drop policy if exists "create own profile" on public.profiles;
+create policy "create own profile" on public.profiles
+  for insert with check (id = auth.uid());
+
 -- ---------- workspaces ----------
 drop policy if exists "read my workspaces" on public.workspaces;
 create policy "read my workspaces" on public.workspaces
@@ -377,33 +392,39 @@ grant execute on function public.comment_via_share(text, text, text, text) to an
 -- Create the bucket in the dashboard (Storage -> New bucket ->
 -- name it "plates", keep it private), then run the policies below.
 -- ============================================================
-drop policy if exists "members read plates" on storage.objects;
-create policy "members read plates" on storage.objects
-  for select using (
-    bucket_id = 'plates'
-    and public.is_member(((storage.foldername(name))[1])::uuid)
-  );
-
-drop policy if exists "members write plates" on storage.objects;
-create policy "members write plates" on storage.objects
-  for insert with check (
-    bucket_id = 'plates'
-    and public.can_write(((storage.foldername(name))[1])::uuid)
-  );
-
-drop policy if exists "members replace plates" on storage.objects;
-create policy "members replace plates" on storage.objects
-  for update using (
-    bucket_id = 'plates'
-    and public.can_write(((storage.foldername(name))[1])::uuid)
-  );
-
-drop policy if exists "members delete plates" on storage.objects;
-create policy "members delete plates" on storage.objects
-  for delete using (
-    bucket_id = 'plates'
-    and public.can_write(((storage.foldername(name))[1])::uuid)
-  );
+-- Policies on storage.objects also need ownership rights that some
+-- projects withhold from the SQL editor. Guarded for the same reason as
+-- the auth trigger above: a refusal must not abort the backfill below.
+-- If these are skipped, add the same four rules from the dashboard
+-- under Storage > Policies whenever you start using the plates bucket.
+do $$ begin
+  execute 'drop policy if exists "members read plates" on storage.objects';
+  execute $pol$create policy "members read plates" on storage.objects
+    for select using (
+      bucket_id = 'plates'
+      and public.is_member(((storage.foldername(name))[1])::uuid)
+    )$pol$;
+  execute 'drop policy if exists "members write plates" on storage.objects';
+  execute $pol$create policy "members write plates" on storage.objects
+    for insert with check (
+      bucket_id = 'plates'
+      and public.can_write(((storage.foldername(name))[1])::uuid)
+    )$pol$;
+  execute 'drop policy if exists "members replace plates" on storage.objects';
+  execute $pol$create policy "members replace plates" on storage.objects
+    for update using (
+      bucket_id = 'plates'
+      and public.can_write(((storage.foldername(name))[1])::uuid)
+    )$pol$;
+  execute 'drop policy if exists "members delete plates" on storage.objects';
+  execute $pol$create policy "members delete plates" on storage.objects
+    for delete using (
+      bucket_id = 'plates'
+      and public.can_write(((storage.foldername(name))[1])::uuid)
+    )$pol$;
+exception when others then
+  raise notice 'skipped storage.objects policies (%); add them under Storage > Policies when needed', sqlerrm;
+end $$;
 
 -- ============================================================
 -- BACKFILL; safe to run any number of times.
