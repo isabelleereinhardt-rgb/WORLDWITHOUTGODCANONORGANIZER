@@ -19,8 +19,8 @@
 
 const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta",
   "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames",
-  "daylog"];
-const DB_VER = 4;
+  "daylog", "revisions", "margins"];
+const DB_VER = 5;
 let db = null;
 let usingFallback = false;
 let currentWorkspace = "default";

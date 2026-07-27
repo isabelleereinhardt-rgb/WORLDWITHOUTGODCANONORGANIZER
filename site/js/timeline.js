@@ -35,10 +35,13 @@ function render() {
   const showZero = zeroRaw >= 0 && zeroRaw <= 100 && min < 0 && max > 0;
 
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">Timeline</div>
-    <h1>Timeline</h1>
+    <div class="page-kicker">Before &amp; After the Reconstruction · ${sorted.length} event${sorted.length === 1 ? "" : "s"}</div>
+    <h1 class="display">Timeline</h1>
     <p class="muted">Add events as <b>BR</b> (Before Reconstruction) or <b>AR</b> (After Reconstruction) years —
       they're placed and re-ordered on the line automatically. Click any point to open its notes.</p>
+
+    ${sorted.length ? `<div class="era-bands">${eraBands(sorted).map(b => `
+      <div class="era-band"><div class="eb-name">${esc(b.name)}</div><div class="eb-span">${esc(b.span)}</div></div>`).join("")}</div>` : ""}
 
     <div class="tl-add">
       <input id="tlLabel" placeholder="Event label — e.g. “Founding of House Solis”">
@@ -62,11 +65,14 @@ function render() {
         <div class="tl-axis-ends"><span>${esc(fmtDate(sorted[0]))}</span><span>${esc(fmtDate(sorted[sorted.length - 1]))}</span></div>
       </div>
       <div id="tlDetail">${openId ? detailHtml(events.find(e => e.id === openId)) : `<div class="empty-state">Click a point on the line to see its notes.</div>`}</div>
-      <h3 style="font-family:var(--serif);margin-top:34px">All events</h3>
+      <div class="rule-head mt"><span class="k">Every event, in order</span><span class="hr"></span></div>
       <div class="tl-list">
-        ${sorted.map(ev => `<div class="tl-list-item" data-open="${ev.id}">
-          <b>${esc(fmtDate(ev))}</b> <span>${esc(ev.label)}</span>
-          <button class="btn ghost sm" data-del="${ev.id}">Delete</button>
+        ${sorted.map(ev => `<div class="tl-row" data-open="${ev.id}">
+          <span class="tr-year">${esc(fmtDate(ev))}</span>
+          <span class="tr-mark">✦</span>
+          <span class="tr-body"><span class="tr-title">${esc(ev.label)}</span>
+            ${ev.note ? `<span class="tr-note">${esc(ev.note.slice(0, 140))}${ev.note.length > 140 ? "…" : ""}</span>` : ""}</span>
+          <button class="a-chip" data-del="${ev.id}">Delete</button>
         </div>`).join("")}
       </div>` : `<div class="empty-state">No events yet. Add your first one above.</div>`}
   </div>`;
@@ -74,7 +80,7 @@ function render() {
   $("#tlAdd").onclick = addEvent;
   $("#tlLabel").onkeydown = e => { if (e.key === "Enter") addEvent(); };
   $("#tlEra").onchange = e => { lastEra = e.target.value; };
-  $$(".tl-point,[data-open]", view()).forEach(el => el.addEventListener("click", () => { openId = el.dataset.id || el.dataset.open; render(); }));
+  $$(".tl-point,.tl-row[data-open]", view()).forEach(el => el.addEventListener("click", () => { openId = el.dataset.id || el.dataset.open; render(); }));
   $$("[data-del]", view()).forEach(b => b.onclick = async e => {
     e.stopPropagation();
     if (!confirm("Delete this event?")) return;
@@ -84,6 +90,22 @@ function render() {
     render();
   });
 }
+/* Eras are read off the events you actually have, so the bands describe
+   your canon rather than a calendar nobody agreed to. */
+function eraBands(sorted) {
+  const br = sorted.filter(e => sortKey(e) < 0);
+  const ar = sorted.filter(e => sortKey(e) >= 0);
+  const bands = [];
+  const range = list => {
+    const ys = list.map(e => Math.abs(sortKey(e)));
+    return Math.min(...ys) + "–" + Math.max(...ys);
+  };
+  if (br.length) bands.push({ name: "Before Reconstruction", span: range(br) + " BR · " + br.length + " event" + (br.length === 1 ? "" : "s") });
+  if (br.length && ar.length) bands.push({ name: "The Reconstruction", span: "Year 0" });
+  if (ar.length) bands.push({ name: "After Reconstruction", span: range(ar) + " AR · " + ar.length + " event" + (ar.length === 1 ? "" : "s") });
+  return bands;
+}
+
 function detailHtml(ev) {
   if (!ev) return "";
   return `<div class="tl-detail">

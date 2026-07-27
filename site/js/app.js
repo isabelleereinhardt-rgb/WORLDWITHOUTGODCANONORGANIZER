@@ -40,6 +40,8 @@ const IC = {
   timeline:'<path d="M3.5 10h13"/><circle cx="6" cy="10" r="1.6"/><circle cx="10.5" cy="10" r="1.6"/><circle cx="15" cy="10" r="1.6"/><path d="M6 10V5.5M15 10v4.5"/>',
   draw:   '<path d="M4.5 15.5l1-4L13.5 3.5a1.6 1.6 0 0 1 2.2 2.2L7.7 13.7l-4 1z"/><path d="M11.5 5.5l3 3"/>',
   help:   '<circle cx="10" cy="10" r="6.6"/><path d="M8.2 8a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4"/><path d="M10 13.6h.01"/>',
+  read:   '<path d="M10 5.6C8.4 4.4 6 4.2 3.6 4.6v10.2c2.4-.4 4.8-.2 6.4 1 1.6-1.2 4-1.4 6.4-1V4.6c-2.4-.4-4.8-.2-6.4 1z"/><path d="M10 5.6v11"/>',
+  clock:  '<circle cx="10" cy="10" r="6.6"/><path d="M10 6.4V10l2.6 1.6"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -237,6 +239,7 @@ function buildNav() {
       <div class="nav-title-row"><div class="nav-title">Workroom</div></div>
       <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
+      <div class="nav-item" data-route="#/read">${svg("read")}<span>Read Through</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
       <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
@@ -592,26 +595,69 @@ function viewEntry(id) {
     ${categoriesList().map(c => `<option value="${esc(c.name)}" ${e.category === c.name ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
   </select>` : "";
 
-  view.innerHTML = `<div class="wrap">
-    <div class="reading">
-      <div class="entry-head"><div class="page-kicker" style="margin:0">${catDot(e.category)} ${esc(e.category)}</div>${catSelector}</div>
-      <h1>${esc(e.title)}</h1>
-      <div class="entry-actions">
-        <button class="btn sm" id="askAssistant">${svg("spark")} Ask the assistant about this</button>
-        ${pdfLink}${fileLink}
-        <button class="btn ghost sm" id="copyText">Copy text</button>
-        <button class="btn ghost sm" id="readAloud">${svg("speaker")} Read aloud</button>
-        <button class="btn ghost sm" id="delEntry">Delete</button>
+  const facts = factsOf(e, 8);
+  const flags = entryFlags(e);
+  view.innerHTML = `<div class="entry-page">
+    <div class="entry-top">
+      <div>
+        <div class="page-kicker">${catDot(e.category)} ${esc(e.category)}</div>
+        <h1 class="display entry-title">${esc(e.title)}</h1>
       </div>
-      ${body}
-      ${linksHtml}
-      ${relImgs}
-      ${backHtml}
+      <div class="entry-when">${e.wordcount ? e.wordcount.toLocaleString() + " words" : ""}${
+        backs.length ? ` · ${backs.length} cross-reference${backs.length === 1 ? "" : "s"}` : ""}</div>
+    </div>
+    <div class="entry-actions">
+      <button class="btn sm" id="askAssistant">✦ Ask about this</button>
+      ${pdfLink}${fileLink}
+      <button class="btn ghost sm" id="copyText">Copy text</button>
+      <button class="btn ghost sm" id="readAloud">Read aloud</button>
+      ${catSelector}
+      <button class="btn ghost sm" id="delEntry">Delete</button>
+    </div>
+
+    <div class="entry-grid">
+      <div class="entry-main reading">
+        ${body}
+        ${linksHtml}
+        ${relImgs}
+      </div>
+      <aside class="entry-side">
+        ${facts.length ? `<div class="gold-card">
+          <div class="gold-card-head">✦ At a glance ✦</div>
+          ${facts.map(f => `<div class="glance-row"><span class="gk">${esc(f.k)}</span>
+            <span class="gv">${crossLink(esc(f.v))}</span></div>`).join("")}
+        </div>` : ""}
+
+        ${flags.length ? `<div class="flag-card">
+          <div class="rule-head"><span class="k">Continuity flags · ${flags.length}</span><span class="hr"></span></div>
+          ${flags.map(f => `<div class="flag-row"><span class="fw">${esc(f.what)}</span>
+            <span class="fwhere">${esc(f.where)}</span></div>`).join("")}
+          <button class="a-chip" id="flagCheck">Check this entry</button>
+        </div>` : ""}
+
+        <div class="margin-card">
+          <div class="rule-head"><span class="k">Your margin notes</span><span class="hr"></span>
+            <button class="a-chip" id="addMargin">+ Note</button></div>
+          <div id="marginList"></div>
+          <p class="faint margin-foot">Notes stay out of the entry itself, and out of exports.</p>
+        </div>
+
+        ${backs.length ? `<div>
+          <div class="rule-head"><span class="k">Mentioned in</span><span class="hr"></span>
+            <span class="meta">${backs.length}</span></div>
+          ${backs.slice(0, 12).map(b => `<a class="back-row" href="#/entry/${b.id}">
+            <span class="br-glyph">✧</span>
+            <span class="br-body">${esc(b.title)}<span class="br-where">${esc(b.category)}</span></span></a>`).join("")}
+        </div>` : ""}
+      </aside>
     </div>
   </div>`;
 
   $$(".xref", view).forEach(x => x.onclick = () => location.hash = "#/subject/" + encodeURIComponent(x.dataset.subject));
   bindGallery();
+  renderMargins(e.id);
+  $("#addMargin").onclick = () => addMargin(e.id);
+  if ($("#flagCheck")) $("#flagCheck").onclick = () => { openAssistant(); askAssistant("check consistency for " + e.title); };
   $("#askAssistant").onclick = () => { openAssistant(); assistantLookup(e.title); };
   $("#copyText").onclick = () => { navigator.clipboard.writeText(e.text); toast("Copied to clipboard"); };
   $("#readAloud").onclick = () => { window.CodexSpeech ? CodexSpeech.read(e.text || e.title) : toast("Speech not supported here"); };
@@ -658,6 +704,83 @@ function galleryHtml(images) {
        <figcaption>${esc(p.split('/').pop() || "image")}</figcaption>
      </figure>`).join("") + `</div>`;
 }
+/* ---------- continuity flags on an entry ----------
+   Cheap, specific checks that can be stated plainly. Anything vaguer
+   than this belongs to the assistant's full consistency pass, which
+   the button beside the list opens. */
+function entryFlags(e) {
+  const out = [];
+  const text = e.text || "";
+
+  // Collect every "Key: value" line, then decide whether this entry is
+  // about one subject or is a compendium. A roster of fifty characters
+  // legitimately repeats Born and Died fifty times; calling that a
+  // contradiction would bury the real ones in noise.
+  const byKey = {};
+  text.split("\n").forEach(line => {
+    if (!FACT_LINE.test(line)) return;
+    const i = line.indexOf(":");
+    const k = line.slice(0, i).trim().toLowerCase(), v = line.slice(i + 1).trim();
+    if (!v) return;
+    (byKey[k] = byKey[k] || []).push(v);
+  });
+  const isCompendium = Object.keys(byKey).some(k => byKey[k].length > 2);
+  if (!isCompendium) {
+    Object.keys(byKey).forEach(k => {
+      const vals = Array.from(new Set(byKey[k]));
+      if (vals.length > 1) out.push({ what: `Two values given for "${k}"`, where: vals.slice(0, 2).join(" / ") });
+    });
+  }
+  // a year written both BR and AR for the same event line
+  const eras = text.match(/\b\d{1,4}\s?(BR|AR)\b/gi) || [];
+  const byYear = {};
+  eras.forEach(tok => {
+    const y = tok.match(/\d+/)[0], era = /AR/i.test(tok) ? "AR" : "BR";
+    if (byYear[y] && byYear[y] !== era) out.push({ what: `Year ${y} appears as both eras`, where: "BR and AR" });
+    else byYear[y] = era;
+  });
+  return out.slice(0, 4);
+}
+
+/* ---------- margin notes ----------
+   Kept in their own store so they never enter the entry text, search
+   index, exports, or anything the assistant reads. */
+async function loadMargins(entryId) {
+  if (!window.CodexStore) return [];
+  try {
+    return (await CodexStore.all("margins")).filter(m => m.entryId === entryId).sort((a, b) => a.at - b.at);
+  } catch (err) { return []; }
+}
+async function renderMargins(entryId) {
+  const el = $("#marginList");
+  if (!el) return;
+  const list = await loadMargins(entryId);
+  el.innerHTML = list.length ? list.map((m, i) => `<div class="margin-row${m.done ? " done" : ""}">
+    <div class="mr-top"><span class="mr-n">${i + 1}</span><span class="mr-text">${esc(m.text)}</span></div>
+    <div class="mr-foot"><span class="mr-when">${new Date(m.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+      <span class="hr"></span>
+      <button class="a-chip" data-mdone="${esc(m.id)}">${m.done ? "Reopen" : "Resolve"}</button>
+      <button class="a-chip" data-mdel="${esc(m.id)}">Remove</button></div>
+  </div>`).join("") : `<p class="faint" style="font-size:13px">Nothing noted yet.</p>`;
+  $$("[data-mdone]", el).forEach(b => b.onclick = async () => {
+    const m = await CodexStore.get("margins", b.dataset.mdone);
+    if (m) { m.done = !m.done; await CodexStore.put("margins", m); renderMargins(entryId); }
+  });
+  $$("[data-mdel]", el).forEach(b => b.onclick = async () => {
+    await CodexStore.del("margins", b.dataset.mdel);
+    renderMargins(entryId);
+  });
+}
+async function addMargin(entryId) {
+  const text = prompt("A note to yourself about this entry:");
+  if (!text || !text.trim()) return;
+  await CodexStore.put("margins", {
+    id: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    entryId, text: text.trim(), at: Date.now(), done: false,
+  });
+  renderMargins(entryId);
+}
+
 function viewGallery(e) {
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${catDot(e.category)} Gallery</div>
@@ -671,10 +794,17 @@ function viewMaps() {
   mapsSelectMode = false; mapsSelected = new Set();
   renderMaps();
 }
+const ATLAS_FILTERS = ["Everything", "Galleries", "Maps", "Flags & sigils"];
+let atlasFilter = "Everything";
+
 function renderMaps() {
   const galleries = DB.entries.filter(e => e.type === "gallery");
   const mapDocs = DB.entries.filter(e => e.category === "Maps & Locations" && e.type === "pdf");
-  const items = galleries.concat(mapDocs);
+  let items = galleries.concat(mapDocs);
+  // filters read the plate's own words, so they stay right as the atlas grows
+  if (atlasFilter === "Galleries") items = items.filter(e => e.type === "gallery");
+  else if (atlasFilter === "Maps") items = items.filter(e => /\bmap\b|\batlas\b|\bregion\b/i.test(e.title));
+  else if (atlasFilter === "Flags & sigils") items = items.filter(e => /\bflag|sigil|banner|crest|arms\b/i.test(e.title + " " + (e.summary || "")));
   const cards = items.map(e => {
     if (!mapsSelectMode) {
       return e.type === "gallery"
@@ -690,22 +820,25 @@ function renderMaps() {
     </div>`;
   }).join("");
 
+  const plates = items.reduce((n, e) => n + (e.type === "gallery" ? e.images.length : 1), 0);
   view.innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">${svg("atlas")} Atlas</div>
-    <div class="browse-head">
-      <h1>Atlas &amp; Galleries</h1>
-      <div class="browse-actions">
-        ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${mapsSelectMode ? "Cancel" : "Select"}</button>` : ""}
-      </div>
+    <div class="page-kicker">Maps, flags &amp; visual reference · ${plates} plate${plates === 1 ? "" : "s"}</div>
+    <h1 class="display">The Atlas</h1>
+    <div class="atlas-bar">
+      ${ATLAS_FILTERS.map(f => `<button class="a-chip${atlasFilter === f ? " on" : ""}" data-afilter="${esc(f)}">${esc(f)}</button>`).join("")}
+      <span class="hr"></span>
+      ${items.length ? `<button class="a-chip" id="toggleSelect">${mapsSelectMode ? "Cancel" : "Select"}</button>` : ""}
+      <button class="a-chip" id="atlasAdd">+ Add plates</button>
     </div>
-    <p class="muted">Maps, flags, and visual reference plates.</p>
     ${mapsSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${items.length && mapsSelected.size === items.length ? "checked" : ""}> Select all</label>
       <span class="faint" id="selCount">${mapsSelected.size} selected</span>
       <button class="btn danger sm" id="deleteSelected" ${mapsSelected.size ? "" : "disabled"}>Delete selected</button>
     </div>` : ""}
-    <div class="list-grid">${cards || `<div class="empty-state">Nothing here yet.</div>`}</div>
+    <div class="list-grid">${cards || `<div class="empty-state">Nothing here yet. Drop maps and plates in from Add lore.</div>`}</div>
   </div>`;
+  $$("[data-afilter]", view).forEach(b => b.onclick = () => { atlasFilter = b.dataset.afilter; renderMaps(); });
+  $("#atlasAdd").onclick = () => location.hash = "#/import";
   bindGallery();
 
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { mapsSelectMode = !mapsSelectMode; if (!mapsSelectMode) mapsSelected.clear(); renderMaps(); };
@@ -1769,6 +1902,8 @@ function route() {
   else if (path === "study") window.CodexStudy && CodexStudy.view();
   else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
   else if (path === "help") window.CodexHelp && CodexHelp.view();
+  else if (path === "read") window.CodexPages && CodexPages.read(parts[1] || "");
+  else if (path === "history") window.CodexPages && CodexPages.history(parts[1] || "");
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
   else if (path === "settings") window.CodexUI && CodexUI.viewSettings();

@@ -102,6 +102,7 @@ async function open(id) {
       ${folderSelect}
       <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
       <button id="tbExport" title="Export">Export</button>
+      <button id="tbHistory" title="Saved versions of this draft">Versions</button>
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="wrap">
@@ -131,6 +132,8 @@ async function open(id) {
     await S().put("docs", doc);
     stateEl.textContent = S().usingFallback() ? "Saved (local)" : "Saved";
     window.CodexSound && CodexSound.onSave();
+    // keeps a version when the draft has moved on materially
+    window.CodexRevisions && CodexRevisions.consider(doc);
   };
   const touch = () => { stateEl.textContent = "Saving…"; updateWordCount(); clearTimeout(saveT); saveT = setTimeout(persist, 600); };
   updateWordCount();
@@ -168,6 +171,7 @@ async function open(id) {
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
   $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
   $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
+  $("#tbHistory").onclick = async () => { await persist(); location.hash = "#/history/" + encodeURIComponent(doc.id); };
   $("#tbAssist").onclick = () => {
     CodexAssistant.open();
     // tell the rail what it is looking at, so answers can say so
