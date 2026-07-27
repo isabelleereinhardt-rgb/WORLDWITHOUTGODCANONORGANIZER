@@ -159,7 +159,11 @@ const Extra = {
   async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
 };
 window.CodexExtra = Extra;
-window.CodexSettings = { save: () => saveSettings() };
+window.CodexSettings = {
+  save: () => saveSettings(),
+  // re-derive every colour token for the theme that is active now
+  reapply: () => applySettings(Extra.settings),
+};
 
 /* ---------- activity feed logging ---------- */
 async function logFeed(action, detail) {
@@ -193,19 +197,38 @@ function applySettings(s) {
   } else {
     root.removeProperty("--accent"); root.removeProperty("--accent-ink"); root.removeProperty("--accent-soft");
   }
-  if (s.bg) {
-    const dark = luminance(s.bg) < 0.5;
+  /* A custom background is chosen for ONE theme. It used to be stored
+     for both, and because these land as inline styles on :root — which
+     outrank every stylesheet rule, including [data-theme="light"] — a
+     dark background picked in dark mode kept --ink pinned pale after a
+     switch to light. The panels went cream from the stylesheet, the nav
+     text stayed off-white, and the sidebar became white on white.
+
+     So each theme keeps its own background, and the one belonging to the
+     other theme is simply not applied. A background is also only honoured
+     if it actually suits its theme; a near-black "light mode" background
+     would take the ink down with it. */
+  const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const custom = theme === "light" ? s.bgLight : s.bg;
+  const suits = custom ? (luminance(custom) < 0.5) === (theme === "dark") : false;
+  if (custom && suits) {
+    const dark = theme === "dark";
     const ink = dark ? "#f0ece0" : "#2c2a26";
-    root.setProperty("--bg", s.bg);
-    root.setProperty("--bg-raised", mix(s.bg, "#ffffff", dark ? 0.10 : 0.6));
-    root.setProperty("--bg-sunken", mix(s.bg, "#000000", dark ? 0.2 : 0.05));
+    root.setProperty("--bg", custom);
+    root.setProperty("--bg-raised", mix(custom, "#ffffff", dark ? 0.10 : 0.6));
+    root.setProperty("--bg-sunken", mix(custom, "#000000", dark ? 0.2 : 0.05));
     root.setProperty("--ink", ink);
     root.setProperty("--ink-soft", dark ? "#c9c2b0" : "#6a655c");
     root.setProperty("--ink-faint", dark ? "#8c8574" : "#9c968a");
-    root.setProperty("--line", mix(s.bg, ink, dark ? 0.2 : 0.12));
-    root.setProperty("--line-strong", mix(s.bg, ink, dark ? 0.32 : 0.22));
+    root.setProperty("--line", mix(custom, ink, dark ? 0.2 : 0.12));
+    root.setProperty("--line-strong", mix(custom, ink, dark ? 0.32 : 0.22));
+    // panel and chip are what the sidebar and cards actually sit on; left
+    // to the stylesheet they belonged to a different background entirely
+    root.setProperty("--panel", mix(custom, dark ? "#ffffff" : "#ffffff", dark ? 0.06 : 0.55));
+    root.setProperty("--chip", mix(custom, ink, dark ? 0.12 : 0.10));
   } else {
-    ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
+    ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint",
+     "--line", "--line-strong", "--panel", "--chip"].forEach(p => root.removeProperty(p));
   }
   // density scales the spacing tokens the whole page lays out from
   const dens = { snug: 0.82, comfortable: 1, airy: 1.22 }[s.density || "comfortable"] || 1;
@@ -326,7 +349,13 @@ function renderSetPanel() {
 function panelAppearance(el) {
   const s = Extra.settings;
   const accents = ["#f6ccd5", "#d4869c", "#b06a8f", "#c9a15c", "#8e7cc3", "#7c9a76", "#c2603f", "#3f6f8f"];
-  const bgs = ["#241b1e", "#f7f0ea", "#fbe9ee", "#221d2e", "#efe3d2", "#1b1a1d", "#17151a", "#f6f3ec"];
+  const isLight = document.documentElement.dataset.theme === "light";
+  const curBg = isLight ? s.bgLight : s.bg;
+  // offer backgrounds that suit the theme on screen; a near-black
+  // "light mode" ground is what broke the sidebar in the first place
+  const bgs = isLight
+    ? ["#f7f0ea", "#fbe9ee", "#efe3d2", "#f6f3ec", "#fdf7f3", "#eef2f6", "#f4efe6", "#fbf6ef"]
+    : ["#241b1e", "#221d2e", "#1b1a1d", "#17151a", "#1e2226", "#2a1f22", "#191c22", "#231f1a"];
   el.innerHTML = `
     <div class="rule-head"><span class="k">Preset looks</span><span class="hr"></span>
       <span class="meta">a starting point; everything below stays adjustable</span></div>
@@ -367,10 +396,12 @@ function panelAppearance(el) {
     </div>
 
     <div class="rule-head mt"><span class="k">Background colour</span><span class="hr"></span></div>
-    <p class="faint set-help">Any colour you like; text contrast adjusts to stay readable.</p>
+    <p class="faint set-help">This sets the background for
+      <strong>${isLight ? "light" : "dark"}</strong> mode only — the other mode keeps its own,
+      so switching themes never leaves you with unreadable text.</p>
     <div class="swatch-row">
       ${bgs.map(c => `<button class="swatch" style="background:${c}" data-bg="${c}" title="${c}"></button>`).join("")}
-      <label class="swatch wheel" title="Any colour"><input type="color" id="bgPicker" value="${s.bg || "#241b1e"}"></label>
+      <label class="swatch wheel" title="Any colour"><input type="color" id="bgPicker" value="${curBg || (isLight ? "#f7f0ea" : "#241b1e")}"></label>
       <button class="btn ghost sm" id="bgReset">Theme default</button>
     </div>
 
@@ -406,9 +437,11 @@ function panelAppearance(el) {
   $$(".swatch[data-accent]", el).forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker", el).oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
   $("#accentReset", el).onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
-  $$(".swatch[data-bg]", el).forEach(b => b.onclick = () => { Extra.settings.bg = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
-  $("#bgPicker", el).oninput = e => { Extra.settings.bg = e.target.value; saveSettings(); };
-  $("#bgReset", el).onclick = () => { Extra.settings.bg = ""; saveSettings(); toast("Background reset to theme default"); };
+  // written to the key for whichever theme is on screen right now
+  const bgKey = isLight ? "bgLight" : "bg";
+  $$(".swatch[data-bg]", el).forEach(b => b.onclick = () => { Extra.settings[bgKey] = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
+  $("#bgPicker", el).oninput = e => { Extra.settings[bgKey] = e.target.value; saveSettings(); };
+  $("#bgReset", el).onclick = () => { Extra.settings[bgKey] = ""; saveSettings(); toast("Background reset to theme default"); };
   $("#fontSize", el).oninput = e => { Extra.settings.fontSize = +e.target.value; $("#fsVal").textContent = e.target.value + "px"; saveSettings(); };
   $("#uiFont", el).onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
   $("#readFont", el).onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };

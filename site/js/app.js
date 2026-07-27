@@ -266,7 +266,7 @@ function buildNav() {
     <div class="nav-section">
       <div class="nav-title-row"><div class="nav-title">Workroom</div></div>
       <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
-      <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
+      <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Books</span></div>
       <div class="nav-item" data-route="#/read">${svg("read")}<span>Read Through</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
@@ -605,11 +605,94 @@ function entryCard(e) {
   </a>`;
 }
 
+/* ---------- writing a note ----------
+   A note you just made had nowhere to type: the entry page is a reading
+   view, and nothing on it edited the title or the body. So a brand new
+   note opened as a blank page with a Delete button and no way in.
+   Notes you wrote now have an editor, and an empty one opens straight
+   into it — there is nothing to read yet. */
+let entryEditing = null;
+
+function noteEditor(e) {
+  const cats = categoriesList();
+  return `<div class="note-edit">
+    <div class="page-kicker">${e.title && e.text ? "Editing" : "A new note"}</div>
+    <input class="note-edit-title" id="neTitle" value="${esc(e.title === "Untitled note" ? "" : e.title)}"
+      placeholder="Give it a title" maxlength="200">
+    <textarea class="note-edit-body" id="neBody" rows="18"
+      placeholder="Write whatever this is. Any name you use more than once becomes a cross reference automatically.">${esc(e.text || "")}</textarea>
+    <div class="note-edit-row">
+      <label class="ne-field"><span>Section</span>
+        <select class="folder-select" id="neCat">
+          ${cats.map(c => `<option value="${esc(c.name)}" ${e.category === c.name ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        </select></label>
+      <label class="ne-field grow"><span>Links, one per line</span>
+        <textarea class="note-edit-links" id="neLinks" rows="2"
+          placeholder="https://…">${esc((e.links || []).join("\n"))}</textarea></label>
+    </div>
+    <div class="note-edit-acts">
+      <button class="btn" id="neSave">Save note</button>
+      <button class="btn ghost" id="neCancel">Cancel</button>
+      <span class="ne-count" id="neCount"></span>
+    </div>
+    <p class="faint" style="margin:10px 0 0">Saved to this browser as you confirm.
+      Nothing is uploaded.</p>
+  </div>`;
+}
+
+function bindNoteEditor(e) {
+  const title = $("#neTitle"), body = $("#neBody"), count = $("#neCount");
+  const tally = () => {
+    const n = (body.value || "").trim().split(/\s+/).filter(Boolean).length;
+    count.textContent = n ? n.toLocaleString() + (n === 1 ? " word" : " words") : "";
+  };
+  body.oninput = tally; tally();
+  (title.value ? body : title).focus();
+
+  // Ctrl/Cmd+S and Ctrl/Cmd+Enter both save, because both are muscle memory
+  const maybeSave = ev => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "Enter")) { ev.preventDefault(); save(); }
+  };
+  title.onkeydown = body.onkeydown = maybeSave;
+
+  const save = async () => {
+    const t = title.value.trim(), b = body.value;
+    if (!t && !b.trim()) { toast("Give it a title or something to say"); return; }
+    await updateNote(e.id, {
+      title: t || "Untitled note",
+      text: b,
+      category: $("#neCat").value,
+      links: $("#neLinks").value.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 20),
+      updated: Date.now(),
+      wordcount: b.trim() ? b.trim().split(/\s+/).filter(Boolean).length : 0,
+    });
+    entryEditing = null;
+    toast("Note saved");
+    viewEntry(e.id);
+  };
+  $("#neSave").onclick = save;
+  $("#neCancel").onclick = () => {
+    entryEditing = null;
+    // an untouched blank note has nothing worth keeping a page for
+    if (!e.text && (!e.title || e.title === "Untitled note")) { location.hash = "#/browse/" + encodeURIComponent(e.category); return; }
+    viewEntry(e.id);
+  };
+}
+
 function viewEntry(id) {
   const e = byId[id];
   if (!e) { view.innerHTML = `<div class="wrap"><p>Entry not found.</p></div>`; return; }
   store.pushRecent(id);
   if (e.type === "gallery") return viewGallery(e);
+
+  // your own note, empty or explicitly being edited, gets the editor
+  const blank = e._user && !String(e.text || "").trim() && (!e.title || e.title === "Untitled note");
+  if (e._user && (entryEditing === id || blank)) {
+    entryEditing = id;
+    view.innerHTML = `<div class="wrap">${noteEditor(e)}</div>`;
+    bindNoteEditor(e);
+    return;
+  }
 
   const body = renderBody(e);
   const seen = new Set(); let backs = [];
@@ -649,7 +732,8 @@ function viewEntry(id) {
         backs.length ? ` · ${backs.length} cross-reference${backs.length === 1 ? "" : "s"}` : ""}</div>
     </div>
     <div class="entry-actions">
-      <button class="btn sm" id="askAssistant">✦ Ask about this</button>
+      ${e._user ? `<button class="btn sm" id="editEntry">Edit this note</button>` : ""}
+      <button class="btn ${e._user ? "ghost " : ""}sm" id="askAssistant">✦ Ask about this</button>
       ${pdfLink}${fileLink}
       <button class="btn ghost sm" id="copyText">Copy text</button>
       <button class="btn ghost sm" id="readAloud">Read aloud</button>
@@ -703,6 +787,7 @@ function viewEntry(id) {
   $("#addMargin").onclick = () => addMargin(e.id);
   if ($("#flagCheck")) $("#flagCheck").onclick = () => { openAssistant(); askAssistant("check consistency for " + e.title); };
   $("#askAssistant").onclick = () => { openAssistant(); assistantLookup(e.title); };
+  if ($("#editEntry")) $("#editEntry").onclick = () => { entryEditing = e.id; viewEntry(e.id); };
   $("#copyText").onclick = () => { navigator.clipboard.writeText(e.text); toast("Copied to clipboard"); };
   $("#readAloud").onclick = () => { window.CodexSpeech ? CodexSpeech.read(e.text || e.title) : toast("Speech not supported here"); };
   $("#delEntry").onclick = async () => {
@@ -2013,7 +2098,19 @@ function buildSpaceNav(nav) {
   if (back) back.onclick = () => { location.hash = "#/"; };
 }
 
+/* Every navigation gets a number. Views that finish rendering
+   asynchronously — the Desk reads the day log, the editor reads a
+   document — must check they are still the page the user is on before
+   writing to #view. Without this, a slow view that has been navigated
+   away from lands anyway and paints over whatever replaced it: creating
+   a note dropped you on the Desk, because the Desk render started, the
+   note page drew synchronously, and then the Desk arrived late and won. */
+let routeGen = 0;
+function currentGen() { return routeGen; }
+function isStale(gen) { return gen !== routeGen; }
+
 function route() {
+  routeGen++;
   const h = location.hash || "#/";
   // a reading link is somebody else's view of one work: no sidebar,
   // no assistant, none of the workspace furniture
@@ -2162,6 +2259,10 @@ async function init() {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     localStorage.setItem("codex.theme", t);
+    // Colour tokens partly come from inline styles on :root, which outrank
+    // the stylesheet's theme block — so flipping the attribute alone left
+    // half the palette belonging to the theme we just left.
+    if (window.CodexSettings && CodexSettings.reapply) CodexSettings.reapply();
   };
 
   $("#sidebarToggle").onclick = () => collapseSidebar();
@@ -2267,5 +2368,6 @@ else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
 window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
-  recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll };
+  recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll,
+  currentGen, isStale };
 })();

@@ -687,6 +687,20 @@ const Lucky = {
     this.bindAsk();
   },
 
+  /* Update the pet counter WITHOUT re-rendering.
+     render() replaces the stage's innerHTML, which builds a fresh
+     .lucky-walk — and a fresh element restarts the walk animation at 0%,
+     where `left:100vw` puts him off the right edge. So every pet used to
+     make him vanish and stroll back in from nothing. Only the two little
+     bits of text actually change, so only they are touched. */
+  paintPets() {
+    const pets = pref("luckyPets") || 0;
+    const meter = $(".pet-meter", this.el);
+    if (meter) meter.textContent = "✦".repeat(pets) + "✧".repeat(Math.max(0, 5 - pets));
+    const hint = $(".pet-hint", this.el);
+    if (hint) hint.textContent = pets === 0 ? "Click me" : pets >= 4 ? "One more for a treat" : "Keep petting";
+  },
+
   pet(walk) {
     const n = (pref("luckyPets") || 0) + 1;
     CodexExtra.settings.luckyPetsTotal = (pref("luckyPetsTotal") || 0) + 1;
@@ -694,13 +708,13 @@ const Lucky = {
       // no treats: he simply enjoys the attention
       CodexExtra.settings.luckyPets = n % 5;
       save();
-      this.render();
+      this.paintPets();
       return;
     }
     if (n < 5) {
       CodexExtra.settings.luckyPets = n;
       save();
-      this.render();
+      this.paintPets();
       return;
     }
     // five pets: a treat, a little dance, and he takes it off screen

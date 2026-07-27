@@ -100,8 +100,10 @@ function safePct(raw) { return 4 + (Math.max(0, Math.min(100, raw)) / 100) * 92;
 
 let events = [], openId = null, lastEra = "BR";
 async function view_() {
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   events = (await S().all("timeline"));
+  if (window.Codex && Codex.isStale(gen)) return;
   render();
 }
 function render() {

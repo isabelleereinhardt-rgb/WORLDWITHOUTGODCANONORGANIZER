@@ -50,6 +50,7 @@ async function chaptersOf(folderId) {
    THE WORK PAGE   #/work/<folderId>
    ============================================================ */
 async function viewWork(folderId) {
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   const folders = await S().all("folders").catch(() => []);
   if (!folders.length) {
@@ -77,6 +78,7 @@ async function viewWork(folderId) {
     try { shares = await C().shares.list(); } catch (e) {}
   }
 
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `<div class="wrap wide work-page">
     <div class="work-head">
       <div class="work-cover" id="workCover">
@@ -165,11 +167,15 @@ async function viewWork(folderId) {
    mean; hunting for Documents and setting a project afterwards is the
    step that made this confusing. */
 async function newChapter(f, existing) {
-  const title = prompt("Chapter title:", "Chapter " + (existing + 1));
+  // the same numbering the Books page uses, so the two never disagree
+  const suggested = window.CodexEditor && CodexEditor.nextChapterTitle
+    ? await CodexEditor.nextChapterTitle(f.id)
+    : "Chapter " + (existing + 1);
+  const title = prompt("Chapter title:", suggested);
   if (title === null) return;
   const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   await S().put("docs", {
-    id, title: (title.trim() || "Chapter " + (existing + 1)).slice(0, 200),
+    id, title: (title.trim() || suggested).slice(0, 200),
     html: "", folder: f.id, updated: Date.now(),
   });
   toast("Chapter added to “" + f.name + "”");

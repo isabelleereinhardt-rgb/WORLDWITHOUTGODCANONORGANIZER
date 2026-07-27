@@ -220,6 +220,9 @@ function luckyJournal(id, week) {
    ============================================================ */
 async function viewDesk() {
   const v = view();
+  // claimed before the first await; if the reader has navigated on by the
+  // time the day log comes back, this render is no longer wanted
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
 
   const id = deskIdentity();
@@ -265,6 +268,7 @@ async function viewDesk() {
 
   const minsSince = minutesSince(byDay, since);
 
+  if (window.Codex && Codex.isStale(gen)) return;
   v.innerHTML = `
   <div class="desk">
     <div class="desk-top">

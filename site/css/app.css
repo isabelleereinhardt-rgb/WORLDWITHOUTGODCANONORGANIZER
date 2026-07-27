@@ -1810,3 +1810,23 @@ body.reader-mode .lucky-stage{display:none}
 .work-card .wc-blurb{font-size:13.5px;line-height:1.5;color:var(--dim)}
 :root[data-motion="calm"] .space-back:hover .sb-arrow,
 :root[data-motion="calm"] .space-card-lg:hover{transform:none}
+
+/* ---- writing a note ---- */
+.note-edit{display:flex;flex-direction:column;gap:12px}
+.note-edit-title{background:transparent;border:none;border-bottom:1px solid var(--line);
+  padding:6px 0 10px;color:var(--ink);font-family:var(--serif);font-style:italic;font-size:34px;
+  line-height:1.1;width:100%}
+.note-edit-title:focus{outline:none;border-bottom-color:var(--blush)}
+.note-edit-title::placeholder{color:var(--dim);opacity:.6}
+.note-edit-body,.note-edit-links{background:var(--bg-sunken,rgba(0,0,0,.14));
+  border:1px solid var(--line);border-radius:2px;padding:14px 16px;color:var(--ink);
+  font-family:var(--read,inherit);font-size:16px;line-height:1.65;width:100%;resize:vertical}
+.note-edit-body:focus,.note-edit-links:focus{outline:none;border-color:var(--blush)}
+.note-edit-links{font-size:13.5px;line-height:1.5;resize:none}
+.note-edit-row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.ne-field{display:flex;flex-direction:column;gap:6px;font-family:var(--serif);font-size:9px;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--gold);min-width:180px}
+.ne-field.grow{flex:1}
+.note-edit-acts{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.ne-count{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim);margin-left:auto}

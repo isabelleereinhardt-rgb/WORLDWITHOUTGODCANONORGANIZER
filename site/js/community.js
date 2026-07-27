@@ -203,6 +203,7 @@ function renderRooms(el, st) {
    machine.
    ============================================================ */
 async function spaceHome() {
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   const folders = await S().all("folders").catch(() => []);
   const docs = await S().all("docs").catch(() => []);
@@ -219,6 +220,7 @@ async function spaceHome() {
   const totalWords = works.reduce((n, w) => n + w.total, 0);
   const totalCh = works.reduce((n, w) => n + w.chapters, 0);
 
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `<div class="wrap wide space-home">
     <div class="page-kicker">Community Space</div>
     <h1 class="display" style="font-size:44px;margin:4px 0 8px">Your work, facing outward</h1>

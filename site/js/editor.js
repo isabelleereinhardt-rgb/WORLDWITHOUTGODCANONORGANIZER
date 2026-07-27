@@ -19,8 +19,42 @@ function getCurrentDoc() { return curDocRef; }
 /* ============================================================
    DOCUMENTS
    ============================================================ */
+/* ---------- naming the next chapter ----------
+   "Untitled document" tells you nothing and has to be renamed by hand
+   every time. Inside a book the obvious name is the next chapter number,
+   so work out what that is: read the chapters already filed there, find
+   the highest number any of them claims — in digits or in words — and go
+   one past it. Never reuse a number that exists, and never assume the
+   count of chapters is the right number, because chapter 1 may have been
+   deleted or the book may start at 0 with a prologue. */
+const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+  "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+  "seventeen", "eighteen", "nineteen", "twenty"];
+function chapterNumberIn(title) {
+  const t = String(title || "").toLowerCase();
+  const digits = t.match(/(?:^|\b)(?:chapter|ch\.?|part)\s*#?\s*(\d{1,4})\b/);
+  if (digits) return parseInt(digits[1], 10);
+  const worded = t.match(/(?:^|\b)(?:chapter|ch\.?|part)\s+([a-z\-]+)/);
+  if (worded) {
+    const i = NUM_WORDS.indexOf(worded[1].replace(/-/g, ""));
+    if (i > -1) return i;
+  }
+  // a bare leading number, as in "12. The long winter"
+  const bare = t.match(/^\s*(\d{1,4})\s*[.):\-]/);
+  if (bare) return parseInt(bare[1], 10);
+  return null;
+}
+async function nextChapterTitle(folderId) {
+  if (!folderId) return "";                      // a loose document keeps no number
+  const docs = (await S().all("docs").catch(() => [])).filter(d => d.folder === folderId);
+  const nums = docs.map(d => chapterNumberIn(d.title)).filter(n => n != null);
+  const next = nums.length ? Math.max.apply(null, nums) + 1 : 1;
+  return "Chapter " + next;
+}
+
 async function list(folderId) {
   curDocRef = null;
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   if (window.CodexFolders) await CodexFolders.ensureCache(true);
   let docs = (await S().all("docs")).sort((a, b) => b.updated - a.updated);
@@ -34,18 +68,28 @@ async function list(folderId) {
       <div class="meta">Edited ${fmtDate(d.updated)}
         <button class="btn ghost sm" data-del="${d.id}" style="margin-left:auto">Delete</button></div>
     </div>`).join("");
+  const inBook = folderId ? (window.CodexFolders._cache || []).find(f => f.id === folderId) : null;
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">Workspace</div>
-    <h1>Documents</h1>
-    <p class="muted">Write lore, drafts, and notes right inside your organizer. They save automatically to this
-      browser — use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
+    <div class="page-kicker">${inBook ? esc(inBook.name) : "Workspace"}</div>
+    <h1>${inBook ? "Chapters" : "Books"}</h1>
+    <p class="muted">${inBook
+      ? `The chapters of <b>${esc(inBook.name)}</b>, newest edit first. Each one is a document you can
+         write in, and the reading order follows the chapter numbers in their titles.`
+      : `A book is a project with chapters filed into it. Pick a book below to see its chapters, or write
+         a loose document that does not belong to one yet. Everything saves to this browser — use
+         <b>Back up my work</b> in the sidebar to keep a portable copy.`}</p>
     ${folderBar}
-    <div style="margin:16px 0"><button class="btn" id="newDoc">New document</button></div>
+    <div style="margin:16px 0"><button class="btn" id="newDoc">${
+      inBook ? "New chapter" : "New document"}</button></div>
     ${docs.length ? `<div class="list-grid">${cards}</div>` :
-      `<div class="empty-state">No documents here yet. Create one to start writing.</div>`}
+      `<div class="empty-state">${inBook
+        ? "No chapters in this book yet. The first one is the hardest."
+        : "No documents here yet. Create one to start writing."}</div>`}
   </div>`;
   $("#newDoc").onclick = async () => {
-    const d = { id: uid(), title: "", html: "", folder: folderId || null };
+    const d = { id: uid(), title: await nextChapterTitle(folderId), html: "", folder: folderId || null,
+                updated: Date.now() };
     await S().put("docs", d); location.hash = "#/doc/" + d.id;
   };
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
@@ -59,11 +103,13 @@ async function list(folderId) {
 }
 
 async function open(id) {
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   if (window.CodexFolders) await CodexFolders.ensureCache();
   const doc = await S().get("docs", id);
   if (!doc) { location.hash = "#/docs"; return; }
   const folderSelect = window.CodexFolders ? CodexFolders.selectFor(doc.folder) : "";
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `
     <div class="doc-toolbar">
       <select id="tbBlock" title="Text style">
@@ -691,5 +737,5 @@ function exportDeckPdf(d) {
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
-window.CodexEditor = { list, open, deckList, deckOpen, getCurrentDoc };
+window.CodexEditor = { list, open, deckList, deckOpen, getCurrentDoc, nextChapterTitle, chapterNumberIn };
 })();
