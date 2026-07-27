@@ -48,6 +48,43 @@ function cloudSession() {
 }
 function cloudNsOf(cs) { return "sb" + ((cs.user && cs.user.id) || "").replace(/-/g, ""); }
 
+/* ---------- arriving from a Supabase email link ----------
+   Confirmation (and recovery / magic-link) emails redirect back with the
+   session tokens in the URL fragment. Catch them here, BEFORE anything
+   else reads storage, and adopt them as the cloud session: clicking the
+   email lands the user on the site already signed in. The user id and
+   email live inside the token itself, so no network round-trip is needed. */
+(function captureAuthRedirect() {
+  if (!window.CODEX_CLOUD) return;
+  const h = location.hash || "";
+  if (!/access_token=|error_description=/.test(h)) return;
+  const p = new URLSearchParams(h.replace(/^#\/?/, ""));
+  const cleanHash = () => history.replaceState(null, "", location.pathname + location.search + "#/");
+  const errDesc = p.get("error_description");
+  if (errDesc && !p.get("access_token")) {
+    // e.g. an expired confirmation link; surface it on the gate
+    try { sessionStorage.setItem("codex.gateNotice", errDesc.replace(/\+/g, " ")); } catch (e) {}
+    cleanHash();
+    return;
+  }
+  try {
+    const at = p.get("access_token"), rt = p.get("refresh_token");
+    if (!at || !rt) return;
+    let payload = at.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    payload += "=".repeat((4 - payload.length % 4) % 4);
+    const body = JSON.parse(atob(payload));
+    localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify({
+      access_token: at, refresh_token: rt,
+      expires_at: Date.now() + (Number(p.get("expires_in")) || 3600) * 1000,
+      user: { id: body.sub, email: body.email },
+      name: (body.user_metadata && body.user_metadata.name) || (body.email || "").split("@")[0],
+    }));
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.setItem("codex.hasSignedInBefore", "1");
+    cleanHash();
+  } catch (e) { /* malformed fragment: fall through to the normal gate */ }
+})();
+
 function current() {
   const cs = cloudSession();
   if (cs) return { id: "cloud", name: cs.name || (cs.user.email || "").split("@")[0], email: cs.user.email, cloud: true };
@@ -145,9 +182,11 @@ function storeKeyFor(accountNs, base) { return accountNs ? base + "@" + accountN
    open (the actual template content is copied in by ensureTemplate() below,
    once storage for that workspace is open). */
 function seedSpaceFor(n, ownerName) {
+  // new accounts start with exactly ONE workspace: their own, copied from the
+  // starter template. (The World Without God canon workspace belongs to the
+  // site owner's original account; it is not pre-added for everyone else.)
   const wsId = "ws" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const list = [
-    { id: "default", name: "World Without God", hasCanon: true, createdAt: Date.now() },
     { id: wsId, name: ownerName === "Guest" ? "Guest workspace" : ownerName + "'s workspace", hasCanon: false, template: true, createdAt: Date.now() },
   ];
   localStorage.setItem(storeKeyFor(n, "codex.workspaces"), JSON.stringify(list));
@@ -282,6 +321,14 @@ function showGate() {
     document.body.appendChild(gate);
   }
   gate.innerHTML = gateHtml();
+
+  let notice = "";
+  try { notice = sessionStorage.getItem("codex.gateNotice") || ""; sessionStorage.removeItem("codex.gateNotice"); } catch (e) {}
+  if (notice) {
+    const card = gate.querySelector(".gate-card");
+    if (card) card.insertAdjacentHTML("afterbegin",
+      `<div class="gate-notice">${esc(notice)}. Sign in below, or create the account again to get a fresh link.</div>`);
+  }
 
   const $ = (s) => gate.querySelector(s);
   const $$ = (s) => Array.from(gate.querySelectorAll(s));

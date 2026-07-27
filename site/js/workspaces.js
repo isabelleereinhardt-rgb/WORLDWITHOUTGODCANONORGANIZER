@@ -42,11 +42,18 @@ function rename(id, name) {
   const arr = list(); const w = arr.find(x => x.id === id); if (!w) return;
   w.name = (name || "").trim() || w.name; saveList(arr);
 }
+/* The original owner's canon workspace stays protected; for every other
+   account, any workspace can go, as long as at least one remains. */
+function canDelete(id) {
+  const isLegacyOwner = window.CodexAccount && CodexAccount.ns() === "";
+  if (id === "default" && isLegacyOwner) return false;
+  return list().length > 1;
+}
 async function remove(id) {
-  if (id === "default") throw new Error("The default workspace can't be deleted.");
+  if (!canDelete(id)) throw new Error(id === "default" ? "The canon workspace can't be deleted." : "You need at least one workspace.");
   const arr = list().filter(x => x.id !== id); saveList(arr);
   if (window.CodexStore) await CodexStore.deleteWorkspaceDB(id);
-  if (activeId() === id) localStorage.setItem(ACTIVE_KEY(), "default");
+  if (activeId() === id) localStorage.setItem(ACTIVE_KEY(), (arr[0] && arr[0].id) || "default");
 }
 async function switchTo(id) {
   localStorage.setItem(ACTIVE_KEY(), id);
@@ -75,7 +82,7 @@ function renderSwitcher() {
       <span class="ws-name">${esc(w.name)}${w.hasCanon ? ` <span class="faint">· canon</span>` : ""}</span>
       ${w.id === active ? `<span class="ws-current">Current</span>` : `<button class="btn ghost sm" data-switch="${w.id}">Switch</button>`}
       <button class="btn ghost sm" data-rename="${w.id}">Rename</button>
-      ${w.id !== "default" ? `<button class="btn danger sm" data-remove="${w.id}">Delete</button>` : ""}
+      ${canDelete(w.id) ? `<button class="btn danger sm" data-remove="${w.id}">Delete</button>` : ""}
     </div>`).join("");
   el.innerHTML = `<div class="export-box" style="width:400px">
     <div class="export-title">Workspaces</div>
@@ -104,8 +111,9 @@ function renderSwitcher() {
   $$("[data-remove]", el).forEach(b => b.onclick = async () => {
     const w = list().find(x => x.id === b.dataset.remove);
     if (!confirm(`Delete "${w ? w.name : "this workspace"}" and everything in it? This can't be undone.`)) return;
+    const wasActive = activeId() === b.dataset.remove;
     await remove(b.dataset.remove);
-    if (activeId() === b.dataset.remove) await activate("default");
+    if (wasActive) await activate(list()[0].id);
     renderSwitcher();
   });
 }

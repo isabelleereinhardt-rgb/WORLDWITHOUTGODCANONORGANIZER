@@ -899,3 +899,5 @@ h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.2;color:var(--in
 .cloud-setup-box{background:var(--bg-sunken);border:1px solid var(--line-strong);border-radius:var(--radius-sm);
   padding:12px 14px;font-size:13px;margin-top:10px}
 .cloud-setup-box ol{margin:8px 0 0;padding-left:20px}
+.gate-notice{background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent-ink);
+  border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;margin-bottom:14px}

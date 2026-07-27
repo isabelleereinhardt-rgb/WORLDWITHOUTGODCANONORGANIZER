@@ -82,6 +82,14 @@ function adoptSession(j) {
     name: (user.user_metadata && user.user_metadata.name) || (user.email || "").split("@")[0],
   });
 }
+/* A request came back 401 even though the token hadn't expired (revoked,
+   or adopted from an email link edge case): mark it stale so the next
+   ensureToken() call refreshes it instead of reusing it. */
+function markTokenStale() {
+  const s = session();
+  if (s) { s.expires_at = 0; saveSession(s); }
+}
+
 function friendlyAuthError(j, fallback) {
   const raw = (j && (j.error_description || j.msg || j.message || j.error)) || fallback || "Something went wrong.";
   if (/invalid login credentials/i.test(raw)) return "Wrong email or password.";
@@ -195,6 +203,7 @@ async function flush() {
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         if (j.code === "PGRST205" || j.code === "42P01") { setStatus("setup", "The cloud database isn't set up yet."); throw new Error("setup"); }
+        if (res.status === 401) { markTokenStale(); throw new Error("Refreshing your session; syncing again shortly."); }
         throw new Error(j.message || ("Sync failed (HTTP " + res.status + ")"));
       }
       batch.forEach(r => flushedKeys.add(r._k));
@@ -273,6 +282,7 @@ async function pull(full) {
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         if (j.code === "PGRST205" || j.code === "42P01") { setStatus("setup", "The cloud database isn't set up yet."); return; }
+        if (res.status === 401) { markTokenStale(); throw new Error("Refreshing your session; syncing again shortly."); }
         throw new Error(j.message || ("Pull failed (HTTP " + res.status + ")"));
       }
       const rows = await res.json();
