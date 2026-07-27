@@ -1186,10 +1186,18 @@ a.otd-row:hover{color:var(--blush)}
 @keyframes lucky-leg{0%,100%{transform:rotate(15deg)}50%{transform:rotate(-15deg)}}
 @keyframes lucky-tail{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(10deg)}}
 @keyframes lucky-blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
-/* the treat: a hop, then he carries it off screen */
+/* The treat: he stops where he is, hops, then wanders off to the left.
+
+   The catch that made him teleport: the walk animation is the ONLY thing
+   offsetting him from `left:100vw`, so the moment `.treating` replaces it
+   with a different animation he snaps back to the right edge and does the
+   whole performance off screen. So JS pins `left` to the pixel he had
+   reached and sets --exit to the distance from there to just past the left
+   edge; the transform below is relative to that held position. */
 @keyframes lucky-hop{0%,100%{transform:translateY(0) scaleY(1)}18%{transform:translateY(0) scaleY(.9)}
   50%{transform:translateY(-13px) scaleY(1.04)}82%{transform:translateY(0) scaleY(.94)}}
-@keyframes lucky-hopaway{0%,52%{transform:translateX(0)}100%{transform:translateX(-92vw)}}
+@keyframes lucky-hopaway{0%,58%{transform:translateX(0)}
+  100%{transform:translateX(calc(-1 * var(--exit,92vw)))}}
 .lucky-walk.treating{animation:lucky-hopaway 4.6s ease-in forwards}
 .lucky-walk.treating .lucky-bob{animation:lucky-hop .62s ease-in-out 3}
 
@@ -1830,3 +1838,36 @@ body.reader-mode .lucky-stage{display:none}
 .note-edit-acts{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .ne-count{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
   text-transform:uppercase;color:var(--dim);margin-left:auto}
+
+/* ---- the model pass in an answer ---- */
+.a-model{border-left:2px solid var(--gold);padding:10px 0 10px 14px;margin:12px 0}
+.a-model.failed{border-left-color:var(--dim)}
+.a-model .am-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
+.a-model .am-glyph{color:var(--gold)}
+.a-model .am-who{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold)}
+.a-model .am-state{font-family:var(--serif);font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--dim)}
+.a-model.pending .am-state{animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+.a-model .am-text{font-size:15px;line-height:1.6;color:var(--ink)}
+.a-model .am-text p{margin:0 0 9px}
+.a-model .am-why{font-size:13.5px;line-height:1.5;color:var(--dim)}
+.a-local-wrap{margin:10px 0}
+.a-local-wrap summary{font-family:var(--serif);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim);cursor:pointer;padding:4px 0}
+.a-local-wrap summary:hover{color:var(--blush)}
+.a-chip.model.live .dot{background:var(--gold)}
+
+/* ---- assistant settings: the API side ---- */
+.ai-warn{border:1px solid var(--gold);border-radius:2px;padding:14px 16px;margin-top:16px}
+.ai-warn .aw-head{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold);margin-bottom:8px}
+.ai-warn .aw-list{margin:0;padding-left:18px;font-size:13.5px;line-height:1.6;color:var(--ink)}
+.ai-warn .aw-list li{margin-bottom:5px}
+.ai-grid{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+.ai-acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.ai-test{margin-top:11px;font-size:13.5px;line-height:1.5;min-height:1em}
+.ai-test.working{color:var(--dim)}
+.ai-test.good{color:var(--gold)}
+.ai-test.bad{color:#e0a0a0}

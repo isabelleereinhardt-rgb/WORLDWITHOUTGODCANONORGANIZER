@@ -644,17 +644,140 @@ function panelLucky(el) {
 /* ---------- Assistant ---------- */
 function panelAssistant(el) {
   const s = Extra.settings;
+  const AI = window.CodexAI;
+  const c = AI ? AI.conf() : { mode: "device", provider: "anthropic", model: "", base: "", key: "", contextEntries: 6 };
+  const prov = AI ? AI.PROVIDERS[c.provider] : null;
+  const live = AI ? AI.on() : false;
+
   el.innerHTML = `
-    <div class="rule-head"><span class="k">How the assistant works</span><span class="hr"></span></div>
-    <p class="faint set-help">Every answer is worked out in this browser from entries you wrote. There is no account,
-      no API key and no request to any server, which is why it can only ever tell you what your own canon says —
-      and why it cannot invent a fact it has not read.</p>
+    <div class="rule-head"><span class="k">Where answers come from</span><span class="hr"></span></div>
+    <div class="pers-grid">
+      <button class="pers-card${c.mode !== "api" ? " on" : ""}" data-aimode="device">
+        <span class="pc-glyph">✧</span>
+        <span><span class="pc-name">On this device</span>
+        <span class="pc-sample">Searches your entries and assembles an answer from your own words.
+          Nothing leaves the browser. Free, private, and cannot invent anything.</span></span>
+      </button>
+      <button class="pers-card${c.mode === "api" ? " on" : ""}" data-aimode="api">
+        <span class="pc-glyph">✦</span>
+        <span><span class="pc-name">A model, with my own key</span>
+        <span class="pc-sample">The same search runs first, then the passages it found are sent to a
+          model you pay for, so answers can be reasoned rather than assembled.</span></span>
+      </button>
+    </div>
+
+    ${c.mode === "api" ? `
+      <div class="ai-warn">
+        <div class="aw-head">✦ What this changes</div>
+        <ul class="aw-list">
+          <li>The entries that match a question <strong>are sent to ${esc(prov ? prov.label : c.provider)}</strong>
+            to answer it. Everything else stays here.</li>
+          <li>You are billed by them per request, not by this app.</li>
+          <li>Your key is kept on this device only. It is never uploaded, never synced, and is
+            deliberately left out of backups — so a backup file cannot leak it.</li>
+          <li>If a request fails you still get the on-device answer, with the reason.</li>
+        </ul>
+      </div>
+
+      <div class="rule-head mt"><span class="k">Provider</span><span class="hr"></span></div>
+      <div class="av-chips">${Object.keys(AI.PROVIDERS).map(id =>
+        `<button class="av-chip${c.provider === id ? " on" : ""}" data-aiprov="${id}">${esc(AI.PROVIDERS[id].label)}</button>`).join("")}</div>
+
+      <div class="ai-grid">
+        <label class="ne-field"><span>Model</span>
+          ${prov && prov.models.length
+            ? `<select class="folder-select" id="aiModel">
+                 ${prov.models.map(m => `<option ${m === c.model ? "selected" : ""}>${esc(m)}</option>`).join("")}
+                 ${prov.models.indexOf(c.model) < 0 && c.model ? `<option selected>${esc(c.model)}</option>` : ""}
+               </select>`
+            : `<input class="import-title" id="aiModel" value="${esc(c.model)}" placeholder="model name">`}
+        </label>
+        <label class="ne-field grow"><span>API key</span>
+          <input class="import-title" id="aiKey" type="password" autocomplete="off"
+            value="${esc(c.key)}" placeholder="${esc(prov ? prov.keyHint : "")}"></label>
+      </div>
+      ${c.provider === "custom" ? `
+        <label class="ne-field" style="margin-top:12px"><span>Endpoint URL</span>
+          <input class="import-title" id="aiBase" value="${esc(c.base)}"
+            placeholder="http://localhost:11434/v1/chat/completions"></label>
+        <p class="faint set-help">Anything that speaks the OpenAI request shape: a proxy, a company
+          gateway, or a model on your own machine through Ollama or LM Studio.</p>` : ""}
+
+      <label class="ne-field" style="margin-top:12px"><span>Entries sent per question</span>
+        <input class="import-title" id="aiCtx" type="number" min="1" max="24" value="${c.contextEntries}"
+          style="max-width:110px"></label>
+      <p class="faint set-help">Fewer means cheaper and more focused; more means broader context.</p>
+
+      <div class="ai-acts">
+        <button class="btn sm" id="aiSave">Save</button>
+        <button class="btn ghost sm" id="aiTest">Test the connection</button>
+        <button class="btn ghost sm danger" id="aiForget">Forget my key</button>
+      </div>
+      <div id="aiTestOut" class="ai-test"></div>
+      <p class="faint set-help">Status: ${live
+        ? `<strong>connected</strong> — the assistant will use ${esc(c.model)}.`
+        : `not connected yet. ${c.key ? "Check the model and endpoint." : "Paste a key to finish."}`}</p>
+    ` : `
+      <p class="faint set-help" style="margin-top:14px">Nothing is sent anywhere. The assistant reads
+        the entries you wrote, finds the passages that match, and answers from them — which is why it
+        cannot tell you a fact it has not read.</p>`}
 
     <div class="rule-head mt"><span class="k">Standing instructions</span><span class="hr"></span></div>
-    <p class="faint set-help">Extra guidance on how it should read and answer. Saved with your work.</p>
+    <p class="faint set-help">Extra guidance on how it should read and answer. Used by both ways of answering.</p>
     <textarea class="import-body" id="aiInstr" placeholder="e.g. Prefer my own terminology. When I ask who someone is, give a short blurb in my voice, not a raw quote.">${esc(s.aiInstr || "")}</textarea>
     <div style="margin-top:10px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>`;
+
   $("#saveAiInstr", el).onclick = () => { Extra.settings.aiInstr = $("#aiInstr", el).value; saveSettings(); toast("Saved"); };
+  if (!AI) return;
+
+  $$("[data-aimode]", el).forEach(b => b.onclick = () => {
+    AI.setConf({ mode: b.dataset.aimode });
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    viewSettings("assistant");
+  });
+  $$("[data-aiprov]", el).forEach(b => b.onclick = () => {
+    const id = b.dataset.aiprov;
+    const models = AI.PROVIDERS[id].models;
+    // moving provider carries the key over but not the model name, which
+    // would be meaningless at the new one
+    AI.setConf({ provider: id, model: models[0] || "" });
+    viewSettings("assistant");
+  });
+  const readForm = () => {
+    const patch = {
+      model: ($("#aiModel", el) || {}).value || "",
+      key: ($("#aiKey", el) || {}).value || "",
+      contextEntries: Number(($("#aiCtx", el) || {}).value) || 6,
+    };
+    const baseEl = $("#aiBase", el);
+    if (baseEl) patch.base = baseEl.value.trim();
+    return patch;
+  };
+  if ($("#aiSave", el)) $("#aiSave", el).onclick = () => {
+    AI.setConf(readForm());
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    toast(AI.on() ? "Connected" : "Saved — not connected yet");
+    viewSettings("assistant");
+  };
+  if ($("#aiTest", el)) $("#aiTest", el).onclick = async () => {
+    AI.setConf(readForm());
+    const out = $("#aiTestOut", el);
+    out.className = "ai-test working";
+    out.textContent = "Asking " + (AI.state().model || "the provider") + "…";
+    const r = await AI.test();
+    out.className = "ai-test " + (r.ok ? "good" : "bad");
+    out.textContent = r.ok
+      ? "Working. It replied: " + String(r.text).slice(0, 120)
+      : "Not working. " + r.why;
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+  };
+  if ($("#aiForget", el)) $("#aiForget", el).onclick = () => {
+    if (!confirm("Forget the API key and go back to answering on this device?")) return;
+    AI.clearKey();
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    toast("Key forgotten");
+    viewSettings("assistant");
+  };
 }
 
 /* ---------- Sections ---------- */

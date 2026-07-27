@@ -1830,6 +1830,57 @@ function askAssistant(q) {
   bindAssistantChips(turn);
   bindAnswerActions(turn);
   turn.scrollIntoView({ block: "start", behavior: "smooth" });
+
+  // With a model connected, the on-device answer above is shown at once
+  // and then reasoned over: same retrieval, same citations, better prose.
+  // The local answer is never thrown away, so a failure downgrades
+  // instead of breaking.
+  if (window.CodexAI && CodexAI.on()) enrichWithModel(turn, q, answer);
+}
+
+/* ---------- the model pass ---------- */
+async function enrichWithModel(turn, q, local) {
+  const them = turn.querySelector(".a-them");
+  if (!them) return;
+  const pending = document.createElement("div");
+  pending.className = "a-model pending";
+  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
+    <span class="am-who">${esc(CodexAI.label())}</span>
+    <span class="am-state">reading your entries…</span></div>`;
+  them.insertBefore(pending, them.querySelector(".a-actions"));
+
+  const r = await CodexAI.ask(q, local.sources || []);
+  if (!turn.isConnected) return;                  // thread was cleared mid-flight
+
+  if (!r.ok) {
+    pending.className = "a-model failed";
+    pending.innerHTML = `<div class="am-head"><span class="am-glyph">✧</span>
+      <span class="am-who">${esc(CodexAI.label())} could not answer</span></div>
+      <div class="am-why">${esc(r.why)} The answer above was worked out on this device instead.</div>`;
+    return;
+  }
+  pending.className = "a-model";
+  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
+    <span class="am-who">${esc(r.model || CodexAI.label())}</span>
+    <span class="am-state">from ${r.sent} of your entries</span></div>
+    <div class="am-text">${esc(r.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
+      .replace(/^/, "<p>").replace(/$/, "</p>")}</div>`;
+  // the local answer stays, folded away, so you can always compare
+  const localBlock = them.querySelector(".a-local-wrap");
+  if (!localBlock) {
+    const parts = Array.from(them.children).filter(el =>
+      !el.classList.contains("a-model") && !el.classList.contains("a-actions") &&
+      !el.classList.contains("a-cites") && !el.classList.contains("a-ground"));
+    if (parts.length) {
+      const wrap = document.createElement("details");
+      wrap.className = "a-local-wrap";
+      const sum = document.createElement("summary");
+      sum.textContent = "What this device found on its own";
+      wrap.appendChild(sum);
+      parts.forEach(p => wrap.appendChild(p));
+      them.insertBefore(wrap, pending);
+    }
+  }
 }
 
 function bindAnswerActions(turn) {
@@ -1941,11 +1992,27 @@ function setAssistantContext(label, href) {
     <button class="ctx-x" title="Stop using this as context">✕</button>`;
   el.querySelector(".ctx-x").onclick = () => setAssistantContext(null);
 }
+/* The chip is the app's claim about where answers come from, so it is
+   derived from the live setting rather than written once into the HTML. */
+function refreshModelChip() {
+  const chip = $("#assistantModel"), name = $("#assistantModelName");
+  if (!chip || !name) return;
+  const ai = window.CodexAI;
+  const live = ai && ai.on();
+  name.textContent = ai ? ai.label() : "On device";
+  chip.classList.toggle("live", !!live);
+  chip.title = live
+    ? "Your matching entries are sent to " + ai.state().providerLabel +
+      " to answer. You are billed by them. Change this in Settings, Assistant."
+    : "Answers are worked out in this browser from your own entries. Nothing is sent anywhere.";
+}
+
 window.CodexAssistant = { scan: assistantScan, lookup: assistantLookup, open: openAssistant,
-  ask: askAssistant, context: setAssistantContext };
+  ask: askAssistant, context: setAssistantContext, refreshModelChip };
 function openAssistant() {
   $("#app").classList.add("assist-open");
   $("#assistant").hidden = false;
+  refreshModelChip();
   // the header portrait is Lucky's, so it has to follow his chosen coat
   const face = $("#assistantFace");
   if (face && window.CodexLucky) {
@@ -1972,8 +2039,20 @@ async function backupAll() {
   if (window.CodexStore) data = await CodexStore.exportAll();
   else { data = { _codex: true, stores: {} }; }
   data._codex = true;
-  // include tiny localStorage prefs too
-  data.prefs = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("codex.")) data.prefs[k] = localStorage.getItem(k); }
+  /* Include the small localStorage prefs too — but NEVER a credential.
+     A backup is the one file that leaves this machine: it gets emailed to
+     yourself, dropped in cloud storage, kept for years. An API key inside
+     it is a live secret in all of those places, so the AI settings are
+     skipped outright rather than filtered field by field. */
+  const SECRET_KEYS = [window.CodexAI ? CodexAI.STORAGE_KEY : "codex.ai"];
+  data.prefs = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith("codex.")) continue;
+    if (SECRET_KEYS.indexOf(k) > -1) continue;
+    data.prefs[k] = localStorage.getItem(k);
+  }
+  data._skipped = "AI provider settings and API key are never included in a backup.";
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

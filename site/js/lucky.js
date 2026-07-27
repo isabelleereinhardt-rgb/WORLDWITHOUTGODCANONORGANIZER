@@ -722,6 +722,16 @@ const Lucky = {
     CodexExtra.settings.luckyTreats = (pref("luckyTreats") || 0) + 1;
     save();
     Sound.onBell();
+
+    /* Pin him to the spot he had actually reached before swapping the
+       animation. The walk keyframes are the only thing holding him away
+       from `left:100vw`, so dropping them mid-stroll would snap him to the
+       right edge and play the whole treat off screen. Freeze the measured
+       position as a real `left`, then tell the exit how far it is from
+       there to just past the left edge. */
+    const box = walk.getBoundingClientRect();
+    walk.style.left = Math.round(box.left) + "px";
+    walk.style.setProperty("--exit", Math.round(box.left + box.width + 40) + "px");
     walk.classList.add("treating");
     const p = persona();
     const txt = $("#luckyTipText", this.el);
@@ -734,12 +744,18 @@ const Lucky = {
     setTimeout(() => {
       clearTimeout(thanksAt);
       walk.classList.remove("treating");
+      // drop the pinned position so the stylesheet's left:100vw applies again
+      walk.style.removeProperty("left");
+      walk.style.removeProperty("--exit");
       this.tipIdx++;
       this.render();
-      // restart the stroll so he walks back in from the right
+      // he has gone off the left edge, so the fresh stroll starts from
+      // the right as usual
       const el = $("#luckyWalk", this.el);
       if (el && el.getAnimations) el.getAnimations({ subtree: true }).forEach(a => { try { a.cancel(); a.play(); } catch (e) {} });
-    }, 4600);
+      // a beat past the 4.6s exit, so he is fully off the edge before the
+      // reset rather than blinking out mid-stride
+    }, 4900);
   },
 
   /* rotate the tip every time the stroll comes round again */
