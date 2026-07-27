@@ -1,5 +1,5 @@
 /* ============================================================
-   The Codex — Documents & Slide Decks
+   The Codex; Documents & Slide Decks
    Rich text editor + deck builder. Everything saves to IndexedDB
    (via CodexStore), so images persist. Items can be filed under
    a project folder. Export to Word / Markdown / print-to-PDF.
@@ -38,7 +38,7 @@ async function list(folderId) {
     <div class="page-kicker">Workspace</div>
     <h1>Documents</h1>
     <p class="muted">Write lore, drafts, and notes right inside your organizer. They save automatically to this
-      browser — use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
+      browser; use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
     ${folderBar}
     <div style="margin:16px 0"><button class="btn" id="newDoc">New document</button></div>
     ${docs.length ? `<div class="list-grid">${cards}</div>` :
@@ -165,7 +165,7 @@ async function open(id) {
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
   $("#tbReadSel").onclick = () => {
     if (!window.CodexSpeech) { toast("Speech not supported here"); return; }
-    // "Read aloud" with no selection is the common case — read the whole document
+    // "Read aloud" with no selection is the common case; read the whole document
     // instead of silently doing nothing (a highlighted selection still wins if present).
     const sel = (window.getSelection && String(window.getSelection())) || "";
     CodexSpeech.read(sel.trim() ? sel : (edEl.innerText || ""));
@@ -405,7 +405,7 @@ function runGrammarCheck(text) {
   const openParen = (text.match(/\(/g) || []).length, closeParen = (text.match(/\)/g) || []).length;
   if (openParen !== closeParen) issues.push({ msg: `Unmatched parentheses (${openParen} "(" vs ${closeParen} ")").` });
   const quotes = (text.match(/"/g) || []).length;
-  if (quotes % 2 !== 0) issues.push({ msg: `An odd number of straight quotes (${quotes}) — one may be unclosed.` });
+  if (quotes % 2 !== 0) issues.push({ msg: `An odd number of straight quotes (${quotes}); one may be unclosed.` });
   Object.keys(TYPOS).forEach(t => { if (new RegExp("\\b" + t + "\\b", "i").test(text)) issues.push({ msg: `Possible typo: "${t}" → "${TYPOS[t]}".` }); });
   const sentences = text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) || [];
   sentences.forEach(s => {
@@ -422,7 +422,7 @@ function showGrammarPanel(issues, text) {
   const words = (text || "").trim().split(/\s+/).filter(Boolean).length;
   panel.innerHTML = `<button class="grammar-close" id="grammarClose">✕</button>
     <b style="font-family:var(--serif);font-size:15px">Grammar &amp; style</b>
-    <p class="faint" style="font-size:12px;margin:6px 0 10px">${words} words checked · offline, rule-based — use judgement, it isn't exhaustive.</p>
+    <p class="faint" style="font-size:12px;margin:6px 0 10px">${words} words checked · offline, rule-based; use judgement, it isn't exhaustive.</p>
     ${issues.length ? issues.map(i => `<div class="grammar-item">${i.msg}</div>`).join("") : `<div class="grammar-item">No issues spotted.</div>`}`;
   document.getElementById("grammarClose").onclick = () => panel.remove();
 }
@@ -445,7 +445,7 @@ function bindWriteTimer(btn) {
     iv = setInterval(() => {
       const s = Math.floor((Date.now() - t0) / 1000);
       const m = String(Math.floor(s / 60)).padStart(2, "0"), sec = String(s % 60).padStart(2, "0");
-      btn.textContent = `${m}:${sec} — stop`;
+      btn.textContent = `${m}:${sec}; stop`;
     }, 1000);
   };
 }
@@ -543,7 +543,7 @@ async function deckList(folderId) {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Workspace</div>
     <h1>Slide Decks</h1>
-    <p class="muted">Build simple presentations for your world — lore recaps, house profiles, pitch decks.
+    <p class="muted">Build simple presentations for your world; lore recaps, house profiles, pitch decks.
       Present fullscreen or export to PDF.</p>
     ${folderBar}
     <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
@@ -569,7 +569,7 @@ async function deckList(folderId) {
   });
 }
 /* extracts every complete {...} object appearing after `fromIndex`, tolerating a
-   truncated/unclosed enclosing array or object — used when Gemini's output gets cut
+   truncated/unclosed enclosing array or object; used when Gemini's output gets cut
    off mid-generation so we still recover whichever slides finished cleanly. */
 function extractObjectsFrom(text, fromIndex) {
   const out = [];
@@ -588,7 +588,7 @@ function parseDeckJson(raw) {
   if (s >= 0 && e > s) {
     try { const obj = JSON.parse(t.slice(s, e + 1)); if (obj && typeof obj === "object") return obj; } catch (_) {}
   }
-  // truncated mid-array — salvage whatever complete slide objects exist
+  // truncated mid-array; salvage whatever complete slide objects exist
   const slidesIdx = t.indexOf('"slides"');
   const arrStart = slidesIdx >= 0 ? t.indexOf("[", slidesIdx) : -1;
   const slides = arrStart >= 0 ? extractObjectsFrom(t, arrStart + 1) : [];
@@ -596,21 +596,21 @@ function parseDeckJson(raw) {
   return { title: titleMatch ? titleMatch[1] : "", slides };
 }
 async function generateAIDeck(folderId) {
-  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first; Settings → Assistant"); location.hash = "#/settings"; return; }
   const topic = prompt("What should the deck be about? (a character, house, place, event, or a theme from your canon)");
   if (topic === null) return;
   const msg = $("#aiDeckMsg");
   if (msg) msg.innerHTML = `<div class="ai-thinking" style="padding:10px 0">✦ Drafting your deck from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
   let context = "";
   try { context = CodexAI.context(topic || "overview", 14).context; } catch (e) {}
-  const system = "You build a slide deck from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
-    "Return STRICT JSON only (no markdown, no prose): an object with EXACTLY these keys — " +
+  const system = "You build a slide deck from a worldbuilding author's OWN canon. Use ONLY the provided excerpts; never invent names, facts, or events. " +
+    "Return STRICT JSON only (no markdown, no prose): an object with EXACTLY these keys; " +
     "{\"title\":\"deck title\",\"slides\":[{\"title\":\"slide title\",\"body\":\"a few short lines, use \\n for line breaks\"}]}. " +
-    "Every slide must have a non-empty \"title\" or \"body\" — never leave both blank. " +
-    "Open with a strong title slide, then 4–8 content slides. Keep each slide skimmable — a heading plus a handful of concise lines.";
+    "Every slide must have a non-empty \"title\" or \"body\"; never leave both blank. " +
+    "Open with a strong title slide, then 4–8 content slides. Keep each slide skimmable; a heading plus a handful of concise lines.";
   const user = `Build a presentation about "${topic || "an overview of this world"}" from these excerpts. Return only the JSON.\n\n${context}`;
   try {
-    // Gemini's "thinking" overhead (often 1000-2500+ tokens) can eat the visible output —
+    // Gemini's "thinking" overhead (often 1000-2500+ tokens) can eat the visible output;
     // give real headroom so the JSON doesn't get cut off mid-array.
     const data = parseDeckJson(await CodexAI.complete(system, user, { maxTokens: 4800 }));
     const slides = (data.slides || []).map(s => ({
@@ -729,12 +729,20 @@ function present() {
   };
   draw();
   document.body.appendChild(el);
+  const close = () => {
+    el.remove();
+    document.removeEventListener("keydown", key);
+    window.removeEventListener("hashchange", close);
+  };
   const key = e => {
     if (e.key === "ArrowRight" || e.key === " ") { i = Math.min(i + 1, d.slides.length - 1); draw(); }
     else if (e.key === "ArrowLeft") { i = Math.max(i - 1, 0); draw(); }
-    else if (e.key === "Escape") { el.remove(); document.removeEventListener("keydown", key); }
+    else if (e.key === "Escape") close();
   };
   document.addEventListener("keydown", key);
+  // navigating away (back button, a link) must also tear the overlay down,
+  // or its key listener would keep firing on a page that no longer shows it
+  window.addEventListener("hashchange", close);
   el.onclick = () => { i = Math.min(i + 1, d.slides.length - 1); draw(); };
 }
 function exportDeckPdf(d) {

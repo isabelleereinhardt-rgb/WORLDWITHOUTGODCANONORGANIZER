@@ -1,5 +1,5 @@
 /* ============================================================
-   World Without God — Canon Organizer
+   World Without God; Canon Organizer
    Mind Maps: nodes you can add, drag, connect, and label. Make as
    many maps as you want, file them under a project. Saved in
    IndexedDB via CodexStore ("mindmaps" store).
@@ -31,7 +31,7 @@ async function list(folderId) {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Workspace · Mind Maps</div>
     <h1>Mind Maps</h1>
-    <p class="muted">Lay ideas out and connect them — plot threads, relationship webs, cause and effect.
+    <p class="muted">Lay ideas out and connect them; plot threads, relationship webs, cause and effect.
       Double-click empty space to add a node; drag from a node's dot to connect it to another.</p>
     ${folderBar}
     <div style="margin:16px 0"><button class="btn" id="newMap">New mind map</button></div>

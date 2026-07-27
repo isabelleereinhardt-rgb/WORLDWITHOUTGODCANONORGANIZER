@@ -1,5 +1,5 @@
 /* ============================================================
-   The Codex — Canvases (mood boards)
+   The Codex; Canvases (mood boards)
    A freeform space, Notion-style: drop in images, videos, links,
    and text cards, drag them anywhere. Make as many boards as you
    like and file them under a project folder. Saved in IndexedDB.
@@ -18,7 +18,7 @@ const S = () => window.CodexStore;
    Every text note and every caption on the board is mirrored into the
    regular notes store (tagged so we know it came from a canvas), so it's
    searchable, cross-linked, and readable by the assistant just like any
-   other note — instead of silently living only inside the board. */
+   other note; instead of silently living only inside the board. */
 function cardAIText(c) {
   if (c.type === "text") return (c.data.html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (c.data && c.data.caption) return c.data.caption.trim();
@@ -32,7 +32,7 @@ async function syncCardToAI(board, c) {
   if (!text) { await S().del("notes", noteId); if (window.Codex) Codex.refresh(); return; }
   const kindLabel = c.type === "text" ? "Note" : (c.type[0].toUpperCase() + c.type.slice(1) + " caption");
   await S().put("notes", {
-    id: noteId, title: `${board.title || "Canvas"} — ${kindLabel}`, text,
+    id: noteId, title: `${board.title || "Canvas"}; ${kindLabel}`, text,
     images: c.type === "image" && c.data.src ? [c.data.src] : [], category: "My Notes", _fromCanvas: true,
   });
   if (window.Codex) Codex.refresh();
@@ -71,7 +71,7 @@ async function list(folderId) {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Workspace · Mood boards</div>
     <h1>Canvases</h1>
-    <p class="muted">Freeform boards for the <em>feel</em> of a place, a character, a whole book — pin images,
+    <p class="muted">Freeform boards for the <em>feel</em> of a place, a character, a whole book; pin images,
       video, links, and stray thoughts, and arrange them however makes sense to you.</p>
     ${folderBar}
     <div style="margin:16px 0"><button class="btn" id="newCanvas">New canvas</button></div>
@@ -198,7 +198,7 @@ function videoEmbed(url) {
 
 function captionField(c) {
   return `<div class="cc-caption-wrap"><input class="cc-caption" data-cap="${c.id}"
-    placeholder="Caption — what this is, and how the assistant should use it…"
+    placeholder="Caption; what this is, and how the assistant should use it…"
     value="${esc(c.data.caption || "")}"></div>`;
 }
 function cardInner(c) {

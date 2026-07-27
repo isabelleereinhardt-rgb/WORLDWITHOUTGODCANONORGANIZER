@@ -1,6 +1,6 @@
 /* ============================================================
-   World Without God — Canon Organizer
-   Timeline — enter events as BR (Before Reconstruction) or AR
+   World Without God; Canon Organizer
+   Timeline; enter events as BR (Before Reconstruction) or AR
    (After Reconstruction) years and they're automatically placed
    and ordered on a single computed line. Click a date to open its
    notes. Saved in IndexedDB ("timeline" store).
@@ -37,11 +37,11 @@ function render() {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Timeline</div>
     <h1>Timeline</h1>
-    <p class="muted">Add events as <b>BR</b> (Before Reconstruction) or <b>AR</b> (After Reconstruction) years —
+    <p class="muted">Add events as <b>BR</b> (Before Reconstruction) or <b>AR</b> (After Reconstruction) years;
       they're placed and re-ordered on the line automatically. Click any point to open its notes.</p>
 
     <div class="tl-add">
-      <input id="tlLabel" placeholder="Event label — e.g. “Founding of House Solis”">
+      <input id="tlLabel" placeholder="Event label; e.g. “Founding of House Solis”">
       <input id="tlValue" type="number" placeholder="Year" style="width:110px">
       <select id="tlEra"><option value="BR" ${lastEra === "BR" ? "selected" : ""}>BR</option><option value="AR" ${lastEra === "AR" ? "selected" : ""}>AR</option></select>
       <button class="btn" id="tlAdd">Add to timeline</button>

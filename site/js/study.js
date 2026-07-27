@@ -1,6 +1,6 @@
 /* ============================================================
-   World Without God — Canon Organizer
-   Flashcards & Quiz — self-testing built straight from your own
+   World Without God; Canon Organizer
+   Flashcards & Quiz; self-testing built straight from your own
    canon. Give it a topic and a count and it pulls facts and
    summaries into cards or multiple-choice / recall questions.
    Regenerate as many times as you want.
@@ -13,7 +13,7 @@ const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const view = () => $("#view");
 const C = () => window.Codex;
 
-/* returns { items, note } — note explains why the pool is smaller than hoped, if it is */
+/* returns { items, note }; note explains why the pool is smaller than hoped, if it is */
 function pool(topic) {
   const DB = C().DB;
   const entries = C().visibleEntries ? C().visibleEntries() : DB.entries;
@@ -32,18 +32,18 @@ function pool(topic) {
   const mentionHits = usable.filter(e => !titleHits.includes(e) && (e._hay || "").includes(t));
   const named = titleHits.concat(mentionHits);
   if (named.length >= 3) return { items: named, note: null };
-  if (named.length) return { items: named, note: `Only ${named.length} entr${named.length === 1 ? "y" : "ies"} in your canon match "${topic.trim()}" — try a broader topic (a category name like "Noble Houses"), or leave it blank to pull from everything.` };
+  if (named.length) return { items: named, note: `Only ${named.length} entr${named.length === 1 ? "y" : "ies"} in your canon match "${topic.trim()}"; try a broader topic (a category name like "Noble Houses"), or leave it blank to pull from everything.` };
   return { items: usable, note: `Nothing matched "${topic.trim()}", so this pulls from your whole canon instead.` };
 }
 function shuffle(arr) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function pick(arr, n) { return shuffle(arr).slice(0, n); }
 
-/* build one Q/A pair from an entry — prefers a concrete fact, falls back to a summary sentence */
+/* build one Q/A pair from an entry; prefers a concrete fact, falls back to a summary sentence */
 function questionFor(entry) {
   const facts = C().factsOf(entry, 8);
   if (facts.length) {
     const f = facts[Math.floor(Math.random() * facts.length)];
-    return { q: `${entry.title} — ${f.k}?`, a: f.v, entry, factKey: f.k };
+    return { q: `${entry.title}; ${f.k}?`, a: f.v, entry, factKey: f.k };
   }
   const sents = C().sentencesOf(entry.text).filter(s => s.length > 20 && s.length < 220);
   const s = sents[0] || entry.summary || entry.title;
@@ -54,13 +54,13 @@ function questionFor(entry) {
 let cards = [], flipped = new Set();
 function view_() {
   view().innerHTML = `<div class="wrap">
-    <div class="page-kicker">${window.svg ? "" : ""}Study</div>
+    <div class="page-kicker">Study</div>
     <h1>Flashcards &amp; Quiz</h1>
-    <p class="muted">Built from your own canon — nothing invented. Pick a topic (a category name like
+    <p class="muted">Built from your own canon; nothing invented. Pick a topic (a category name like
       "Noble Houses", or a character/place name, or leave blank for anything), how many, and go.</p>
 
     <div class="study-controls">
-      <input id="stTopic" placeholder="Topic (optional) — e.g. Magic System, or a name…">
+      <input id="stTopic" placeholder="Topic (optional); e.g. Magic System, or a name…">
       <input id="stCount" type="number" min="3" max="30" value="10" style="width:80px">
       <select id="stMode"><option value="cards">Flashcards</option><option value="quiz">Quiz</option></select>
       <select id="stDiff"><option value="easy">Easy (multiple choice)</option><option value="hard">Hard (type it yourself)</option></select>
@@ -95,7 +95,7 @@ function poolNoteHtml() { return poolNote ? `<div class="import-ok" style="margi
 /* Gemini's newer models spend a real, size-varying chunk of the token budget on internal
    "thinking" before writing anything (observed 300–2800+ tokens even for simple prompts).
    If the visible JSON gets cut off partway through, a naive parse either fails outright or
-   — worse — can slice at the wrong bracket and leave a corrupted trailing object. This
+  ; worse; can slice at the wrong bracket and leave a corrupted trailing object. This
    scans char-by-char and keeps only COMPLETE {...} objects, so a truncated generation still
    yields whatever full cards it managed to finish, never a card with a blank answer. */
 function parseJsonArray(raw) {
@@ -113,7 +113,7 @@ function parseJsonArray(raw) {
   return out;
 }
 async function generateAI() {
-  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first — Settings → Assistant"); location.hash = "#/settings"; return; }
+  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first; Settings → Assistant"); location.hash = "#/settings"; return; }
   const topic = $("#stTopic").value.trim();
   const count = Math.max(3, Math.min(30, +$("#stCount").value || 10));
   const mode = $("#stMode").value;
@@ -122,16 +122,16 @@ async function generateAI() {
   const src = pick(items, Math.min(16, items.length));
   if (!src.length) { $("#stArea").innerHTML = `<div class="empty-state">Nothing in your canon matches that topic yet.</div>`; return; }
   let context = "";
-  for (const e of src) { const chunk = `### ${e.title} — ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1400)}\n\n`; if (context.length + chunk.length > 15000) break; context += chunk; }
+  for (const e of src) { const chunk = `### ${e.title}; ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1400)}\n\n`; if (context.length + chunk.length > 15000) break; context += chunk; }
   $("#stArea").innerHTML = `<div class="ai-thinking" style="justify-content:center;padding:30px">✦ Writing ${count} cards from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
-  const system = "You write study flashcards from a worldbuilding author's OWN canon. Use ONLY the provided excerpts — never invent names, facts, or events. " +
-    "Return STRICT JSON only (no markdown, no prose): an array of objects with EXACTLY these keys — " +
+  const system = "You write study flashcards from a worldbuilding author's OWN canon. Use ONLY the provided excerpts; never invent names, facts, or events. " +
+    "Return STRICT JSON only (no markdown, no prose): an array of objects with EXACTLY these keys; " +
     `{"q":"a specific question","a":"a concise correct answer","distractors":["wrong but plausible","wrong 2","wrong 3"]}. ` +
-    "Every object must have a non-empty \"q\" and a non-empty \"a\" — never omit or leave either blank. " +
+    "Every object must have a non-empty \"q\" and a non-empty \"a\"; never omit or leave either blank. " +
     "Questions must be answerable from the excerpts; answers short; distractors plausible-but-wrong short phrases drawn from the same world.";
   const user = `Make ${count} flashcards${topic ? ` about "${topic}"` : ""} from these excerpts. Return only the JSON array.\n\n${context}`;
   try {
-    // scale the budget to the requested count — thinking overhead alone can run 1000-2800+
+    // scale the budget to the requested count; thinking overhead alone can run 1000-2800+
     // tokens, so a fixed low cap silently truncates larger batches mid-array
     const maxTokens = Math.min(8000, 1400 + count * 260);
     const raw = await CodexAI.complete(system, user, { maxTokens });
@@ -146,7 +146,7 @@ async function generateAI() {
     if (!built.length) throw new Error("no usable cards came back");
     cards = built.slice(0, count);
     window.CodexFeed && CodexFeed.log("Generated AI " + (mode === "quiz" ? "quiz" : "flashcards"), `${cards.length} on "${topic || "everything"}"`);
-    if (built.length < count) poolNote = `${(window.CodexAI && CodexAI.label) || "AI"} finished ${built.length} of ${count} requested cards — showing what came back.`;
+    if (built.length < count) poolNote = `${(window.CodexAI && CodexAI.label) || "AI"} finished ${built.length} of ${count} requested cards; showing what came back.`;
     if (mode === "cards") renderCards(); else renderQuiz($("#stDiff").value);
   } catch (err) {
     const hint = window.CodexAI && CodexAI.errorHtml ? CodexAI.errorHtml(err) : `AI couldn't build cards (${esc(err.message)}). Check your key in Settings.`;
@@ -157,7 +157,7 @@ async function generateAI() {
 
 function renderCards() {
   flipped = new Set();
-  $("#stArea").innerHTML = `${poolNoteHtml()}<p class="muted">${cards.length} card${cards.length === 1 ? "" : "s"} on <b>${esc($("#stTopic").value || "your canon")}</b> — click a card to flip it.</p>
+  $("#stArea").innerHTML = `${poolNoteHtml()}<p class="muted">${cards.length} card${cards.length === 1 ? "" : "s"} on <b>${esc($("#stTopic").value || "your canon")}</b>; click a card to flip it.</p>
     <div class="flash-grid">${cards.map((c, i) => flashcardHtml(c, i)).join("")}</div>`;
   bindCards();
 }
@@ -236,7 +236,7 @@ function renderQuizResults() {
   $("#stArea").innerHTML = `<div class="quiz-results">
     <div class="page-kicker">Results</div>
     <h2>${quizState.score} / ${cards.length} <span class="faint" style="font-size:16px">(${pct}%)</span></h2>
-    <p class="muted">${pct >= 80 ? "You know this cold." : pct >= 50 ? "Solid — a few gaps to shore up." : "Worth another pass through the source entries."}</p>
+    <p class="muted">${pct >= 80 ? "You know this cold." : pct >= 50 ? "Solid; a few gaps to shore up." : "Worth another pass through the source entries."}</p>
     <div style="margin-top:14px;display:flex;gap:8px">
       <button class="btn" id="retryQuiz">Retry this set</button>
       <button class="btn ghost" id="newQuiz">New quiz</button>

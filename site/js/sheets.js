@@ -1,6 +1,6 @@
 /* ============================================================
-   World Without God — Canon Organizer
-   Sheets: a small spreadsheet — grid of cells, basic formulas
+   World Without God; Canon Organizer
+   Sheets: a small spreadsheet; grid of cells, basic formulas
    (=A1+B2, =SUM(A1:A5), =AVERAGE(...), =COUNT(...)), and pie/bar
    charts built from a selected range. Saved in IndexedDB.
    ============================================================ */
@@ -33,7 +33,7 @@ async function list(folderId) {
   view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Workspace · Sheets</div>
     <h1>Sheets</h1>
-    <p class="muted">A small spreadsheet for tallies, comparisons, timelines of numbers — anything you'd
+    <p class="muted">A small spreadsheet for tallies, comparisons, timelines of numbers; anything you'd
       rather see in a grid. Select a range and turn it into a pie or bar chart.</p>
     ${folderBar}
     <div style="margin:16px 0"><button class="btn" id="newSheet">New sheet</button></div>
@@ -67,7 +67,7 @@ async function open(id) {
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="wrap wide">
-      <p class="muted" id="selHint" style="margin:14px 0">Click a cell, or drag to select a range — the first
+      <p class="muted" id="selHint" style="margin:14px 0">Click a cell, or drag to select a range; the first
         column of your selection becomes chart labels, the rest become values.</p>
       <div class="sheet-scroll"><table class="sheet-grid" id="grid"></table></div>
       <div class="sheet-charts" id="chartArea"></div>
@@ -161,7 +161,7 @@ function paintSelection() {
     td.classList.toggle("sel", r >= r0 && r <= r1 && c >= c0 && c <= c1);
   });
   const hint = $("#selHint");
-  if (hint) hint.textContent = `Selected ${colLetter(c0)}${r0 + 1}:${colLetter(c1)}${r1 + 1} — click "Pie chart" or "Bar chart" to visualize it.`;
+  if (hint) hint.textContent = `Selected ${colLetter(c0)}${r0 + 1}:${colLetter(c1)}${r1 + 1}; click "Pie chart" or "Bar chart" to visualize it.`;
 }
 
 function makeChart(kind) {
@@ -177,7 +177,7 @@ function makeChart(kind) {
     if (val != null) data.push({ label: String(label || `Row ${r + 1}`), value: val });
   }
   if (!data.length) { toast("No numeric values in that selection"); return; }
-  cur.charts.push({ id: uid(), kind, title: `${kind === "pie" ? "Pie" : "Bar"} chart — ${colLetter(c0)}${r0 + 1}:${colLetter(c1)}${r1 + 1}`, data });
+  cur.charts.push({ id: uid(), kind, title: `${kind === "pie" ? "Pie" : "Bar"} chart; ${colLetter(c0)}${r0 + 1}:${colLetter(c1)}${r1 + 1}`, data });
   persist(); renderCharts();
 }
 function deleteChart(id) { cur.charts = cur.charts.filter(c => c.id !== id); persist(); renderCharts(); }

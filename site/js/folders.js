@@ -1,5 +1,5 @@
 /* ============================================================
-   The Codex — Projects (folders)
+   The Codex; Projects (folders)
    Group documents, decks, and canvases by the project you're
    working on, so several worlds / books stay untangled.
    A folder is just { id, name }; items carry a .folder = id.
