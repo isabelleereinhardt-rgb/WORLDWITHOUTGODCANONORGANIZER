@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main
-      - claude/worldbuilding-site-ai-chat-0cwy2i
+      - claude/website-ux-template-setup-27oy6l
   workflow_dispatch:
 
 permissions:
