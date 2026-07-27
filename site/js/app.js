@@ -104,10 +104,21 @@ function buildIndexes() {
 
 /* ---------- state ---------- */
 const store = {
-  recent: JSON.parse(localStorage.getItem("codex.recent") || "[]"),
+  // Guarded: this runs while the module is still evaluating, so a
+  // corrupt or truncated value here would stop app.js loading at all
+  // and leave the shell stuck on "Opening…" with an empty sidebar.
+  recent: (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("codex.recent") || "[]");
+      if (Array.isArray(v)) return v.filter(x => typeof x === "string");
+    } catch (e) {}
+    // rewrite the bad value now, so it cannot trip anything else up later
+    try { localStorage.setItem("codex.recent", "[]"); } catch (e) {}
+    return [];
+  })(),
   pushRecent(id) {
     this.recent = [id, ...this.recent.filter(x => x !== id)].slice(0, 8);
-    localStorage.setItem("codex.recent", JSON.stringify(this.recent));
+    try { localStorage.setItem("codex.recent", JSON.stringify(this.recent)); } catch (e) {}
   }
 };
 
@@ -1929,6 +1940,43 @@ function collapseSidebar(force) {
    close it again whenever a nav link is followed. */
 function isNarrow() { return window.matchMedia("(max-width:860px)").matches; }
 
+/* Something failed during start-up. Say so where it can be seen and
+   copied, rather than leaving a blank page and no explanation. The
+   app carries on around it wherever it can. */
+const bootProblems = [];
+function bootTrouble(doing, err) {
+  const detail = (err && (err.stack || err.message)) || String(err);
+  bootProblems.push({ doing, detail });
+  try { console.error("Beep Beep Organizer — trouble " + doing + ":", err); } catch (e) {}
+  let bar = document.getElementById("bootTrouble");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "bootTrouble";
+    bar.className = "boot-trouble";
+    document.body.appendChild(bar);
+  }
+  const first = bootProblems[0];
+  bar.innerHTML = `
+    <div class="bt-body">
+      <strong>Something went wrong ${esc(first.doing)}.</strong>
+      Your writing is safe — this is a display problem, not a data one.
+      <code>${esc(String(first.detail).split("\n")[0].slice(0, 200))}</code>
+    </div>
+    <div class="bt-acts">
+      <button class="btn ghost sm" id="btCopy">Copy details</button>
+      <button class="btn ghost sm" id="btReload">Reload</button>
+      <button class="btn ghost sm" id="btHide">Dismiss</button>
+    </div>`;
+  bar.querySelector("#btCopy").onclick = () => {
+    const text = bootProblems.map(p => "While " + p.doing + ":\n" + p.detail).join("\n\n")
+      + "\n\nPage: " + location.href + "\nBrowser: " + navigator.userAgent;
+    navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast("Details copied — paste them to me"))
+      : window.prompt("Copy this:", text);
+  };
+  bar.querySelector("#btReload").onclick = () => location.reload();
+  bar.querySelector("#btHide").onclick = () => bar.remove();
+}
+
 async function init() {
   if (isNarrow()) collapseSidebar(true);
   try {
@@ -1943,13 +1991,23 @@ async function init() {
     if (window.CodexExtra) await CodexExtra.ready();
     // the sidebar's Projects section renders from this cache
     if (window.CodexFolders) await CodexFolders.ensureCache(true);
-  } catch (e) { /* non-fatal */ }
-  buildIndexes();
-  buildNav();
-  if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel();
+  } catch (e) { bootTrouble("loading your work", e); }
+
+  // Each of these is fenced off on its own. A fault in one must not
+  // leave the whole shell sitting on "Opening…" with an empty sidebar,
+  // which is exactly what used to happen.
+  try { buildIndexes(); } catch (e) { bootTrouble("indexing your canon", e); }
+  try { buildNav(); } catch (e) { bootTrouble("building the sidebar", e); }
+  try { if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel(); } catch (e) {}
+
+  // Cleared unconditionally: whatever else went wrong, the app is as
+  // ready as it is going to get and the person needs to see it.
   $("#app").classList.remove("loading");
-  route();
-  window.addEventListener("hashchange", route);
+
+  try { route(); } catch (e) { bootTrouble("opening that page", e); }
+  window.addEventListener("hashchange", () => {
+    try { route(); } catch (e) { bootTrouble("opening that page", e); }
+  });
 
   if ($("#wsSwitchOpen")) $("#wsSwitchOpen").onclick = () => window.CodexWorkspaces && CodexWorkspaces.openSwitcher();
 
@@ -2043,7 +2101,23 @@ async function init() {
 function scrollSel() { const el = $$(".sr-item")[searchSel]; if (el) el.scrollIntoView({ block: "nearest" }); }
 function isEditing(t) { return t && (t.isContentEditable || /input|textarea/i.test(t.tagName)); }
 
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+/* A last line of defence: if init itself dies, or a script that runs
+   after it throws, the shell must still come out of its loading state. */
+window.addEventListener("error", e => {
+  const app = $("#app");
+  if (app && app.classList.contains("loading")) {
+    app.classList.remove("loading");
+    bootTrouble("starting up", e.error || e.message);
+  }
+});
+function boot() {
+  init().catch(e => {
+    const app = $("#app");
+    if (app) app.classList.remove("loading");
+    bootTrouble("starting up", e);
+  });
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
