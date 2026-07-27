@@ -32,7 +32,7 @@ begin
     select policyname, tablename from pg_policies
     where schemaname = 'public'
       and tablename in ('profiles', 'workspaces', 'workspace_members', 'items', 'shares', 'comments',
-                        'community_profiles', 'community_books', 'community_chapters', 'community_kudos',
+                        'community_profiles', 'community_books', 'community_chapters', 'community_stars',
                         'community_library', 'community_follows', 'community_comments',
                         'community_progress', 'community_posts')
   loop
@@ -522,20 +522,36 @@ create table if not exists public.community_books (
   tags            text[] not null default '{}',
   status          text not null default 'Ongoing',
   mature          boolean not null default false,
+  visibility      text not null default 'public' check (visibility in ('public', 'private')),
   language        text not null default 'English',
   word_count      int    not null default 0,
   chapter_count   int    not null default 0,
   reads           bigint not null default 0,
-  kudos_count     int    not null default 0,
+  star_count      int    not null default 0,
   library_count   int    not null default 0,
   comment_count   int    not null default 0,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   unique (owner, local_folder_id)
 );
+-- earlier deployments predate the visibility column
+alter table public.community_books
+  add column if not exists visibility text not null default 'public'
+  check (visibility in ('public', 'private'));
+-- the first cut of this schema borrowed AO3's word for it; ours are stars
+do $$ begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'community_books'
+               and column_name = 'kudos_count') then
+    alter table public.community_books rename column kudos_count to star_count;
+  end if;
+  drop index if exists public.cbooks_kudos_idx;
+  drop table if exists public.community_kudos;
+  execute 'drop function if exists public.community_kudos_guest(uuid, text)';
+end $$;
 create index if not exists cbooks_updated_idx on public.community_books (updated_at desc);
 create index if not exists cbooks_created_idx on public.community_books (created_at desc);
-create index if not exists cbooks_kudos_idx   on public.community_books (kudos_count desc);
+create index if not exists cbooks_stars_idx   on public.community_books (star_count desc);
 create index if not exists cbooks_reads_idx   on public.community_books (reads desc);
 create index if not exists cbooks_genre_idx   on public.community_books (genre);
 create index if not exists cbooks_tags_idx    on public.community_books using gin (tags);
@@ -557,10 +573,12 @@ create table if not exists public.community_chapters (
 );
 create index if not exists cch_book_idx on public.community_chapters (book_id, position);
 
--- ---------- kudos ----------
--- One per reader per book, AO3-style. Guests may leave kudos through
--- an RPC below, deduplicated on a key their browser keeps.
-create table if not exists public.community_kudos (
+-- ---------- stars ----------
+-- One per reader per book: a star says "this meant something" and
+-- there is no undo-war over counts because each reader has exactly
+-- one to give. Guests may leave a star through an RPC below,
+-- deduplicated on a key their browser keeps.
+create table if not exists public.community_stars (
   id         uuid primary key default gen_random_uuid(),
   book_id    uuid not null references public.community_books on delete cascade,
   user_id    uuid references auth.users on delete cascade,
@@ -568,8 +586,8 @@ create table if not exists public.community_kudos (
   created_at timestamptz not null default now(),
   check (user_id is not null or guest_key is not null)
 );
-create unique index if not exists ckudos_user_idx  on public.community_kudos (book_id, user_id)  where user_id is not null;
-create unique index if not exists ckudos_guest_idx on public.community_kudos (book_id, guest_key) where user_id is null;
+create unique index if not exists cstars_user_idx  on public.community_stars (book_id, user_id)  where user_id is not null;
+create unique index if not exists cstars_guest_idx on public.community_stars (book_id, guest_key) where user_id is null;
 
 -- ---------- library ----------
 -- "Saved to read", Wattpad-style. chapters_seen remembers how many
@@ -652,7 +670,7 @@ declare b uuid;
 begin
   b := coalesce(new.book_id, old.book_id);
   update public.community_books set
-    kudos_count   = (select count(*) from public.community_kudos   k where k.book_id = b),
+    star_count    = (select count(*) from public.community_stars   k where k.book_id = b),
     library_count = (select count(*) from public.community_library l where l.book_id = b),
     comment_count = (select count(*) from public.community_comments c where c.book_id = b and not c.deleted)
   where id = b;
@@ -662,8 +680,8 @@ exception when others then
 end;
 $$;
 
-drop trigger if exists ckudos_counter on public.community_kudos;
-create trigger ckudos_counter after insert or delete on public.community_kudos
+drop trigger if exists cstars_counter on public.community_stars;
+create trigger cstars_counter after insert or delete on public.community_stars
   for each row execute function public.community_book_counters();
 drop trigger if exists clib_counter on public.community_library;
 create trigger clib_counter after insert or delete on public.community_library
@@ -747,14 +765,14 @@ as $$
   update public.community_books set reads = reads + 1 where id = book;
 $$;
 
-create or replace function public.community_kudos_guest(book uuid, key text)
+create or replace function public.community_star_guest(book uuid, key text)
 returns boolean language plpgsql security definer set search_path = public
 as $$
 begin
   if key is null or char_length(key) < 8 or char_length(key) > 80 then
     raise exception 'bad guest key';
   end if;
-  insert into public.community_kudos (book_id, guest_key)
+  insert into public.community_stars (book_id, guest_key)
   values (book, key)
   on conflict (book_id, guest_key) where user_id is null do nothing;
   return found;
@@ -762,13 +780,13 @@ end;
 $$;
 
 grant execute on function public.community_bump_reads(uuid) to anon, authenticated;
-grant execute on function public.community_kudos_guest(uuid, text) to anon, authenticated;
+grant execute on function public.community_star_guest(uuid, text) to anon, authenticated;
 
 -- ---------- community access rules ----------
 alter table public.community_profiles enable row level security;
 alter table public.community_books    enable row level security;
 alter table public.community_chapters enable row level security;
-alter table public.community_kudos    enable row level security;
+alter table public.community_stars    enable row level security;
 alter table public.community_library  enable row level security;
 alter table public.community_follows  enable row level security;
 alter table public.community_comments enable row level security;
@@ -785,9 +803,12 @@ create policy "update own community profile" on public.community_profiles
 create policy "delete own community profile" on public.community_profiles
   for delete using (id = auth.uid());
 
--- books and chapters: the whole point is that strangers can read them
+-- books and chapters: the whole point is that strangers can read them;
+-- unless the author has set the book private, in which case only the
+-- author sees it (engagement is kept, not destroyed, for when it
+-- comes back)
 create policy "anyone reads community books" on public.community_books
-  for select using (true);
+  for select using (visibility = 'public' or owner = auth.uid());
 create policy "authors publish books" on public.community_books
   for insert with check (owner = auth.uid());
 create policy "authors update own books" on public.community_books
@@ -796,20 +817,21 @@ create policy "authors unpublish own books" on public.community_books
   for delete using (owner = auth.uid());
 
 create policy "anyone reads community chapters" on public.community_chapters
-  for select using (true);
+  for select using (exists (select 1 from public.community_books b
+    where b.id = book_id and (b.visibility = 'public' or b.owner = auth.uid())));
 create policy "authors write own chapters" on public.community_chapters
   for all using (exists (select 1 from public.community_books b
                          where b.id = book_id and b.owner = auth.uid()))
   with check  (exists (select 1 from public.community_books b
                        where b.id = book_id and b.owner = auth.uid()));
 
--- kudos: visible to all (that is what a count is), given as yourself,
--- and takeable-back. Guest kudos arrive via the RPC above.
-create policy "anyone reads kudos" on public.community_kudos
+-- stars: visible to all (that is what a count is), given as yourself,
+-- and takeable-back. Guest stars arrive via the RPC above.
+create policy "anyone reads stars" on public.community_stars
   for select using (true);
-create policy "signed-in kudos" on public.community_kudos
+create policy "star as yourself" on public.community_stars
   for insert with check (user_id = auth.uid());
-create policy "remove own kudos" on public.community_kudos
+create policy "remove own star" on public.community_stars
   for delete using (user_id = auth.uid());
 
 -- your library and your reading position are nobody's business;
@@ -830,7 +852,8 @@ create policy "unfollow as yourself" on public.community_follows
 -- comments: public to read, signed as yourself. The book's author may
 -- also moderate; soft-delete or remove anything on their own book.
 create policy "anyone reads community comments" on public.community_comments
-  for select using (true);
+  for select using (exists (select 1 from public.community_books b
+    where b.id = book_id and (b.visibility = 'public' or b.owner = auth.uid())));
 create policy "comment as yourself" on public.community_comments
   for insert with check (author_id = auth.uid());
 create policy "edit own or moderate" on public.community_comments

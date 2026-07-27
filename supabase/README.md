@@ -87,9 +87,9 @@ Everything above stays private; these are meant to be read by strangers:
 | Table | What it holds |
 |---|---|
 | `community_profiles` | A pen name, bio and avatar. Joining the community is opt-in; this row is created the first time you publish, comment or follow. |
-| `community_books` | One row per published work: cover, blurb, genre, tags, and the counters (reads, kudos, libraries, comments) that Discover sorts by. |
+| `community_books` | One row per published work: cover, blurb, genre, tags, and the counters (reads, stars, libraries, comments) that Discover sorts by. |
 | `community_chapters` | The published chapters' text. Publishing **copies** published chapters here; drafts and the workspace itself never leave the private side. |
-| `community_kudos` | One per reader per book, guests included (deduplicated on a browser key, via an RPC). |
+| `community_stars` | One star per reader per book, guests included (deduplicated on a browser key, via an RPC). |
 | `community_library` | "Saved to read". Private to each reader; only the count on the book is public. |
 | `community_follows` | Who follows which author. |
 | `community_comments` | Public conversation, per book or per chapter, one level of replies. Authors may moderate comments on their own books. |
@@ -99,7 +99,7 @@ Everything above stays private; these are meant to be read by strangers:
 The counters on books and profiles are maintained by `security definer`
 triggers, so a client cannot inflate its own numbers; and anonymous
 visitors touch the database only through two narrow functions
-(`community_bump_reads`, `community_kudos_guest`) plus plain reads.
+(`community_bump_reads`, `community_star_guest`) plus plain reads.
 
 **Deletes are soft.** A device that has been offline needs to hear that
 something was deleted, and it means a mistaken delete is recoverable.

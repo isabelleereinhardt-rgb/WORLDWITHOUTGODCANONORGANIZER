@@ -6,7 +6,7 @@
    of a work into the community; your workspace itself never leaves
    the private side. Unpublishing deletes the copy.
 
-   Browsing needs no account. Kudos work signed out (an anonymous
+   Browsing needs no account. Stars work signed out (an anonymous
    key this browser keeps); everything with a name on it; comments,
    follows, your library; asks you to sign in and pick a pen name.
    ============================================================ */
@@ -46,8 +46,8 @@ const sb = () => (C() && C().configured()) ? C().client() : null;
 const me = () => { const st = C() ? C().state() : {}; return st.signedIn ? st.userId : ""; };
 const ready = () => !!sb();
 
-const BOOK_COLS = "id,owner,local_folder_id,title,blurb,cover,genre,tags,status,mature,language," +
-  "word_count,chapter_count,reads,kudos_count,library_count,comment_count,created_at,updated_at," +
+const BOOK_COLS = "id,owner,local_folder_id,title,blurb,cover,genre,tags,status,mature,visibility,language," +
+  "word_count,chapter_count,reads,star_count,library_count,comment_count,created_at,updated_at," +
   "community_profiles(name,avatar,follower_count,book_count)";
 const BOOK_LIST_COLS = BOOK_COLS;
 
@@ -67,7 +67,9 @@ async function saveProfile(p) {
 /* browse the shelves. q searches title and blurb; "#tag" searches tags. */
 async function browse(opts) {
   opts = opts || {};
-  let q = sb().from("community_books").select(BOOK_LIST_COLS);
+  /* the RLS would hide other people's private books anyway; the filter
+     also keeps YOUR private ones off the public shelves you browse */
+  let q = sb().from("community_books").select(BOOK_LIST_COLS).eq("visibility", "public");
   if (opts.genre) q = q.eq("genre", opts.genre);
   if (!opts.matureOk) q = q.eq("mature", false);
   const term = String(opts.q || "").trim();
@@ -79,7 +81,7 @@ async function browse(opts) {
   const sort = opts.sort || "updated";
   if (sort === "new") q = q.order("created_at", { ascending: false });
   else if (sort === "reads") q = q.order("reads", { ascending: false });
-  else if (sort === "kudos") q = q.order("kudos_count", { ascending: false });
+  else if (sort === "stars") q = q.order("star_count", { ascending: false });
   else q = q.order("updated_at", { ascending: false });
   const from = opts.offset || 0;
   const { data, error } = await q.range(from, from + (opts.limit || 24) - 1);
@@ -106,38 +108,38 @@ async function chapterAt(bookId, pos) {
   return data;
 }
 
-/* what I have already done to this book: kudos, library, progress */
+/* what I have already done to this book: star, library, progress */
 async function myEngagement(bookId) {
-  const out = { kudos: false, inLibrary: false, progress: null };
+  const out = { starred: false, inLibrary: false, progress: null };
   if (!ready()) return out;
   if (me()) {
     const [k, l, p] = await Promise.all([
-      sb().from("community_kudos").select("id").eq("book_id", bookId).eq("user_id", me()).maybeSingle(),
+      sb().from("community_stars").select("id").eq("book_id", bookId).eq("user_id", me()).maybeSingle(),
       sb().from("community_library").select("book_id,chapters_seen").eq("book_id", bookId).eq("user_id", me()).maybeSingle(),
       sb().from("community_progress").select("chapter_pos,updated_at").eq("book_id", bookId).eq("user_id", me()).maybeSingle(),
     ]);
-    out.kudos = !!(k.data); out.inLibrary = !!(l.data); out.progress = p.data || null;
+    out.starred = !!(k.data); out.inLibrary = !!(l.data); out.progress = p.data || null;
   } else {
-    const { data } = await sb().from("community_kudos").select("id")
+    const { data } = await sb().from("community_stars").select("id")
       .eq("book_id", bookId).eq("guest_key", guestKey()).is("user_id", null).maybeSingle();
-    out.kudos = !!data;
+    out.starred = !!data;
   }
   return out;
 }
 
-/* kudos, AO3-style: once each, guests included */
+/* stars: one per reader per book, guests included */
 function guestKey() {
   let k = localStorage.getItem("codex.guestKey");
   if (!k) { k = "g" + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("codex.guestKey", k); }
   return k;
 }
-async function toggleKudos(bookId, on) {
+async function toggleStar(bookId, on) {
   if (me()) {
-    if (on) { const { error } = await sb().from("community_kudos").insert({ book_id: bookId, user_id: me() }); if (error && error.code !== "23505") throw error; }
-    else { const { error } = await sb().from("community_kudos").delete().eq("book_id", bookId).eq("user_id", me()); if (error) throw error; }
+    if (on) { const { error } = await sb().from("community_stars").insert({ book_id: bookId, user_id: me() }); if (error && error.code !== "23505") throw error; }
+    else { const { error } = await sb().from("community_stars").delete().eq("book_id", bookId).eq("user_id", me()); if (error) throw error; }
   } else {
-    if (!on) return false;   // guests can give kudos, not retract them
-    const { error } = await sb().rpc("community_kudos_guest", { book: bookId, key: guestKey() });
+    if (!on) return false;   // guests can give a star, not retract one
+    const { error } = await sb().rpc("community_star_guest", { book: bookId, key: guestKey() });
     if (error) throw error;
   }
   return true;
@@ -392,6 +394,7 @@ async function publishWork(folderId) {
     tags: (pub.tags || []).slice(0, 12),
     status: pub.status || "Ongoing",
     mature: !!pub.mature,
+    visibility: pub.visibility === "private" ? "private" : "public",
   };
   const { data: book, error } = await sb().from("community_books")
     .upsert(bookRow, { onConflict: "owner,local_folder_id" }).select("id").single();
@@ -423,13 +426,21 @@ async function unpublishWork(bookId) {
   if (error) throw error;
 }
 
+/* hide or reshow without destroying anything: a private book keeps its
+   stars, comments and library saves for whenever it comes back */
+async function setVisibility(bookId, vis) {
+  const { error } = await sb().from("community_books")
+    .update({ visibility: vis === "private" ? "private" : "public" }).eq("id", bookId);
+  if (error) throw error;
+}
+
 /* ============================================================
    SHARED PIECES; cards, stats, comments
    ============================================================ */
 function statBits(b) {
   return `<span class="bk-stats">
     <span title="Reads">◉ ${nice(b.reads)}</span>
-    <span title="Kudos">♥ ${nice(b.kudos_count)}</span>
+    <span title="Stars">★ ${nice(b.star_count)}</span>
     <span title="Chapters">☰ ${b.chapter_count}</span>
     <span title="In libraries">✦ ${nice(b.library_count)}</span>
   </span>`;
@@ -570,7 +581,7 @@ async function viewBook(id) {
           `<a class="chip" href="#/community/discover/${encodeURIComponent("#" + t)}">${esc(t)}</a>`).join("")}</div>` : ""}
         <div class="bk-bigstats">
           <span><b>${nice(b.reads)}</b> reads</span>
-          <span><b>${nice(b.kudos_count)}</b> kudos</span>
+          <span><b>${nice(b.star_count)}</b> star${b.star_count === 1 ? "" : "s"}</span>
           <span><b>${nice(b.library_count)}</b> in libraries</span>
           <span><b>${b.word_count.toLocaleString()}</b> words</span>
         </div>
@@ -578,7 +589,7 @@ async function viewBook(id) {
       <div class="work-side">
         ${chapters.length ? `<a class="btn" href="#/book/${esc(id)}/${started ? startPos : 0}">${started && startPos > 0 ? "Continue · ch " + (startPos + 1) : "Start reading"}</a>` : ""}
         ${isMine ? `<a class="btn ghost sm" href="#/work/${esc(b.local_folder_id)}">Manage in My Works</a>`
-        : `<button class="btn ghost sm${mine.kudos ? " on" : ""}" id="bkKudos">${mine.kudos ? "♥ Kudos given" : "♥ Leave kudos"}</button>
+        : `<button class="btn ghost sm${mine.starred ? " on" : ""}" id="bkStar">${mine.starred ? "★ Starred" : "☆ Leave a star"}</button>
            <button class="btn ghost sm${mine.inLibrary ? " on" : ""}" id="bkLib">${mine.inLibrary ? "✦ In your library" : "✦ Save to library"}</button>`}
         <button class="btn ghost sm" id="bkCopy">Copy link</button>
         <div class="work-stat">Updated ${rel(b.updated_at)}</div>
@@ -623,12 +634,12 @@ async function viewBook(id) {
     const url = location.origin + location.pathname + "#/book/" + id;
     navigator.clipboard ? navigator.clipboard.writeText(url).then(() => toastMsg("Link copied")) : window.prompt("Copy:", url);
   };
-  const kBtn = $("#bkKudos");
+  const kBtn = $("#bkStar");
   if (kBtn) kBtn.onclick = async () => {
     try {
-      if (!me() && mine.kudos) return toastMsg("Guest kudos can't be taken back");
-      await toggleKudos(id, !mine.kudos);
-      toastMsg(mine.kudos ? "Kudos removed" : "♥ Kudos left");
+      if (!me() && mine.starred) return toastMsg("A guest star can't be taken back");
+      await toggleStar(id, !mine.starred);
+      toastMsg(mine.starred ? "Star removed" : "★ Star left");
       refresh();
     } catch (e) { toastMsg(e.message || String(e)); }
   };
@@ -698,7 +709,7 @@ async function viewChapter(id, posArg) {
     </section>
     <div class="cr-nav">
       ${pos > 0 ? `<a class="btn ghost sm" href="#/book/${esc(id)}/${pos - 1}">← Previous</a>` : `<span></span>`}
-      <button class="a-chip cr-kudos" id="crKudos">♥ <span id="crKn">${nice(b.kudos_count)}</span></button>
+      <button class="a-chip cr-star" id="crStar">★ <span id="crKn">${nice(b.star_count)}</span></button>
       ${pos < chapters.length - 1 ? `<a class="btn sm" href="#/book/${esc(id)}/${pos + 1}">Next chapter →</a>`
         : `<a class="btn sm" href="#/book/${esc(id)}">The end, for now ✦</a>`}
     </div>
@@ -708,13 +719,13 @@ async function viewChapter(id, posArg) {
     </div>
   </div>`;
 
-  $("#crKudos").onclick = async () => {
+  $("#crStar").onclick = async () => {
     try {
       const mine = await myEngagement(id);
-      if (mine.kudos) return toastMsg("Kudos already given ♥");
-      await toggleKudos(id, true);
-      $("#crKn").textContent = nice(b.kudos_count + 1);
-      toastMsg("♥ Kudos left for " + b.title);
+      if (mine.starred) return toastMsg("Already starred ★");
+      await toggleStar(id, true);
+      $("#crKn").textContent = nice(b.star_count + 1);
+      toastMsg("★ Star left for " + b.title);
     } catch (e) { toastMsg(e.message || String(e)); }
   };
   const refresh = () => viewChapter(id, pos);
@@ -741,7 +752,7 @@ async function viewAuthor(id) {
   if (window.Codex && Codex.isStale(gen)) return;
   const isMe = id === me();
   const totalReads = books.reduce((n, b) => n + (+b.reads || 0), 0);
-  const totalKudos = books.reduce((n, b) => n + (b.kudos_count || 0), 0);
+  const totalStars = books.reduce((n, b) => n + (b.star_count || 0), 0);
 
   view().innerHTML = `<div class="wrap wide">
     <div class="author-head">
@@ -753,7 +764,7 @@ async function viewAuthor(id) {
           <span><b>${p.book_count}</b> book${p.book_count === 1 ? "" : "s"}</span>
           <span><b>${nice(p.follower_count)}</b> follower${p.follower_count === 1 ? "" : "s"}</span>
           <span><b>${nice(totalReads)}</b> reads</span>
-          <span><b>${nice(totalKudos)}</b> kudos</span>
+          <span><b>${nice(totalStars)}</b> star${totalStars === 1 ? "" : "s"}</span>
         </div>
         ${p.bio ? `<p class="ah-bio">${esc(p.bio)}</p>` : ""}
       </div>
@@ -787,7 +798,7 @@ window.CodexBooks = {
   publishWork, unpublishWork, communityCopyOf, ensureProfile, openProfileModal,
   api: {
     ready, me, myProfile, browse, getBook, getChapters, myEngagement,
-    toggleKudos, setLibrary, libraryList, markSeen, toggleFollow, following, feed,
+    toggleStar, setVisibility, setLibrary, libraryList, markSeen, toggleFollow, following, feed,
     listComments, addComment, removeComment, continueReading, commentsOnMyBooks,
     listPosts, addPost, removePost, myBooks, authorProfile, authorBooks,
   },

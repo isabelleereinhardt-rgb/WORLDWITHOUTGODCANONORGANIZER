@@ -55,7 +55,7 @@ async function viewCommunity(which, arg) {
         <h1 class="display">The reading room</h1>
       </div>
       <div class="comm-actions">
-        <button class="a-chip" id="commPublish">Publish a work</button>
+        <button class="a-chip" id="commPublish">✎ Write a story</button>
       </div>
     </div>
     <div class="atlas-bar">
@@ -65,11 +65,7 @@ async function viewCommunity(which, arg) {
   </div>`;
 
   $$("[data-ctab]").forEach(b => b.onclick = () => { location.hash = "#/community/" + b.dataset.ctab; });
-  $("#commPublish").onclick = async () => {
-    const folders = await S().all("folders").catch(() => []);
-    if (!folders.length) { toast("Make a project first; the + beside Projects in the sidebar"); return; }
-    location.hash = "#/work/" + encodeURIComponent(folders[0].id);
-  };
+  $("#commPublish").onclick = () => { location.hash = "#/work"; };
 
   const body = $("#commBody");
   try {
@@ -100,7 +96,7 @@ async function renderDiscover(body, st) {
       <input class="import-title disc-q" id="discQ" value="${esc(disc.q)}"
         placeholder="Search titles and blurbs, or #tag…">
       <select class="folder-select" id="discSort">
-        ${[["updated", "Recently updated"], ["new", "New arrivals"], ["reads", "Most read"], ["kudos", "Most kudos"]]
+        ${[["updated", "Recently updated"], ["new", "New arrivals"], ["reads", "Most read"], ["stars", "Most starred"]]
           .map(([v, l]) => `<option value="${v}"${disc.sort === v ? " selected" : ""}>${l}</option>`).join("")}
       </select>
       <button class="a-chip${disc.matureOk ? " on" : ""}" id="discMature" title="Show works marked 18+">18+</button>
@@ -140,9 +136,9 @@ async function renderDiscover(body, st) {
         ? `<div class="empty-state">Nothing on the shelves matches that. Try fewer words, or another genre.</div>`
         : `<div class="gold-card"><div class="gold-card-head">✦ The shelves are waiting ✦</div>
             <p style="font-size:14.5px;line-height:1.6;margin:0">Nothing has been published to the community yet.
-            Yours could be the first: open a work, publish a chapter or two, and press
-            <b>Publish to the community</b>. Anyone with an account can do the same, and everything
-            published lands here for everyone to find.</p></div>`;
+            Yours could be the first: start a story at <a href="#/work">the writing desk</a>, publish a
+            part or two, and press <b>Go public</b>. Anyone with an account can do the same, and
+            everything published lands here for everyone to find.</p></div>`;
       return;
     }
     grid.innerHTML = `<div class="disc-grid">${disc.rows.map(b => B().ui.bookCard(b)).join("")}</div>`;
@@ -356,7 +352,7 @@ async function renderShelf(body, st) {
   }
   body.innerHTML = parts.join("");
   $$("[data-takedown]", body).forEach(b => b.onclick = async () => {
-    if (!confirm("Take this book off the community? Readers lose access; kudos and comments go with it.")) return;
+    if (!confirm("Take this book off the community? Readers lose access; its stars and comments go with it.")) return;
     try { await B().unpublishWork(b.dataset.takedown); toast("Taken down"); viewCommunity("shelf"); }
     catch (e) { toast(e.message || String(e)); }
   });
@@ -437,9 +433,9 @@ async function spaceHome() {
         <div class="sc-note">Everyone's shelves: browse by genre, tag, newest, most read.</div>
       </a>
       <a class="space-card-lg" href="#/work">
-        <div class="sc-glyph">✦</div>
-        <div class="sc-name">My Works</div>
-        <div class="sc-note">Covers, blurbs, chapters, publishing and reading links.</div>
+        <div class="sc-glyph">✎</div>
+        <div class="sc-name">My Stories</div>
+        <div class="sc-note">The writing desk: parts, drafts, publishing, covers and blurbs; all in one place.</div>
       </a>
       <a class="space-card-lg" href="#/community/library">
         <div class="sc-glyph">☾</div>
@@ -458,7 +454,7 @@ async function spaceHome() {
     ${!st.signedIn && st.configured ? `<div class="gold-card" style="margin-top:26px">
       <div class="gold-card-head">✦ Reading is open; belonging needs a name ✦</div>
       <p style="font-size:14.5px;line-height:1.6;margin:0">Browse and read without signing in. To publish,
-        follow, comment, keep a library, or leave kudos under a name, sign in from
+        follow, comment, keep a library, or star books under a name, sign in from
         <a href="#/settings">Settings → Account</a> and pick a pen name; that is all a reader ever sees.</p>
     </div>` : ""}
   </div>`;
@@ -480,10 +476,10 @@ async function spaceHome() {
       const statBox = $("#spaceCloudStats");
       if (statBox && st.signedIn) {
         const outReads = mineOut.reduce((n, b) => n + (+b.reads || 0), 0);
-        const outKudos = mineOut.reduce((n, b) => n + (b.kudos_count || 0), 0);
+        const outStars = mineOut.reduce((n, b) => n + (b.star_count || 0), 0);
         statBox.innerHTML = [[mineOut.length, "in the community"],
           [outReads.toLocaleString(), "reads out there"],
-          [outKudos.toLocaleString(), "kudos received"]].map(([n, label]) =>
+          [outStars.toLocaleString(), "stars received"]].map(([n, label]) =>
           `<div class="space-stat"><div class="ss-n">${n}</div><div class="ss-l">${esc(label)}</div></div>`).join("");
       }
     } catch (e) {}

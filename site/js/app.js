@@ -2244,7 +2244,7 @@ function buildSpaceNav(nav) {
     <div class="nav-section">
       <div class="nav-title-row"><div class="nav-title">The Space</div></div>
       ${item("#/space", "home", "Space home")}
-      ${item("#/work", "book", "My Works")}
+      ${item("#/work", "book", "My Stories")}
       ${item("#/community/discover", "atlas", "Discover", "community")}
     </div>
 

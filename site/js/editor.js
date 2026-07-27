@@ -152,6 +152,7 @@ async function open(id) {
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="wrap">
+      <div id="partBar"></div>
       <input class="doc-title" id="docTitle" placeholder="Untitled document" value="${esc(doc.title)}">
       <div class="doc-editor" id="docEditor" contenteditable="true" spellcheck="true"
            data-ph="Start writing your lore… As you type names from your world, the assistant on the right recognises them.">${doc.html || ""}</div>
@@ -183,6 +184,7 @@ async function open(id) {
   };
   const touch = () => { stateEl.textContent = "Saving…"; updateWordCount(); clearTimeout(saveT); saveT = setTimeout(persist, 600); };
   updateWordCount();
+  renderPartBar(doc, persist);
   titleEl.oninput = touch;
   edEl.oninput = () => {
     touch();
@@ -363,6 +365,56 @@ function bindSlashMenu(edEl, touch) {
   });
   edEl.addEventListener("blur", () => setTimeout(closeSlash, 150));
 }
+/* ---------- the part bar ----------
+   When a document is a part of a story, the editor says so and lets
+   the writing end the way it should: with Publish, right here. It
+   works on the editor's own doc object; going through a re-fetched
+   copy would race the autosave and lose the flag. */
+async function renderPartBar(doc, persist) {
+  const box = document.getElementById("partBar");
+  if (!box) return;
+  if (!doc.folder) { box.innerHTML = ""; return; }
+  const f = await S().get("folders", doc.folder);
+  if (!f) { box.innerHTML = ""; return; }
+  const pub = f.publish || {};
+  const on = !!doc.published;
+  const isPublic = pub.communityId && pub.visibility !== "private";
+  const stale = on && isPublic && (doc.updated || 0) > (pub.communityAt || 0) + 2000;
+  box.innerHTML = `<div class="part-bar">
+    <a class="pb-story" href="#/work/${encodeURIComponent(f.id)}">← ${esc(f.name)}</a>
+    <span class="wch-state ${on ? "on" : ""}">${on ? "Published" : "Draft"}</span>
+    ${isPublic ? `<span class="pb-note">◉ public story</span>` : ""}
+    <span class="pb-gap"></span>
+    ${stale ? `<button class="a-chip go" id="pbSync">Sync this part to the shelves</button>` : ""}
+    <button class="a-chip${on ? "" : " go"}" id="pbToggle">${on ? "Unpublish" : "Publish this part"}</button>
+  </div>`;
+  const again = () => renderPartBar(doc, persist);
+  $("#pbToggle", box).onclick = async () => {
+    const next = !doc.published;
+    if (next && !confirm(`Publish “${doc.title || "Untitled"}”?\n\n${isPublic
+      ? "It goes onto the community shelves for anyone to read."
+      : "Anyone reading this story; by link, or if it goes public; will see it."}`)) return;
+    doc.published = next;
+    doc.publishedAt = next ? (doc.publishedAt || Date.now()) : null;
+    await persist();
+    let synced = false;
+    if (pub.communityId && window.CodexPublish && CodexPublish.maybeSync) {
+      synced = await CodexPublish.maybeSync(f.id);
+    }
+    toast(next ? (synced && isPublic ? "Published; it is on the shelves" : "Part published")
+      : (synced && isPublic ? "Back to draft; taken off the shelves" : "Back to draft"));
+    again();
+  };
+  const sync = $("#pbSync", box);
+  if (sync) sync.onclick = async () => {
+    sync.disabled = true; sync.textContent = "Syncing…";
+    await persist();
+    const ok = window.CodexPublish && CodexPublish.maybeSync ? await CodexPublish.maybeSync(f.id) : false;
+    toast(ok ? "The shelves have the latest" : "Couldn't sync just now");
+    again();
+  };
+}
+
 function openSlash(edEl, touch) {
   closeSlash();
   slashEl = document.createElement("div");
