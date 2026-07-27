@@ -1170,7 +1170,11 @@ a.otd-row:hover{color:var(--blush)}
 /* ============================================================
    LUCKY — he strolls along the bottom of the window
    ============================================================ */
-.lucky-stage{position:fixed;left:0;right:0;bottom:0;height:200px;pointer-events:none;
+/* Tall enough for the whole speech bubble. The stage clips its contents,
+   so a bubble taller than this loses its head — literally: the row with
+   his name and mood was being cut off the top. Nothing here takes
+   pointer events, so the extra height costs the page nothing. */
+.lucky-stage{position:fixed;left:0;right:0;bottom:0;height:330px;pointer-events:none;
   z-index:25;overflow:hidden}
 /* Pace rides on a custom property, not an inline animation-duration: an
    inline duration outranks every stylesheet rule, so it would also have
@@ -1202,7 +1206,7 @@ a.otd-row:hover{color:var(--blush)}
 .lucky-walk.treating .lucky-bob{animation:lucky-hop .62s ease-in-out 3}
 
 /* his speech bubble */
-.lucky-tip{position:absolute;bottom:56px;left:34px;width:224px;background:var(--panel);
+.lucky-tip{position:absolute;bottom:56px;left:34px;width:286px;background:var(--panel);
   border:1px solid var(--gold);box-shadow:0 12px 28px rgba(0,0,0,.3);padding:9px 11px;
   pointer-events:none;opacity:0;animation:tip-window var(--pace,34s) linear infinite}
 .lucky-tip:after{content:"";position:absolute;left:24px;bottom:-6px;width:10px;height:10px;
@@ -1982,3 +1986,24 @@ body.reader-mode .lucky-stage{display:none}
 .qz-att-row .qa-tag{font-family:var(--serif);font-size:8.5px;letter-spacing:.18em;
   text-transform:uppercase;color:var(--dim);white-space:nowrap}
 .qz-att-row.pass .qa-tag{color:var(--gold)}
+
+/* ---- the fuller speech bubble ---- */
+.lucky-tip .lt-head{display:flex;align-items:center;gap:7px;margin-bottom:8px;
+  padding-bottom:7px;border-bottom:1px solid var(--line)}
+.lucky-tip .lt-glyph{color:var(--gold);font-size:12px;flex:none}
+.lucky-tip .lt-who{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink);
+  flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.lucky-tip .lt-mood{font-family:var(--serif);font-size:8px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim);white-space:nowrap;flex:none}
+.lucky-tip .lt-body{display:block}
+.lucky-tip .lt-kind{display:inline-block;font-family:var(--serif);font-size:7.5px;
+  letter-spacing:.2em;text-transform:uppercase;padding:2px 6px;border-radius:2px;
+  margin:0 7px 3px 0;vertical-align:2px;border:1px solid var(--line);color:var(--dim)}
+.lucky-tip .lt-kind.tip{color:var(--gold);border-color:var(--gold)}
+.lucky-tip .lt-kind.saying{color:var(--blush);border-color:var(--blush)}
+.lucky-tip .lucky-tip-text{font-size:14px;line-height:1.5;color:var(--ink)}
+.lucky-tip .lt-acts{display:flex;flex-direction:column;gap:0}
+.lucky-tip .lt-acts .lucky-ask{padding:6px 0 0}
+.lucky-tip .lt-acts .lucky-ask:first-child{color:var(--dim)}
+.lucky-tip .lt-acts .lucky-ask:first-child:hover{color:var(--blush)}
+@media(max-width:520px){.lucky-tip{width:min(286px,calc(100vw - 60px))}}

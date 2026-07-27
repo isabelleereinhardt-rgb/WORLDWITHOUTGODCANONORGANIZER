@@ -297,15 +297,46 @@ const PERSONAS = {
   },
 };
 
-/* Fill the templated tips from real numbers and drop the ones we
-   cannot ground yet — better a shorter rotation than a made-up fact. */
-function tipsFor(id, facts) {
-  const p = PERSONAS[id] || PERSONAS.sweet;
-  return p.tips.map(t => {
+/* ---------- drawing a line ----------
+   Two rotations per personality, thirty of each, in lucky-lines.js.
+   Templated entries carry a `needs` key and are dropped whenever the
+   number behind them is not real yet — better a shorter rotation than a
+   cat congratulating you on a streak you do not have.
+
+   Tips and sayings alternate, so he is useful about half the time and
+   company the other half. Both are shuffled per session, so two people
+   opening the app do not get the same script, and neither do you two
+   days running. */
+function linesOf(id) {
+  const L = window.CodexLuckyLines || {};
+  return L[id] || L.sweet || { tips: [], sayings: [] };
+}
+function fill(list, facts) {
+  return list.map(t => {
     if (typeof t === "string") return t;
     const v = facts[t.needs];
     return v ? t.text(v) : null;
   }).filter(Boolean);
+}
+function shuffled(list) {
+  const a = list.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a;
+}
+
+/* Kept as the old name so nothing else has to change: returns the
+   interleaved rotation as {kind, text} pairs. */
+function tipsFor(id, facts) {
+  const src = linesOf(id);
+  const tips = shuffled(fill(src.tips || [], facts)).map(text => ({ kind: "tip", text }));
+  const says = shuffled(fill(src.sayings || [], facts)).map(text => ({ kind: "saying", text }));
+  const out = [];
+  const n = Math.max(tips.length, says.length);
+  for (let i = 0; i < n; i++) {
+    if (tips[i]) out.push(tips[i]);
+    if (says[i]) out.push(says[i]);
+  }
+  return out;
 }
 
 function persona() { return PERSONAS[pref("luckyPersonality")] || PERSONAS.sweet; }
@@ -559,7 +590,7 @@ function faceSvg(size) {
    THE WALKER
    ============================================================ */
 const Lucky = {
-  el: null, tipIdx: 0, _wasSleeping: false, facts: { words: 0, streak: 0, entries: 0 },
+  el: null, tipIdx: 0, _wasSleeping: false, _rot: null, _rotKey: null, facts: { words: 0, streak: 0, entries: 0 },
 
   name() { return (pref("luckyName") || "Lucky").trim() || "Lucky"; },
   skin() { return pref("luckySkin"); },
@@ -588,8 +619,17 @@ const Lucky = {
     } catch (e) {}
   },
 
-  tips() { return tipsFor(pref("luckyPersonality"), this.facts); },
-  tip() { const t = this.tips(); return t.length ? t[this.tipIdx % t.length] : ""; },
+  /* The rotation is built once per session and per personality, so the
+     shuffle is stable while you use it rather than re-dealing on every
+     render and repeating lines. */
+  rotation() {
+    const key = pref("luckyPersonality") + ":" + this.facts.words + ":" + this.facts.streak + ":" + this.facts.entries;
+    if (this._rotKey !== key) { this._rotKey = key; this._rot = tipsFor(pref("luckyPersonality"), this.facts); }
+    return this._rot || [];
+  },
+  tips() { return this.rotation(); },
+  line() { const t = this.rotation(); return t.length ? t[this.tipIdx % t.length] : { kind: "saying", text: "" }; },
+  tip() { return this.line().text; },
 
   mount() {
     if (this.el) return;
@@ -615,15 +655,7 @@ const Lucky = {
     this.el.innerHTML = `
       <div class="lucky-walk" id="luckyWalk" title="Pet me, or ask me about your canon"
            style="--pace:${pace}s">
-        ${pref("luckyTips") ? `<div class="lucky-tip">
-          <div class="k">${esc(this.name())} says</div>
-          <div class="lucky-tip-text" id="luckyTipText">${esc(this.tip())}</div>
-          <div class="lucky-tip-foot">
-            <span class="pet-meter">${"✦".repeat(pets)}${"✧".repeat(Math.max(0, 5 - pets))}</span>
-            <span class="pet-hint">${pets === 0 ? "Click me" : pets >= 4 ? "One more for a treat" : "Keep petting"}</span>
-          </div>
-          <button class="lucky-ask" id="luckyAsk">Ask me something →</button>
-        </div>` : ""}
+        ${pref("luckyTips") ? this.bubbleHtml(pets) : ""}
         <div class="lucky-bob">${walkerSvg()}</div>
         ${companionSvg()}
         ${treatSvg()}
@@ -645,6 +677,51 @@ const Lucky = {
     this.bindAsk();
   },
 
+  /* ---------- the bubble ----------
+     It carries more than a bare line now: who is speaking and what mood
+     he is in, whether this is a tip or just the cat talking, where you
+     are in the rotation, the pet meter, and two ways onward — another
+     line, or the assistant. */
+  bubbleHtml(pets) {
+    const p = persona();
+    const rot = this.rotation();
+    const line = this.line();
+    const n = rot.length;
+    const at = n ? (this.tipIdx % n) + 1 : 0;
+    return `<div class="lucky-tip" id="luckyTip">
+      <div class="lt-head">
+        <span class="lt-glyph">${p.glyph}</span>
+        <span class="lt-who">${esc(this.name())}</span>
+        <span class="lt-mood">${esc(p.mood)}</span>
+      </div>
+      <div class="lt-body">
+        <span class="lt-kind ${line.kind}">${line.kind === "tip" ? "Tip" : "Says"}</span>
+        <span class="lucky-tip-text" id="luckyTipText">${esc(line.text)}</span>
+      </div>
+      <div class="lucky-tip-foot">
+        <span class="pet-meter">${"✦".repeat(pets)}${"✧".repeat(Math.max(0, 5 - pets))}</span>
+        <span class="pet-hint">${pets === 0 ? "Click me" : pets >= 4 ? "One more for a treat" : "Keep petting"}</span>
+      </div>
+      <div class="lt-acts">
+        <button class="lucky-ask" id="luckyMore" title="Another line">${at} of ${n} · Another →</button>
+        <button class="lucky-ask" id="luckyAsk">Ask me something →</button>
+      </div>
+    </div>`;
+  },
+
+  /* Swap only the line. Re-rendering the stage would rebuild the walker
+     and throw him back to the right-hand edge mid-stroll. */
+  paintLine() {
+    const line = this.line();
+    const txt = $("#luckyTipText", this.el);
+    if (txt) txt.textContent = line.text;
+    const kind = $(".lt-kind", this.el);
+    if (kind) { kind.className = "lt-kind " + line.kind; kind.textContent = line.kind === "tip" ? "Tip" : "Says"; }
+    const more = $("#luckyMore", this.el);
+    const n = this.rotation().length;
+    if (more) more.textContent = (n ? (this.tipIdx % n) + 1 : 0) + " of " + n + " · Another →";
+  },
+
   /* The corner button, unless you would rather have the corner back.
      It sits over the page on every screen, so it has to be refusable —
      the assistant is still one click away in the top bar and on Ctrl J. */
@@ -662,6 +739,8 @@ const Lucky = {
       if (window.CodexAssistant) CodexAssistant.open();
     };
     const ask = $("#luckyAsk", this.el); if (ask) ask.onclick = open;
+    const more = $("#luckyMore", this.el);
+    if (more) more.onclick = (e) => { e.stopPropagation(); this.tipIdx++; this.paintLine(); };
     const hail = $("#luckyHail", this.el); if (hail) hail.onclick = open;
   },
 
@@ -762,7 +841,7 @@ const Lucky = {
   },
 
   /* rotate the tip every time the stroll comes round again */
-  nextTip() { this.tipIdx++; const t = $("#luckyTipText", this.el || document); if (t) t.textContent = this.tip(); },
+  nextTip() { this.tipIdx++; this.paintLine(); },
 
   setSkin(id) { setPref("luckySkin", id); this.render(); refreshFaces(); },
   setAcc(id) { setPref("luckyAcc", id); this.render(); },
