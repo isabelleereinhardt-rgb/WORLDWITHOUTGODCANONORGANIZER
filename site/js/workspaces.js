@@ -23,7 +23,14 @@ function list() {
     const raw = JSON.parse(localStorage.getItem(WS_KEY()) || "null");
     if (raw && raw.length) return raw;
   } catch (e) {}
-  const seeded = [{ id: "default", name: "World Without God", hasCanon: true, createdAt: Date.now() }];
+  // Only the site owner's original (un-namespaced) data ever seeds the
+  // World Without God canon. Any signed-in account that somehow reaches
+  // this point with no workspace list gets a plain personal workspace;
+  // account holders never see the canon workspace at all.
+  const legacy = !window.CodexAccount || CodexAccount.ns() === "" || CodexAccount.ns() === "gate";
+  const seeded = legacy
+    ? [{ id: "default", name: "World Without God", hasCanon: true, createdAt: Date.now() }]
+    : [{ id: "default", name: "My workspace", hasCanon: false, createdAt: Date.now() }];
   localStorage.setItem(WS_KEY(), JSON.stringify(seeded));
   return seeded;
 }

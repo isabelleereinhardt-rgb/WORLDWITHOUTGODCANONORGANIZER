@@ -76,7 +76,7 @@ function friendly(e) {
   if (/Password should be/i.test(m)) return "that password is too short";
   if (/rate limit|too many/i.test(m)) return "too many attempts just now; wait a minute and try again";
   if (/JWT|expired/i.test(m)) return "your session expired; sign in again";
-  if (/row-level security|permission denied/i.test(m)) return "this account can't write to that workspace; re-running supabase/schema.sql in the project dashboard repairs this";
+  if (/row-level security|permission denied/i.test(m)) return "the database is missing its access rules; open the Supabase dashboard, run the whole supabase/schema.sql file in the SQL Editor, then press Sync now";
   return m;
 }
 const fail = e => { const err = new Error(friendly(e)); err.raw = e; return err; };
@@ -142,33 +142,43 @@ async function resetPassword(email) {
    SYNC
    ============================================================ */
 
-/* The remote row for this local workspace, made on first sync. */
+/* The remote row for this local workspace, made on first sync.
+   Creation is verified and rate-limited: if the database's membership
+   rules are missing (an older schema run), a created row can neither be
+   read back nor written to, and blindly recreating one per sync piles
+   up orphans. Instead: create at most once per ten minutes, check the
+   row is actually usable, and clean up + explain when it is not. */
 async function ensureWorkspace() {
   const c = client();
   const existing = remoteId();
   if (existing) {
     const { data } = await c.from("workspaces").select("id").eq("id", existing).maybeSingle();
     if (data) return existing;
-    // A row we created moments ago but cannot read back means the
-    // database's membership rules are missing (older schema run), not
-    // that the workspace is gone. Creating another row every sync would
-    // pile up orphans, so stop and say what repairs it instead.
-    const born = +(localStorage.getItem(remoteIdKey() + ".born") || 0);
-    if (born && Date.now() - born < 86400000) {
-      throw new Error("row-level security: workspace unreadable after creation");
-    }
-    // it was deleted, or belongs to another account; start a fresh one
+    // stale mapping: the row is gone or unreadable; fall through to
+    // (rate-limited, verified) creation
     localStorage.removeItem(remoteIdKey());
     localStorage.removeItem(lastSyncKey());
   }
+  const attemptKey = acctKey("codex.sync.createTry." + wsId());
+  const lastTry = +(localStorage.getItem(attemptKey) || 0);
+  if (Date.now() - lastTry < 600000) {
+    throw new Error("row-level security: workspace creation keeps failing");
+  }
+  localStorage.setItem(attemptKey, String(Date.now()));
   const name = (window.CodexWorkspaces && CodexWorkspaces.current() && CodexWorkspaces.current().name) || "My workspace";
-  const hasCanon = !window.CodexWorkspaces || CodexWorkspaces.activeHasCanon();
+  const hasCanon = window.CodexWorkspaces ? !!CodexWorkspaces.activeHasCanon() : false;
   const { data, error } = await c.from("workspaces")
-    .insert({ owner: session.user.id, name, has_canon: hasCanon })
+    .insert({ owner: session.user.id, name, has_canon: !!hasCanon })
     .select("id").single();
   if (error) throw error;
+  // verify the new row is genuinely usable before trusting it
+  const { data: check } = await c.from("workspaces").select("id").eq("id", data.id).maybeSingle();
+  if (!check) {
+    try { await c.from("workspaces").delete().eq("id", data.id); } catch (e) {}
+    throw new Error("row-level security: created workspace is unreadable");
+  }
+  localStorage.removeItem(attemptKey);
   setRemoteId(data.id);
-  localStorage.setItem(remoteIdKey() + ".born", String(Date.now()));
   return data.id;
 }
 
