@@ -125,6 +125,17 @@ function findEntity(raw) {
   if (entry) return { name: entry.title, guessed: false };
   hit = ents.find(n => n.toLowerCase() === "house " + nl);
   if (hit) return { name: hit, guessed: false };
+  /* And the other way round. Sixty-odd names here are "House Something",
+     but plenty of families are indexed by the bare name alone; asking
+     about "House Solis" when the canon indexes "Solis" used to come back
+     as "not in your canon yet", which is flatly untrue and reads as the
+     assistant having never heard of a house you have written about for
+     months. */
+  const bare = nl.replace(/^house\s+/, "");
+  if (bare !== nl) {
+    hit = ents.find(n => n.toLowerCase() === bare);
+    if (hit) return { name: hit, guessed: false };
+  }
   hit = ents.find(n => n.toLowerCase().startsWith(nl)) ||
         ents.find(n => n.toLowerCase().includes(nl));
   if (hit) return { name: hit, guessed: hit.toLowerCase() !== nl };
@@ -414,13 +425,21 @@ function hStats(q, ctx) {
   });
   const cats = Object.keys(perCat).sort((a, b) => perWords[b] - perWords[a]);
   const woven = Object.keys(nameCounts).sort((a, b) => nameCounts[b] - nameCounts[a]).slice(0, 8);
+  /* The sidebar counts every entry; these tiles count the ones I can
+     actually read. Galleries hold pictures, not sentences, so they are
+     named separately rather than quietly dropped: otherwise this panel
+     and the sidebar disagree by a few entries and neither says why. */
+  const galleries = C().DB.entries.filter(e => e.type === "gallery").length;
   return out(`<div class="ans-label">The shape of your canon</div>
     <div class="stat-tiles">
-      <div><b>${p.length}</b><span>entries</span></div>
+      <div><b>${p.length}</b><span>entries I read</span></div>
       <div><b>${words.toLocaleString()}</b><span>words</span></div>
       <div><b>${(C().DB.entities || []).length}</b><span>names indexed</span></div>
       <div><b>${cats.length}</b><span>collections</span></div>
     </div>
+    ${galleries ? `<div class="a-ground" style="margin:-4px 0 10px">Plus ${galleries}
+      image ${galleries === 1 ? "gallery" : "galleries"}, which I can file but not read;
+      ${p.length + galleries} entries in total.</div>` : ""}
     ${cats.map(c => `<div class="glance-row"><span class="gk">${esc(c)}</span>
       <span class="gv">${perCat[c]} ${perCat[c] === 1 ? "entry" : "entries"} · ${perWords[c].toLocaleString()} words</span></div>`).join("")}
     ${woven.length ? `<div class="ans-label" style="margin-top:10px">Most woven-through names</div>
