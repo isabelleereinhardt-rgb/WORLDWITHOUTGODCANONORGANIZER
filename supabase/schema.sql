@@ -614,8 +614,9 @@ create index if not exists cfol_author_idx on public.community_follows (author);
 
 -- ---------- comments ----------
 -- On the book (chapter_id null) or on one chapter. One level of
--- replies via parent_id. Soft-deleted so a reply thread keeps its
--- shape when something above it goes.
+-- replies via parent_id. Deleting is real deletion, and replies go
+-- with their parent (the FK cascades); no tombstones in a thread.
+-- The deleted flag remains only for rows written by older clients.
 create table if not exists public.community_comments (
   id         uuid primary key default gen_random_uuid(),
   book_id    uuid not null references public.community_books on delete cascade,

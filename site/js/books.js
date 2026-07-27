@@ -263,7 +263,8 @@ async function feed() {
 async function listComments(bookId, chapterId) {
   let q = sb().from("community_comments")
     .select("id,book_id,chapter_id,parent_id,author_id,body,deleted,created_at,community_profiles(name,avatar)")
-    .eq("book_id", bookId).order("created_at", { ascending: true }).limit(400);
+    .eq("book_id", bookId).eq("deleted", false)
+    .order("created_at", { ascending: true }).limit(400);
   q = chapterId ? q.eq("chapter_id", chapterId) : q.is("chapter_id", null);
   const { data, error } = await q;
   if (error) throw error;
@@ -277,8 +278,10 @@ async function addComment(bookId, chapterId, parentId, body) {
   if (error) throw error;
   return data;
 }
+/* deletion is deletion: the row goes, and the database cascades any
+   replies away with their parent, so no tombstones linger in a thread */
 async function removeComment(id) {
-  const { error } = await sb().from("community_comments").update({ deleted: true }).eq("id", id);
+  const { error } = await sb().from("community_comments").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -347,7 +350,8 @@ async function commentsOnMyBooks() {
 async function listPosts(room) {
   const { data, error } = await sb().from("community_posts")
     .select("id,room,author_id,parent_id,body,deleted,created_at,community_profiles(name,avatar)")
-    .eq("room", room).order("created_at", { ascending: false }).limit(200);
+    .eq("room", room).eq("deleted", false)
+    .order("created_at", { ascending: false }).limit(200);
   if (error) throw error;
   return data || [];
 }
@@ -358,7 +362,7 @@ async function addPost(room, parentId, body) {
   if (error) throw error;
 }
 async function removePost(id) {
-  const { error } = await sb().from("community_posts").update({ deleted: true }).eq("id", id);
+  const { error } = await sb().from("community_posts").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -532,8 +536,10 @@ function avatarOf(p, size) {
   return `<span class="wc-initial" style="width:${size || 34}px;height:${size || 34}px;line-height:${size || 34}px;font-size:${Math.round((size || 34) * .42)}px">${esc(ch)}</span>`;
 }
 
-/* one comment thread, one level of replies, with reply + moderation */
+/* one comment thread, one level of replies, with reply + moderation.
+   Deleted rows are simply absent; removing a root removes its thread. */
 function commentThread(box, comments, ctx) {
+  comments = comments.filter(c => !c.deleted);
   const roots = comments.filter(c => !c.parent_id);
   const kids = id => comments.filter(c => c.parent_id === id);
   const uid = me();
@@ -548,10 +554,10 @@ function commentThread(box, comments, ctx) {
           <a class="cm-name" href="#/author/${esc(c.author_id)}">${esc(p.name || "Someone")}</a>
           ${ctx.ownerId === c.author_id ? `<span class="cm-tag">author</span>` : ""}
           <span class="cm-when">${rel(c.created_at)}</span></div>
-        <div class="cm-text">${c.deleted ? `<span class="faint">[removed]</span>` : esc(c.body)}</div>
+        <div class="cm-text">${esc(c.body)}</div>
         <div class="cm-acts">
-          ${!isReply && !c.deleted ? `<button class="a-chip" data-reply="${esc(c.id)}">Reply</button>` : ""}
-          ${(mine || mod) && !c.deleted ? `<button class="a-chip danger" data-rm="${esc(c.id)}">Remove</button>` : ""}
+          ${!isReply ? `<button class="a-chip" data-reply="${esc(c.id)}">Reply</button>` : ""}
+          ${(mine || mod) ? `<button class="a-chip danger" data-rm="${esc(c.id)}" data-haskids="${!isReply && kids(c.id).length ? 1 : 0}">Remove</button>` : ""}
         </div>
         <div class="cm-replies">${kids(c.id).map(k => one(k, true)).join("")}</div>
         <div class="cm-replybox" id="rb-${esc(c.id)}" hidden>
@@ -592,7 +598,8 @@ function commentThread(box, comments, ctx) {
     send(b.dataset.sendreply, rb.querySelector("textarea").value);
   });
   $$("[data-rm]", box).forEach(b => b.onclick = async () => {
-    if (!confirm("Remove this comment?")) return;
+    if (!confirm(b.dataset.haskids === "1"
+      ? "Delete this comment?\n\nIts replies are deleted with it." : "Delete this comment?")) return;
     try { await removeComment(b.dataset.rm); ctx.refresh(); }
     catch (e) { toastMsg(e.message || String(e)); }
   });

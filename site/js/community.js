@@ -256,6 +256,7 @@ async function renderRooms(body, st) {
   try { posts = await B().api.listPosts(room); }
   catch (e) { box.innerHTML = `<p class="faint">The room didn't answer.</p>`; return; }
   const uid = B().api.me();
+  posts = posts.filter(p => !p.deleted);
   const roots = posts.filter(p => !p.parent_id);
   const kids = id => posts.filter(p => p.parent_id === id).slice().reverse();
   if (!roots.length) {
@@ -269,10 +270,10 @@ async function renderRooms(body, st) {
       <div class="cm-body">
         <div class="cm-top"><a class="cm-name" href="#/author/${esc(p.author_id)}">${esc(prof.name || "Someone")}</a>
           <span class="cm-when">${rel(p.created_at)}</span></div>
-        <div class="cm-text">${p.deleted ? `<span class="faint">[removed]</span>` : esc(p.body)}</div>
+        <div class="cm-text">${esc(p.body)}</div>
         <div class="cm-acts">
-          ${!isReply && !p.deleted && uid ? `<button class="a-chip" data-preply="${esc(p.id)}">Reply</button>` : ""}
-          ${uid === p.author_id && !p.deleted ? `<button class="a-chip danger" data-prm="${esc(p.id)}">Remove</button>` : ""}
+          ${!isReply && uid ? `<button class="a-chip" data-preply="${esc(p.id)}">Reply</button>` : ""}
+          ${uid === p.author_id ? `<button class="a-chip danger" data-prm="${esc(p.id)}" data-haskids="${!isReply && kids(p.id).length ? 1 : 0}">Remove</button>` : ""}
         </div>
         <div class="cm-replies">${kids(p.id).map(k => one(k, true)).join("")}</div>
         <div class="cm-replybox" id="prb-${esc(p.id)}" hidden>
@@ -295,7 +296,8 @@ async function renderRooms(body, st) {
     catch (e) { toast(e.message || String(e)); }
   });
   $$("[data-prm]", box).forEach(b => b.onclick = async () => {
-    if (!confirm("Remove this post?")) return;
+    if (!confirm(b.dataset.haskids === "1"
+      ? "Delete this post?\n\nIts replies are deleted with it." : "Delete this post?")) return;
     try { await B().api.removePost(b.dataset.prm); renderRooms(body, st); }
     catch (e) { toast(e.message || String(e)); }
   });
