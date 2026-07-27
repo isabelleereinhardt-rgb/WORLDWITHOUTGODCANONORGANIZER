@@ -23,7 +23,7 @@ const save = () => window.CodexSettings && CodexSettings.save();
 const DEF = {
   luckyName: "Lucky", luckySkin: "tabby", luckyAcc: "bell", luckyPersonality: "sweet",
   luckyWalks: true, luckyNaps: true, luckyTips: true, luckyTreatsOn: true,
-  luckySleeps: true,
+  luckySleeps: true, luckyHail: true,
   // seconds for one crossing; the slider offers a few named speeds
   luckyPace: 34,
   luckyPets: 0, luckyPetsTotal: 0, luckyTreats: 0,
@@ -645,8 +645,11 @@ const Lucky = {
     this.bindAsk();
   },
 
-  /* the corner button, always reachable whatever he is doing */
+  /* The corner button, unless you would rather have the corner back.
+     It sits over the page on every screen, so it has to be refusable —
+     the assistant is still one click away in the top bar and on Ctrl J. */
   askButton() {
+    if (!pref("luckyHail")) return "";
     return `<button class="lucky-hail" id="luckyHail" title="Ask ${esc(this.name())} about your canon">
       <span class="lh-face">${faceSvg(34)}</span>
       <span class="lh-text"><span class="lh-name">Ask ${esc(this.name())}</span>

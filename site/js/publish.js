@@ -42,8 +42,60 @@ async function folderOf(id) {
 }
 async function chaptersOf(folderId) {
   const docs = await S().all("docs").catch(() => []);
-  return docs.filter(d => (d.folder || "") === folderId)
-    .sort((a, b) => (a.order || 0) - (b.order || 0) || (a.created || 0) - (b.created || 0));
+  return docs.filter(d => (d.folder || "") === folderId).sort(chapterOrder);
+}
+
+/* ---------- reading order ----------
+   Reading order is the writer's, not the file system's. `order` is
+   authoritative once set; anything without one falls back to the chapter
+   number in its title, then to when it was made — so a book imported or
+   written before this existed still lines up sensibly instead of
+   scattering. */
+function chapterOrder(a, b) {
+  const ao = Number.isFinite(a.order) ? a.order : null;
+  const bo = Number.isFinite(b.order) ? b.order : null;
+  if (ao != null && bo != null) return ao - bo;
+  if (ao != null) return -1;
+  if (bo != null) return 1;
+  const num = t => (window.CodexEditor && CodexEditor.chapterNumberIn)
+    ? CodexEditor.chapterNumberIn(t) : null;
+  const an = num(a.title), bn = num(b.title);
+  if (an != null && bn != null && an !== bn) return an - bn;
+  return (a.created || a.updated || 0) - (b.created || b.updated || 0);
+}
+
+/* Write the current visual order back onto every chapter, so the next
+   read is not relying on the fallbacks above. */
+async function commitOrder(list) {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].order !== i) { list[i].order = i; await S().put("docs", list[i]); }
+  }
+}
+async function moveChapter(folderId, id, delta) {
+  const list = await chaptersOf(folderId);
+  const i = list.findIndex(d => d.id === id);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= list.length) return false;
+  const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+  await commitOrder(list);
+  return true;
+}
+
+/* ---------- per-chapter state ----------
+   A book is written in public a chapter at a time, so a chapter is
+   either a draft you are still working on or something readers are
+   allowed to see. A reading link only ever carries the published ones —
+   that is the whole point of the distinction, so it is enforced where
+   the chapters are gathered rather than left to each caller. */
+function isPublished(d) { return !!(d && d.published); }
+function publishedOnly(list) { return list.filter(isPublished); }
+async function setChapterState(id, published) {
+  const d = await S().get("docs", id);
+  if (!d) return null;
+  d.published = !!published;
+  d.publishedAt = published ? (d.publishedAt || Date.now()) : null;
+  await S().put("docs", d);
+  return d;
 }
 
 /* ============================================================
@@ -68,6 +120,7 @@ async function viewWork(folderId) {
   const pub = f.publish || {};
   const total = chapters.reduce((n, c) => n + words(plain(c.html)), 0);
   const written = chapters.filter(c => words(plain(c.html)) > 0).length;
+  const live = publishedOnly(chapters);
   const counts = pub.reactions || {};
 
   let comments = [];
@@ -119,14 +172,28 @@ async function viewWork(folderId) {
       : `<span class="faint">No blurb yet. <b>Edit details</b> to write the few lines a reader sees first.</span>`}</p>
 
         <div class="rule-head mt"><span class="k">Chapters</span><span class="hr"></span>
-          <span class="meta">${chapters.length}</span></div>
-        ${chapters.length ? chapters.map((c, i) => {
+          <span class="meta">${live.length} of ${chapters.length} published</span></div>
+        ${chapters.length ? `<div class="ch-list">${chapters.map((c, i) => {
           const w = words(plain(c.html));
-          return `<a class="work-ch" href="#/doc/${encodeURIComponent(c.id)}">
+          const pub = isPublished(c);
+          const empty = !w;
+          return `<div class="work-ch${pub ? " live" : ""}" data-ch="${esc(c.id)}">
             <span class="wch-n">${i + 1}</span>
-            <span class="wch-title">${esc(c.title || "Untitled")}</span>
-            <span class="wch-meta">${w ? w.toLocaleString() + " words" : "empty"}</span></a>`;
-        }).join("") : `<div class="empty-state">No chapters yet.
+            <a class="wch-title" href="#/doc/${encodeURIComponent(c.id)}">${esc(c.title || "Untitled")}</a>
+            <span class="wch-meta">${w ? w.toLocaleString() + " words" : "empty"}</span>
+            <span class="wch-state ${pub ? "on" : ""}">${pub ? "Published" : "Draft"}</span>
+            <span class="wch-tools">
+              <button class="a-chip" data-up="${esc(c.id)}" title="Move earlier" ${i === 0 ? "disabled" : ""}>↑</button>
+              <button class="a-chip" data-down="${esc(c.id)}" title="Move later" ${i === chapters.length - 1 ? "disabled" : ""}>↓</button>
+              <button class="a-chip${pub ? "" : " go"}" data-pub="${esc(c.id)}"
+                ${empty && !pub ? "disabled title='Nothing written yet'" : ""}>${pub ? "Unpublish" : "Publish"}</button>
+              <button class="a-chip danger" data-chdel="${esc(c.id)}" title="Delete this chapter">✕</button>
+            </span>
+          </div>`;
+        }).join("")}</div>
+        <p class="faint" style="margin:10px 0 0">A reading link carries only the published chapters.
+          Drafts stay yours until you say otherwise.</p>`
+        : `<div class="empty-state">No chapters yet.
           <button class="btn sm" id="workNewCh2" style="margin-top:12px">Write the first chapter</button></div>`}
         ${chapters.length ? `<button class="btn ghost sm" id="workNewCh3" style="margin-top:12px">Add another chapter</button>` : ""}
 
@@ -151,6 +218,33 @@ async function viewWork(folderId) {
   // filed into this work, so you never have to go and file it yourself
   ["#workNewCh", "#workNewCh2", "#workNewCh3"].forEach(sel => {
     const b = $(sel); if (b) b.onclick = () => newChapter(f, chapters.length);
+  });
+  const again = () => viewWork(folderId);
+  $$("[data-up]").forEach(b => b.onclick = async () => {
+    if (await moveChapter(folderId, b.dataset.up, -1)) again();
+  });
+  $$("[data-down]").forEach(b => b.onclick = async () => {
+    if (await moveChapter(folderId, b.dataset.down, 1)) again();
+  });
+  $$("[data-pub]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.pub;
+    const cur = chapters.find(c => c.id === id);
+    const next = !isPublished(cur);
+    // publishing is the outward-facing move, so it says what it means
+    if (next && !confirm(`Publish “${cur.title || "Untitled"}”?\n\nAnyone holding a reading link for this work will be able to read it.`)) return;
+    await setChapterState(id, next);
+    toast(next ? "Chapter published" : "Back to draft");
+    again();
+  });
+  $$("[data-chdel]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.chdel;
+    const cur = chapters.find(c => c.id === id);
+    if (!confirm(`Delete “${cur.title || "Untitled"}”?\n\nThis removes the chapter and what is written in it.`)) return;
+    await S().del("docs", id);
+    const rest = (await chaptersOf(folderId));
+    await commitOrder(rest);
+    toast("Chapter deleted");
+    again();
   });
   $("#workDelete").onclick = async () => {
     if (!window.CodexFolders) return;
@@ -372,10 +466,24 @@ async function viewShared(token) {
   const byStore = {};
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r.data); });
   const folders = byStore.folders || [];
-  const docs = (byStore.docs || []).sort((a, b) => (a.order || 0) - (b.order || 0) || (a.created || 0) - (b.created || 0));
+  /* A reader sees published chapters only. The share token may well
+     cover the whole project, drafts and all — the filter is here, at the
+     point of display, so an unfinished chapter cannot appear just because
+     the link was made before it was written. */
+  const all = (byStore.docs || []).sort(chapterOrder);
+  const docs = publishedOnly(all);
+  const held = all.length - docs.length;
   const f = folders[0] || {};
   const pub = f.publish || {};
   const total = docs.reduce((n, d) => n + words(plain(d.html)), 0);
+
+  if (!docs.length) {
+    view().innerHTML = `<div class="wrap"><div class="page-kicker">Reading link</div>
+      <h1 class="display">${esc(f.name || "A work in progress")}</h1>
+      <p class="muted">No chapters have been published yet. The link stays good — come back when
+        the first one goes up.</p></div>`;
+    return;
+  }
 
   view().innerHTML = `<div class="reader">
     <div class="reader-top">
@@ -384,7 +492,8 @@ async function viewShared(token) {
         <div class="page-kicker">${esc(pub.genre || "")}${pub.status ? " · " + esc(pub.status) : ""}</div>
         <h1 class="display">${esc(f.name || "A work in progress")}</h1>
         <div class="work-by">${pub.author ? "by " + esc(pub.author) : ""}${pub.series ? " · " + esc(pub.series) : ""}</div>
-        <div class="work-stat">${total.toLocaleString()} words · ${docs.length} chapter${docs.length === 1 ? "" : "s"}</div>
+        <div class="work-stat">${total.toLocaleString()} words · ${docs.length} chapter${docs.length === 1 ? "" : "s"}${
+          held ? " · " + held + " still being written" : ""}</div>
       </div>
     </div>
     ${pub.blurb ? `<p class="reader-blurb">${esc(pub.blurb)}</p>` : ""}
@@ -422,5 +531,6 @@ async function viewShared(token) {
   };
 }
 
-window.CodexPublish = { work: viewWork, shared: viewShared, GENRES, REACTIONS };
+window.CodexPublish = {
+  chaptersOf, chapterOrder, publishedOnly, isPublished, setChapterState, moveChapter, commitOrder, work: viewWork, shared: viewShared, GENRES, REACTIONS };
 })();

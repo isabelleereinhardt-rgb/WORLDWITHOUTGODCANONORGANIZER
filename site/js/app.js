@@ -826,8 +826,8 @@ function viewSubject(name) {
 }
 
 /* ---------- galleries / atlas ---------- */
-function galleryHtml(images) {
-  return `<div class="gallery">` + images.map(p =>
+function galleryHtml(images, variant) {
+  return `<div class="gallery${variant ? " " + variant : ""}">` + images.map(p =>
     `<figure data-full="${imgSrc(p)}">
        <img loading="lazy" src="${imgSrc(p)}" alt="${esc((p.split('/').pop() || '').slice(0, 60))}">
        <figcaption>${esc(p.split('/').pop() || "image")}</figcaption>
@@ -936,7 +936,7 @@ function viewGallery(e) {
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${catDot(e.category)} Gallery</div>
     <h1>${esc(e.title)}</h1><p class="muted">${e.images.length} images</p>
-    ${galleryHtml(e.images)}
+    ${galleryHtml(e.images, "atlas")}
   </div>`;
   bindGallery();
 }

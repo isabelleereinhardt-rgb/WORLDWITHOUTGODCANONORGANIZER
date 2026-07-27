@@ -190,12 +190,25 @@ function luminance(hex) {
 }
 function applySettings(s) {
   const root = document.documentElement.style;
+  /* The accent has to drive --blush, not just --accent.
+     The label promises "links, active nav, buttons", and every one of
+     those is painted with --blush — which the stylesheet uses about four
+     times as often as --accent. Setting only --accent meant the picker
+     changed a handful of incidental rules and left the site looking
+     exactly the same, which reads as a broken control.
+
+     --onblush is the text that sits ON those fills, so it is chosen for
+     contrast rather than fixed: a pale accent needs dark text on it. */
   if (s.accent) {
     root.setProperty("--accent", s.accent);
     root.setProperty("--accent-ink", mix(s.accent, "#000000", 0.28));
     root.setProperty("--accent-soft", mix(s.accent, "#ffffff", 0.82));
+    root.setProperty("--blush", s.accent);
+    root.setProperty("--blush2", mix(s.accent, "#000000", 0.18));
+    root.setProperty("--onblush", luminance(s.accent) > 0.55 ? "#2b1a20" : "#fff7f8");
   } else {
-    root.removeProperty("--accent"); root.removeProperty("--accent-ink"); root.removeProperty("--accent-soft");
+    ["--accent", "--accent-ink", "--accent-soft", "--blush", "--blush2", "--onblush"]
+      .forEach(p => root.removeProperty(p));
   }
   /* A custom background is chosen for ONE theme. It used to be stored
      for both, and because these land as inline styles on :root — which
@@ -611,6 +624,8 @@ function panelLucky(el) {
       <button class="switch${L.pref("luckyNaps") ? " on" : ""}" data-lhab="luckyNaps" role="switch" aria-checked="${!!L.pref("luckyNaps")}"><span></span></button></div>
     <div class="sfx-row"><span class="sfx-label">Sleep while you write<em>He stops pacing and curls up in the corner whenever a document is open.</em></span>
       <button class="switch${L.pref("luckySleeps") ? " on" : ""}" data-lhab="luckySleeps" role="switch" aria-checked="${!!L.pref("luckySleeps")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">The “Ask ${esc(L.name())}” button<em>The card in the bottom corner. Off gives you the corner back; the assistant is still in the top bar and on Ctrl J.</em></span>
+      <button class="switch${L.pref("luckyHail") ? " on" : ""}" data-lhab="luckyHail" role="switch" aria-checked="${!!L.pref("luckyHail")}"><span></span></button></div>
 
     <div class="rule-head mt"><span class="k">How often he strolls past</span><span class="hr"></span></div>
     <div class="pace-row">
