@@ -111,16 +111,33 @@ async function removeFolder(id) {
   return items.length;
 }
 
-/* the shared confirm, used from the project bar and from a work page */
+/* The shared confirm, used from the project bar and from a story
+   workspace; every way of deleting a project runs through here. If the
+   story is on the community shelves, deleting it here takes the public
+   copy down too; a book whose author has thrown away the original
+   should not keep circulating, and the confirm says so out loud. */
 async function confirmRemove(id, name) {
   const items = await itemsIn(id);
   const n = items.length;
-  const msg = n
+  const f = await S().get("folders", id);
+  const pub = (f && f.publish) || {};
+  const onShelves = !!pub.communityId;
+  let msg = n
     ? `Delete the project “${name}”?\n\n` +
       `${n} item${n === 1 ? "" : "s"} filed in it will be kept and simply unfiled; ` +
       `nothing you have written is deleted.`
     : `Delete the project “${name}”?\n\nIt is empty, so nothing else changes.`;
+  if (onShelves) msg += `\n\nIt is also on the community shelves. Deleting it here takes it down there too; readers lose access, and its stars and comments are removed.`;
   if (!confirm(msg)) return false;
+  // the public copy goes first, while its id is still known
+  if (onShelves && window.CodexBooks) {
+    try {
+      await CodexBooks.unpublishWork(pub.communityId);
+      window.toast && toast("Taken off the community shelves");
+    } catch (e) {
+      window.toast && toast("Couldn't reach the community to take the public copy down; it is still listed under Reading Room → My shelf, where Take down works once you are online and signed in");
+    }
+  }
   const moved = await removeFolder(id);
   window.toast && toast(moved
     ? `Project deleted. ${moved} item${moved === 1 ? "" : "s"} kept and unfiled.`

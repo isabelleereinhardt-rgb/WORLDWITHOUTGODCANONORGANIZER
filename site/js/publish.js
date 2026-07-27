@@ -411,10 +411,7 @@ async function viewWork(folderId) {
   });
   $("#workDelete").onclick = async () => {
     if (!window.CodexFolders) return;
-    const B = window.CodexBooks;
-    if (pub.communityId && B && confirm(`“${f.name}” is on the community shelves.\n\nTake it down as well? OK removes the public copy (stars and comments go with it); Cancel leaves it up under your account.`)) {
-      try { await B.unpublishWork(pub.communityId); } catch (e) {}
-    }
+    // the shared confirm handles the community copy too
     if (await CodexFolders.confirmRemove(folderId, f.name)) location.hash = "#/work";
   };
   bindCover(f);
