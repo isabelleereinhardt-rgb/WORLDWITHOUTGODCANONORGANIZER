@@ -296,9 +296,16 @@ create policy "create own profile" on public.profiles
   for insert with check (id = auth.uid());
 
 -- ---------- workspaces ----------
+-- The owner check must be direct, not only via membership: the
+-- membership row is written by an AFTER INSERT trigger, and Postgres
+-- checks the visibility of "insert ... returning" BEFORE that trigger's
+-- work is visible. With membership alone, creating a workspace and
+-- reading it back in one statement fails as a phantom RLS violation
+-- ("new row violates row-level security policy"), which broke sync's
+-- first step on every device.
 drop policy if exists "read my workspaces" on public.workspaces;
 create policy "read my workspaces" on public.workspaces
-  for select using (public.is_member(id));
+  for select using (owner = auth.uid() or public.is_member(id));
 
 drop policy if exists "create workspaces" on public.workspaces;
 create policy "create workspaces" on public.workspaces
