@@ -213,12 +213,37 @@ copy or move a workspace to another device, open that workspace and use
 currently-active workspace*) and **Restore backup** to load it elsewhere. Your
 original canon in `source/` is always safe in the repo regardless.
 
-Accounts live **on this device**; this is still a static site with no server,
-so there's no live cross-device sync yet: the closest equivalent is exporting a
-backup (or publishing a story as a webpage) and opening it elsewhere. Real
-multi-device accounts and live sharing need a hosted backend (for this kind of
-static site, **Supabase** or **Firebase** are the natural fits); the account
-system was built so that layer can plug in later without starting over.
+Device-only accounts live **on this device**. Cloud accounts (below) keep a
+local copy too, so the app opens instantly and works offline either way.
+
+## Cloud accounts: real cross-device sync (Supabase)
+
+When `site/data/cloud-config.js` holds a Supabase project's URL and anon key,
+the sign-in screen offers **cloud accounts**: email + password, and everything
+the user writes syncs to their account. Sign in on a laptop, an iPad, or a
+phone and the same workspaces, documents, and stories are there. It's
+local-first: IndexedDB stays the working copy, changes push up in the
+background, other devices' changes pull down, and offline edits sync when the
+connection returns. A sync dot on the account chip (and a Cloud sync panel in
+Settings) shows the current state.
+
+One-time setup for the project owner:
+
+1. Create a free project at supabase.com.
+2. Open the project's **SQL Editor**, paste the whole of
+   [`supabase/schema.sql`](supabase/schema.sql), and click **Run**. This
+   creates the two tables and the row-level security rules that keep every
+   user's data private to them.
+3. (Recommended) **Authentication > Sign In / Providers > Email**: turn off
+   "Confirm email" so new users can start instantly. If you keep it on, set
+   **Authentication > URL Configuration > Site URL** to the live site so the
+   confirmation link lands somewhere sensible.
+4. Put the project URL and anon key in `site/data/cloud-config.js` (already
+   done for this repo). The anon key is public by design; the `service_role`
+   key must never ship in the site.
+
+Device-only accounts and guest mode keep working exactly as before; cloud is
+an option at the gate, not a requirement.
 
 ---
 

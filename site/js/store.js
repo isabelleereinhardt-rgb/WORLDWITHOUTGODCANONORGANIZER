@@ -121,14 +121,18 @@ const Store = {
   async put(store, obj) {
     obj.updated = Date.now();
     if (!obj.created) obj.created = obj.updated;
-    if (usingFallback || !db) return LS.put(store, obj);
-    try { await wrap(tx(store, "readwrite").put(obj)); return true; }
-    catch (e) { return LS.put(store, obj); }
+    let ok;
+    if (usingFallback || !db) ok = LS.put(store, obj);
+    else { try { await wrap(tx(store, "readwrite").put(obj)); ok = true; } catch (e) { ok = LS.put(store, obj); } }
+    if (window.CodexCloud) CodexCloud.track(store, obj.id, false);
+    return ok;
   },
   async del(store, id) {
-    if (usingFallback || !db) return LS.del(store, id);
-    try { await wrap(tx(store, "readwrite").delete(id)); return true; }
-    catch (e) { return LS.del(store, id); }
+    let ok;
+    if (usingFallback || !db) ok = LS.del(store, id);
+    else { try { await wrap(tx(store, "readwrite").delete(id)); ok = true; } catch (e) { ok = LS.del(store, id); } }
+    if (window.CodexCloud) CodexCloud.track(store, id, true);
+    return ok;
   },
 
   /* export EVERYTHING in the *current* workspace as a plain object for backup */
@@ -156,6 +160,11 @@ const Store = {
     await this.ready;
     return true;
   },
+
+  /* open ANOTHER workspace's database directly (same schema/version) without
+     touching the active connection; used by cloud sync to read and apply
+     changes for workspaces that aren't currently open. Caller must close(). */
+  openWorkspaceDB(workspaceId) { return openDB(dbNameFor(workspaceId)); },
 
   /* permanently remove a workspace's entire database (used when deleting a workspace) */
   deleteWorkspaceDB(workspaceId) {

@@ -35,8 +35,24 @@ function accounts() {
 }
 function saveAccounts(list) { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(list)); }
 function sessionId() { return localStorage.getItem(SESSION_KEY) || ""; }
-function current() { return accounts().find(a => a.id === sessionId()) || (sessionId() === "guest" ? GUEST : null); }
 const GUEST = { id: "guest", name: "Guest", guest: true };
+
+/* ---------- cloud session (Supabase; see cloud.js) ----------
+   Read directly from localStorage so identity and namespacing work
+   at parse time, before cloud.js has loaded. A signed-in cloud
+   account takes precedence over any device-only session. */
+const CLOUD_SESSION_KEY = "codex.cloudSession";
+function cloudSession() {
+  if (!window.CODEX_CLOUD) return null;
+  try { return JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY) || "null"); } catch (e) { return null; }
+}
+function cloudNsOf(cs) { return "sb" + ((cs.user && cs.user.id) || "").replace(/-/g, ""); }
+
+function current() {
+  const cs = cloudSession();
+  if (cs) return { id: "cloud", name: cs.name || (cs.user.email || "").split("@")[0], email: cs.user.email, cloud: true };
+  return accounts().find(a => a.id === sessionId()) || (sessionId() === "guest" ? GUEST : null);
+}
 
 /* Record, ONCE, whether this device had any app data before accounts
    existed. This must run before app.js boots (which lazily seeds
@@ -52,6 +68,8 @@ if (localStorage.getItem(FRESH_KEY) === null) {
 /* The account that claimed the device's original data keeps the bare,
    historical key names; everyone else gets suffixed keys/db names. */
 function ns() {
+  const cs = cloudSession();
+  if (cs) return cloudNsOf(cs);        // cloud account: namespace derived from its user id
   const a = current();
   if (!a) return "gate";               // not signed in: a throwaway space so nothing real is touched
   if (a.legacy) return "";             // the claiming account: original, un-suffixed storage
@@ -94,6 +112,7 @@ async function createAccount(name, email, pass) {
   acc.pass = pass ? await hashPass(pass, acc.salt) : "";
   list.push(acc); saveAccounts(list);
   if (!claimsLegacy) seedNewAccountSpace(acc);
+  localStorage.removeItem(CLOUD_SESSION_KEY);   // a device-only account replaces any cloud session
   localStorage.setItem(SESSION_KEY, acc.id);
   return acc;
 }
@@ -104,14 +123,20 @@ async function signIn(accId, pass) {
     const h = await hashPass(pass || "", acc.salt);
     if (h !== acc.pass) throw new Error("Wrong password for " + acc.name + ".");
   }
+  localStorage.removeItem(CLOUD_SESSION_KEY);   // a device-only sign-in replaces any cloud session
   localStorage.setItem(SESSION_KEY, acc.id);
   return acc;
 }
 function signInGuest() {
+  localStorage.removeItem(CLOUD_SESSION_KEY);
   localStorage.setItem(SESSION_KEY, "guest");
   if (!localStorage.getItem(storeKeyFor("guest", "codex.workspaces"))) seedNewAccountSpace(GUEST);
 }
-function signOut() { localStorage.removeItem(SESSION_KEY); location.reload(); }
+function signOut() {
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(CLOUD_SESSION_KEY);
+  location.reload();
+}
 
 function storeKeyFor(accountNs, base) { return accountNs ? base + "@" + accountNs : base; }
 
@@ -119,15 +144,17 @@ function storeKeyFor(accountNs, base) { return accountNs ? base + "@" + accountN
    plus their OWN workspace, marked to receive the starter template on first
    open (the actual template content is copied in by ensureTemplate() below,
    once storage for that workspace is open). */
-function seedNewAccountSpace(acc) {
+function seedSpaceFor(n, ownerName) {
   const wsId = "ws" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const list = [
     { id: "default", name: "World Without God", hasCanon: true, createdAt: Date.now() },
-    { id: wsId, name: acc.name === "Guest" ? "Guest workspace" : acc.name + "'s workspace", hasCanon: false, template: true, createdAt: Date.now() },
+    { id: wsId, name: ownerName === "Guest" ? "Guest workspace" : ownerName + "'s workspace", hasCanon: false, template: true, createdAt: Date.now() },
   ];
-  const n = acc.id === "guest" ? "guest" : acc.id;
   localStorage.setItem(storeKeyFor(n, "codex.workspaces"), JSON.stringify(list));
   localStorage.setItem(storeKeyFor(n, "codex.activeWorkspace"), wsId);
+}
+function seedNewAccountSpace(acc) {
+  seedSpaceFor(acc.id === "guest" ? "guest" : acc.id, acc.name || "My");
 }
 
 /* Copy the starter template's content into the active workspace, once.
@@ -159,6 +186,7 @@ async function ensureTemplate() {
    THE GATE; the front door you see before the app
    ============================================================ */
 function gateHtml() {
+  const cloud = !!window.CODEX_CLOUD;
   const accs = accounts();
   const accChips = accs.map(a => `
     <button class="gate-acc" data-acc="${a.id}">
@@ -166,6 +194,55 @@ function gateHtml() {
       <span class="gate-acc-name">${esc(a.name)}</span>
       ${a.pass ? `<span class="gate-lock" title="Password protected">&#128274;</span>` : ""}
     </button>`).join("");
+  const localAccBlock = accs.length ? `
+    ${cloud ? `<div class="gate-divider"><span>Device-only accounts on this computer</span></div>` : ""}
+    <div class="gate-acc-list">${accChips}</div>
+    <div id="gatePassRow" hidden>
+      <input type="password" id="gatePass" placeholder="Password" autocomplete="current-password">
+      <button class="btn gate-go" id="gateSignIn">Sign in</button>
+    </div>` : "";
+  const note = cloud
+    ? `One account, every device: sign in on a laptop, tablet, or phone and your workspaces and stories <b>sync to your account</b>. Everything also keeps a local copy, so the app works offline.`
+    : `Your account and everything you write live <b>on this device</b>, in this browser. Use <b>Back up my work</b> anytime for a portable copy you can restore on another device.`;
+  const paneIn = cloud ? `
+      <div class="gate-pane" id="gatePaneIn" hidden>
+        <p class="gate-sub">Welcome back.</p>
+        <input id="gateCloudEmail" type="email" placeholder="Email" autocomplete="email">
+        <input id="gateCloudPass" type="password" placeholder="Password" autocomplete="current-password">
+        <button class="btn gate-go" id="gateCloudSignIn">Sign in</button>
+        <div class="gate-err" id="gateErrIn"></div>
+        ${localAccBlock}
+      </div>` : `
+      <div class="gate-pane" id="gatePaneIn" ${accs.length ? "" : "hidden"}>
+        <p class="gate-sub">Welcome back. Pick your account:</p>
+        ${localAccBlock}
+        <div class="gate-err" id="gateErrIn"></div>
+      </div>`;
+  const paneUp = cloud ? `
+      <div class="gate-pane" id="gatePaneUp" hidden>
+        <p class="gate-sub">One account for every device; your stories sync to it automatically.</p>
+        <input id="gateName" placeholder="Your name (or pen name)" autocomplete="username" maxlength="40">
+        <input id="gateEmail" type="email" placeholder="Email" autocomplete="email">
+        <input type="password" id="gateNewPass" placeholder="Password (at least 6 characters)" autocomplete="new-password">
+        <button class="btn gate-go" id="gateCloudCreate">Create my account</button>
+        <div class="gate-err" id="gateErrUp"></div>
+        <button class="gate-guest" id="gateLocalToggle" style="margin-top:10px">Prefer an account that stays on this device only?</button>
+        <div id="gateLocalForm" hidden>
+          <input id="gateLocalName" placeholder="Your name (or pen name)" maxlength="40">
+          <input type="password" id="gateLocalPass" placeholder="Password (optional)" autocomplete="new-password">
+          <button class="btn gate-go" id="gateCreate">Create device-only account</button>
+          <div class="gate-err" id="gateErrLocal"></div>
+        </div>
+      </div>` : `
+      <div class="gate-pane" id="gatePaneUp" ${accs.length ? "hidden" : ""}>
+        <p class="gate-sub">New here? Your account is created on this device; no email verification, no waiting.</p>
+        <input id="gateName" placeholder="Your name (or pen name)" autocomplete="username" maxlength="40">
+        <input id="gateEmail" placeholder="Email (optional)" autocomplete="email">
+        <input type="password" id="gateNewPass" placeholder="Password (optional, protects this account on shared devices)" autocomplete="new-password">
+        <button class="btn gate-go" id="gateCreate">Create my account</button>
+        <div class="gate-err" id="gateErrUp"></div>
+      </div>`;
+  const showIn = cloud ? accs.length > 0 || localStorage.getItem("codex.hasSignedInBefore") === "1" : accs.length > 0;
   return `
   <div class="gate-split">
     <div class="gate-promo">
@@ -178,35 +255,17 @@ function gateHtml() {
         <li><b>Write</b> in a full document editor with chapters, styles, and autosave</li>
         <li><b>Organize</b> your canon: characters, houses, maps, timelines, mood boards</li>
         <li><b>Read</b> your stories in a clean, bookish reader that remembers your place</li>
-        <li><b>Ask</b> the built-in assistant anything about your own lore</li>
+        ${cloud ? `<li><b>Sync</b> across devices: your account travels with you</li>` : `<li><b>Ask</b> the built-in assistant anything about your own lore</li>`}
       </ul>
-      <p class="gate-note">Your account and everything you write live <b>on this device</b>, in this browser. Use <b>Back up my work</b> anytime for a portable copy you can restore on another device.</p>
+      <p class="gate-note">${note}</p>
     </div>
     <div class="gate-card">
       <div class="gate-tabs">
-        <button class="gate-tab ${accs.length ? "active" : ""}" data-tab="in" ${accs.length ? "" : "hidden"}>Sign in</button>
-        <button class="gate-tab ${accs.length ? "" : "active"}" data-tab="up">Create account</button>
+        <button class="gate-tab ${showIn ? "active" : ""}" data-tab="in">Sign in</button>
+        <button class="gate-tab ${showIn ? "" : "active"}" data-tab="up">Create account</button>
       </div>
-
-      <div class="gate-pane" id="gatePaneIn" ${accs.length ? "" : "hidden"}>
-        <p class="gate-sub">Welcome back. Pick your account:</p>
-        <div class="gate-acc-list">${accChips || ""}</div>
-        <div id="gatePassRow" hidden>
-          <input type="password" id="gatePass" placeholder="Password" autocomplete="current-password">
-          <button class="btn gate-go" id="gateSignIn">Sign in</button>
-        </div>
-        <div class="gate-err" id="gateErrIn"></div>
-      </div>
-
-      <div class="gate-pane" id="gatePaneUp" ${accs.length ? "hidden" : ""}>
-        <p class="gate-sub">New here? Your account is created on this device; no email verification, no waiting.</p>
-        <input id="gateName" placeholder="Your name (or pen name)" autocomplete="username" maxlength="40">
-        <input id="gateEmail" placeholder="Email (optional)" autocomplete="email">
-        <input type="password" id="gateNewPass" placeholder="Password (optional, protects this account on shared devices)" autocomplete="new-password">
-        <button class="btn gate-go" id="gateCreate">Create my account</button>
-        <div class="gate-err" id="gateErrUp"></div>
-      </div>
-
+      ${paneIn}
+      ${paneUp}
       <button class="gate-guest" id="gateGuest">Just browsing? Continue as a guest &rarr;</button>
     </div>
   </div>`;
@@ -228,11 +287,52 @@ function showGate() {
   const $$ = (s) => Array.from(gate.querySelectorAll(s));
   let pickedAcc = null;
 
-  $$(".gate-tab").forEach(t => t.onclick = () => {
-    $$(".gate-tab").forEach(x => x.classList.toggle("active", x === t));
-    $("#gatePaneIn").hidden = t.dataset.tab !== "in";
-    $("#gatePaneUp").hidden = t.dataset.tab !== "up";
-  });
+  const showTab = (tab) => {
+    $$(".gate-tab").forEach(x => x.classList.toggle("active", x.dataset.tab === tab));
+    $("#gatePaneIn").hidden = tab !== "in";
+    $("#gatePaneUp").hidden = tab !== "up";
+  };
+  $$(".gate-tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
+  const initialTab = ($$(".gate-tab").find(t => t.classList.contains("active")) || {}).dataset;
+  showTab(initialTab ? initialTab.tab : "up");
+
+  /* ---------- cloud account handlers (only present in cloud mode) ---------- */
+  const markSignedIn = () => { localStorage.setItem("codex.hasSignedInBefore", "1"); localStorage.removeItem(SESSION_KEY); location.reload(); };
+  if ($("#gateCloudSignIn")) {
+    const doCloudIn = async () => {
+      const btn = $("#gateCloudSignIn");
+      btn.disabled = true; $("#gateErrIn").textContent = "";
+      try {
+        await CodexCloud.signIn($("#gateCloudEmail").value.trim(), $("#gateCloudPass").value);
+        markSignedIn();
+      } catch (e) { $("#gateErrIn").textContent = e.message; btn.disabled = false; }
+    };
+    $("#gateCloudSignIn").onclick = doCloudIn;
+    ["#gateCloudEmail", "#gateCloudPass"].forEach(sel => { $(sel).onkeydown = e => { if (e.key === "Enter") doCloudIn(); }; });
+  }
+  if ($("#gateCloudCreate")) {
+    const doCloudUp = async () => {
+      const btn = $("#gateCloudCreate");
+      btn.disabled = true; $("#gateErrUp").textContent = "";
+      try {
+        const r = await CodexCloud.signUp($("#gateName").value, $("#gateEmail").value.trim(), $("#gateNewPass").value);
+        if (r.needsConfirm) {
+          $("#gateErrUp").innerHTML = `<span class="gate-ok">Almost there: a confirmation link is on its way to your email. Click it, then come back and sign in.</span>`;
+          btn.disabled = false;
+        } else markSignedIn();
+      } catch (e) { $("#gateErrUp").textContent = e.message; btn.disabled = false; }
+    };
+    $("#gateCloudCreate").onclick = doCloudUp;
+    ["#gateName", "#gateEmail", "#gateNewPass"].forEach(sel => { $(sel).onkeydown = e => { if (e.key === "Enter") doCloudUp(); }; });
+  }
+  if ($("#gateLocalToggle")) $("#gateLocalToggle").onclick = () => { $("#gateLocalForm").hidden = !$("#gateLocalForm").hidden; };
+  if ($("#gateCreate") && $("#gateLocalForm")) {
+    // device-only creation inside the cloud-mode form
+    $("#gateCreate").onclick = async () => {
+      try { await createAccount($("#gateLocalName").value, "", $("#gateLocalPass").value); location.reload(); }
+      catch (e) { $("#gateErrLocal").textContent = e.message; }
+    };
+  }
 
   $$(".gate-acc").forEach(b => b.onclick = async () => {
     pickedAcc = accounts().find(a => a.id === b.dataset.acc);
@@ -254,16 +354,18 @@ function showGate() {
   if ($("#gateSignIn")) $("#gateSignIn").onclick = doSignIn;
   if ($("#gatePass")) $("#gatePass").onkeydown = e => { if (e.key === "Enter") doSignIn(); };
 
-  const doCreate = async () => {
-    try {
-      await createAccount($("#gateName").value, $("#gateEmail").value, $("#gateNewPass").value);
-      location.reload();
-    } catch (e) { $("#gateErrUp").textContent = e.message; }
-  };
-  $("#gateCreate").onclick = doCreate;
-  ["#gateName", "#gateEmail", "#gateNewPass"].forEach(sel => {
-    const el = $(sel); if (el) el.onkeydown = e => { if (e.key === "Enter") doCreate(); };
-  });
+  if (!window.CODEX_CLOUD) {
+    const doCreate = async () => {
+      try {
+        await createAccount($("#gateName").value, $("#gateEmail").value, $("#gateNewPass").value);
+        location.reload();
+      } catch (e) { $("#gateErrUp").textContent = e.message; }
+    };
+    $("#gateCreate").onclick = doCreate;
+    ["#gateName", "#gateEmail", "#gateNewPass"].forEach(sel => {
+      const el = $(sel); if (el) el.onkeydown = e => { if (e.key === "Enter") doCreate(); };
+    });
+  }
   $("#gateGuest").onclick = () => { signInGuest(); location.reload(); };
   const nameEl = $("#gateName"); if (nameEl && !$("#gatePaneUp").hidden) nameEl.focus();
 }
@@ -278,9 +380,11 @@ function mountChip() {
     <button class="acct-btn" id="acctBtn" title="Account">
       <span class="gate-avatar sm">${esc((a.name || "?")[0].toUpperCase())}</span>
       <span class="st-label">${esc(a.name)}</span>
+      ${a.cloud ? `<span class="sync-dot" id="syncDot" title="Sync status"></span>` : ""}
     </button>
     <div class="acct-menu" id="acctMenu" hidden>
-      <div class="acct-menu-head">Signed in as <b>${esc(a.name)}</b>${a.guest ? " (guest)" : ""}</div>
+      <div class="acct-menu-head">Signed in as <b>${esc(a.name)}</b>${a.guest ? " (guest)" : ""}${a.cloud ? `<br><span class="faint">${esc(a.email || "")}</span><br><span class="faint" id="syncLabel"></span>` : ""}</div>
+      ${a.cloud ? `<button class="acct-item" id="acctSyncNow">Sync now</button>` : ""}
       <button class="acct-item" id="acctSwitch">Switch account</button>
       <button class="acct-item" id="acctOut">Sign out</button>
     </div>`;
@@ -289,6 +393,18 @@ function mountChip() {
   document.addEventListener("click", () => { menu.hidden = true; });
   holder.querySelector("#acctSwitch").onclick = signOut;
   holder.querySelector("#acctOut").onclick = signOut;
+  const syncBtn = holder.querySelector("#acctSyncNow");
+  if (syncBtn) syncBtn.onclick = (e) => { e.stopPropagation(); window.CodexCloud && CodexCloud.syncNow(); };
+  if (a.cloud && window.CodexCloud) {
+    const LABELS = { synced: "Synced to your account", syncing: "Syncing…", offline: "Offline; will sync when you're back",
+      setup: "Cloud database not set up yet (see Settings)", error: "Sync problem (see Settings)", idle: "Waiting to sync", off: "" };
+    CodexCloud.onStatus(st => {
+      const dot = holder.querySelector("#syncDot"), label = holder.querySelector("#syncLabel");
+      if (dot) dot.className = "sync-dot sync-" + st.state;
+      if (dot) dot.title = LABELS[st.state] || "";
+      if (label) label.textContent = (LABELS[st.state] || "") + (st.detail && st.state === "error" ? ": " + st.detail : "");
+    });
+  }
 }
 
 /* ---------- boot ---------- */
@@ -299,7 +415,7 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else boot();
 
 window.CodexAccount = {
-  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, mountChip,
+  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, mountChip, seedSpaceFor,
   isSignedIn: () => !!current(),
 };
 })();

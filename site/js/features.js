@@ -190,7 +190,8 @@ function viewSettings() {
     ${acct ? `<section class="set-block">
       <h3>Account</h3>
       <p class="faint" style="margin:2px 0 10px">Signed in as <b>${esc(acct.name)}</b>${acct.email ? ` (${esc(acct.email)})` : ""}${acct.guest ? " as a guest" : ""}.
-        Your account and everything you write live on this device, in this browser; use <b>Back up my work</b> in the sidebar for a portable copy.</p>
+        ${acct.cloud ? "This is a cloud account: your work syncs to it and follows you onto any device you sign in on."
+          : "Your account and everything you write live on this device, in this browser; use <b>Back up my work</b> in the sidebar for a portable copy."}</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost sm" id="acctSignOut">Sign out</button>
         <button class="btn ghost sm" id="acctTplDownload" title="Turn this workspace into the template every NEW account starts from">Download as new-user template</button>
@@ -198,6 +199,28 @@ function viewSettings() {
       <p class="faint" style="font-size:12px;margin:8px 0 0">The template download turns the workspace you're in right now into a
         <b>template.js</b> file. Replace <b>site/data/template.js</b> in the project with it and every new account will start
         from a copy of this workspace.</p>
+    </section>` : ""}
+
+    ${window.CodexCloud && CodexCloud.enabled ? `<section class="set-block">
+      <h3>Cloud sync <span class="ai-conn-badge" id="cloudBadge">…</span></h3>
+      ${acct && acct.cloud ? `
+        <p class="faint" style="margin:2px 0 10px" id="cloudDetail"></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn ghost sm" id="cloudSyncNow">Sync now</button>
+          <span class="faint" id="cloudLast" style="font-size:12px"></span>
+        </div>
+        <div class="cloud-setup-box" id="cloudSetupBox" hidden>
+          <b>One-time setup needed.</b> Your account works, but the cloud database tables don't exist yet, so nothing can sync.
+          Whoever runs the Supabase project fixes this in about a minute:
+          <ol>
+            <li>Open the Supabase project dashboard, then <b>SQL Editor</b></li>
+            <li>Paste the contents of <b>supabase/schema.sql</b> from this project</li>
+            <li>Click <b>Run</b>, then come back here and press <b>Sync now</b></li>
+          </ol>
+        </div>`
+      : `<p class="faint" style="margin:2px 0">Cloud sync is available on this site, but you're using a
+          ${acct && acct.guest ? "guest" : "device-only"} account, which never leaves this device.
+          To sync across devices, sign out and create a cloud account (email + password) at the sign-in screen.</p>`}
     </section>` : ""}
 
     <section class="set-block">
@@ -400,6 +423,34 @@ function viewSettings() {
 
   if ($("#acctSignOut")) $("#acctSignOut").onclick = () => window.CodexAccount && CodexAccount.signOut();
   if ($("#acctTplDownload")) $("#acctTplDownload").onclick = downloadTemplate;
+
+  if ($("#cloudBadge") && !$("#cloudDetail")) $("#cloudBadge").textContent = "Available";
+  if ($("#cloudBadge") && $("#cloudDetail") && window.CodexCloud) {
+    const badge = $("#cloudBadge");
+    const BADGES = { synced: "Synced", syncing: "Syncing…", offline: "Offline", setup: "Setup needed", error: "Problem", idle: "Ready", off: "Off" };
+    const DETAILS = {
+      synced: "Everything is saved to your account. Sign in anywhere with the same email and it's all there.",
+      syncing: "Talking to your account…",
+      offline: "You're offline; changes are kept locally and sync as soon as you're back.",
+      setup: "The cloud database needs a one-time setup (below).",
+      error: "Something went wrong while syncing.",
+      idle: "Waiting for the first sync.",
+    };
+    CodexCloud.onStatus(st => {
+      badge.textContent = BADGES[st.state] || st.state;
+      badge.classList.toggle("on", st.state === "synced");
+      const d = $("#cloudDetail");
+      if (d) d.textContent = (DETAILS[st.state] || "") + (st.state === "error" && st.detail ? " (" + st.detail + ")" : "");
+      const box = $("#cloudSetupBox"); if (box) box.hidden = st.state !== "setup";
+      const last = $("#cloudLast");
+      if (last) {
+        const t = CodexCloud.lastSync(), pending = CodexCloud.pending();
+        last.textContent = (t ? "Last synced " + new Date(t).toLocaleTimeString() : "Not synced yet") +
+          (pending ? " · " + pending + " change" + (pending === 1 ? "" : "s") + " waiting" : "");
+      }
+    });
+    if ($("#cloudSyncNow")) $("#cloudSyncNow").onclick = () => CodexCloud.syncNow();
+  }
 
   $$(".swatch[data-accent]").forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker").oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };

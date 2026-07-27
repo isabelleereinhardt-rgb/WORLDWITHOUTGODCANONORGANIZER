@@ -1963,6 +1963,11 @@ async function init() {
   // refresh() picks up the real data once it lands.
   const storageInit = (async () => {
     if (window.CodexStore) {
+      // a cloud account's first open on this device: pull the whole account
+      // down from the cloud before anything reads local storage
+      if (window.CodexCloud && CodexCloud.needsBootstrap()) {
+        try { await CodexCloud.bootstrapIfNeeded(); } catch (e) {}
+      }
       // if the last-active workspace isn't the default one, redirect storage
       // to that workspace's own isolated database before loading anything
       const wsId = window.CodexWorkspaces ? CodexWorkspaces.activeId() : "default";
@@ -1991,6 +1996,7 @@ async function init() {
   $("#app").classList.remove("loading");
   route();
   window.addEventListener("hashchange", route);
+  if (window.CodexCloud) CodexCloud.start();
   if (timedOut) {
     toast("Still finishing loading your data; if it doesn't appear shortly, close any other tabs of this site and refresh.");
     storageInit.then(() => refresh()).catch(() => {});
