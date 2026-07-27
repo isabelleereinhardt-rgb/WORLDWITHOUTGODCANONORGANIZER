@@ -205,6 +205,7 @@ const SET_TABS = [
   ["sections", "Sections", "✧"],
   ["restore", "Restore", "✦"],
   ["backup", "Workspaces & backup", "❖"],
+  ["account", "Account & syncing", "✦"],
 ];
 let setTab = "appearance";
 
@@ -238,6 +239,7 @@ function renderSetPanel() {
     appearance: panelAppearance, avatar: panelAvatar, typography: panelTypography,
     sound: panelSound, lucky: panelLucky, assistant: panelAssistant,
     sections: panelSections, restore: panelRestore, backup: panelBackup,
+    account: panelAccount,
   })[setTab](el);
 }
 
@@ -509,6 +511,108 @@ function panelRestore(el) {
   if (excludedCount) {
     $("#restoreNamesAll", el).onclick = async () => { await Extra.unexcludeAllNames(); window.Codex && Codex.refresh(); toast("Restored"); viewSettings("restore"); };
     $$("[data-restorename]", el).forEach(x => x.onclick = async () => { await Extra.unexcludeName(x.dataset.restorename); window.Codex && Codex.refresh(); viewSettings("restore"); });
+  }
+}
+
+/* ---------- Account & syncing ----------
+   Signing in is optional. Everything works without it; an account only
+   adds carrying your work between devices and, later, sharing. */
+function panelAccount(el) {
+  const C = window.CodexCloud;
+  if (!C || !C.configured()) {
+    el.innerHTML = `
+      <div class="rule-head"><span class="k">Account &amp; syncing</span><span class="hr"></span></div>
+      <p class="set-help">No cloud is connected, so everything you write stays in this browser and
+        nothing leaves this machine. That is the safest arrangement and needs no account.</p>
+      <p class="set-help">To carry your work between devices, connect a database and put its address
+        and public key into <code>site/js/cloud-config.js</code>. The steps are in
+        <code>supabase/README.md</code> in the repository.</p>`;
+    return;
+  }
+  const s = C.state();
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Account &amp; syncing</span><span class="hr"></span>
+      <span class="meta" id="syncBadge"></span></div>
+    <div id="accountBody"></div>`;
+  paint();
+  C.onChange(paint);
+
+  function paint() {
+    const st = C.state();
+    const badge = $("#syncBadge", el);
+    if (badge) badge.textContent = st.syncing ? "Syncing…" : st.pending ? st.pending + " waiting" : "";
+    const body = $("#accountBody", el);
+    if (!body) return;
+
+    if (!st.signedIn) {
+      body.innerHTML = `
+        <p class="set-help">Sign in to carry this workspace between devices. Your writing keeps living in
+          this browser either way — an account adds a copy on the server, it does not move it there.</p>
+        <div class="auth-form">
+          <input class="import-title" id="authEmail" type="email" placeholder="Email" autocomplete="email">
+          <input class="import-title" id="authPass" type="password" placeholder="Password" autocomplete="current-password">
+          <input class="import-title" id="authName" type="text" placeholder="What should we call you? (new accounts only)">
+          <div class="auth-btns">
+            <button class="btn" id="doSignIn">Sign in</button>
+            <button class="btn ghost" id="doSignUp">Create an account</button>
+            <button class="a-chip" id="doReset">Forgot password</button>
+          </div>
+          <div class="auth-msg" id="authMsg">${st.lastError ? esc(st.lastError) : ""}</div>
+        </div>`;
+      const msg = t => { const m = $("#authMsg", el); if (m) m.textContent = t; };
+      const creds = () => [$("#authEmail", el).value.trim(), $("#authPass", el).value];
+      $("#doSignIn", el).onclick = async () => {
+        const [e2, p] = creds();
+        if (!e2 || !p) return msg("Email and password, please.");
+        msg("Signing in…");
+        try { await C.signIn(e2, p); } catch (err) { msg(err.message || String(err)); }
+      };
+      $("#doSignUp", el).onclick = async () => {
+        const [e2, p] = creds();
+        if (!e2 || !p) return msg("Email and password, please.");
+        if (p.length < 8) return msg("Use at least eight characters.");
+        msg("Creating your account…");
+        try {
+          const r = await C.signUp(e2, p, $("#authName", el).value.trim());
+          msg(r.needsConfirmation
+            ? "Check your email for a confirmation link, then come back and sign in."
+            : "Welcome.");
+        } catch (err) { msg(err.message || String(err)); }
+      };
+      $("#doReset", el).onclick = async () => {
+        const [e2] = creds();
+        if (!e2) return msg("Type your email first.");
+        try { await C.resetPassword(e2); msg("Sent. Check your email."); }
+        catch (err) { msg(err.message || String(err)); }
+      };
+      return;
+    }
+
+    const last = st.lastSync ? new Date(st.lastSync).toLocaleString(undefined,
+      { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "not yet";
+    body.innerHTML = `
+      <div class="acct-row">
+        <span class="acct-who"><span class="acct-k">Signed in as</span>${esc(st.email)}</span>
+        <button class="btn ghost sm" id="doSignOut">Sign out</button>
+      </div>
+      <div class="sfx-row"><span class="sfx-label">Last synced<em>${esc(last)}${
+        st.pending ? ` · ${st.pending} change${st.pending === 1 ? "" : "s"} waiting to go up` : ""}</em></span>
+        <button class="btn sm" id="doSync" ${st.syncing ? "disabled" : ""}>${st.syncing ? "Syncing…" : "Sync now"}</button></div>
+      ${st.lastError ? `<p class="auth-msg">Last attempt failed: ${esc(st.lastError)}.</p>` : ""}
+      <div class="rule-head mt"><span class="k">First time on this device?</span><span class="hr"></span></div>
+      <p class="set-help">If this browser already holds work that isn't in your account yet, send it up once.
+        Afterwards everything syncs on its own.</p>
+      <button class="btn ghost sm" id="doUpload">Upload everything in this workspace</button>
+      <div class="rule-head mt"><span class="k">What this changes</span><span class="hr"></span></div>
+      <p class="set-help">Signed out, your writing cannot leave this browser. Signed in, a copy lives on
+        the server so your other devices can reach it — private to your account, but held under access
+        rules rather than by never existing anywhere else.</p>`;
+    $("#doSignOut", el).onclick = async () => { await C.signOut(); };
+    $("#doSync", el).onclick = () => C.sync({});
+    $("#doUpload", el).onclick = async () => {
+      if (!confirm("Send everything in this workspace up to your account?")) return;
+      try { await C.uploadEverything(); } catch (err) { toast(err.message || String(err)); }
+    };
   }
 }
 

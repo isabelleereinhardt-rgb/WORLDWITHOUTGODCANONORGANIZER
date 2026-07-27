@@ -1354,6 +1354,16 @@ a.otd-row:hover{color:var(--blush)}
 .diff-note{margin-top:9px;font-size:12.5px}
 @media(max-width:900px){.hist-grid{grid-template-columns:1fr}.rev-list{position:static;max-height:none}}
 
+/* ---------- account & syncing ---------- */
+.auth-form{max-width:380px;display:flex;flex-direction:column;gap:9px;margin-top:6px}
+.auth-form .import-title{margin-bottom:0;font-family:var(--sans);font-style:normal;font-size:15px}
+.auth-btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.auth-msg{font-size:13.5px;color:var(--blush);line-height:1.45;min-height:1.2em;margin-top:4px}
+.acct-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.acct-who{flex:1;min-width:0;font-size:15px;color:var(--ink)}
+.acct-k{display:block;font-family:var(--serif);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--gold);margin-bottom:2px}
+
 /* ---------- toast: bottom-right, gold-framed, ✦ glyph, manual ✕ ---------- */
 .toast-stack{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;
   gap:8px;align-items:flex-end;pointer-events:none}
