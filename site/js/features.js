@@ -1,5 +1,5 @@
 /* ============================================================
-   World Without God — Canon Organizer
+   World Without God; Canon Organizer
    Extra features: Settings (theme colour + fonts), Task manager,
    soft-delete + custom sections data layer, and speech (read-aloud
    + dictation). Kept in one module to stay tidy.
@@ -12,12 +12,13 @@ const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const view = () => $("#view");
 const uid = (p) => (p || "x") + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const S = () => window.CodexStore;
+const acctKey = (base) => window.CodexAccount ? CodexAccount.storeKey(base) : base;
 
 /* ============================================================
-   SETTINGS data — fonts + typography (defined before Extra, since
+   SETTINGS data; fonts + typography (defined before Extra, since
    Extra's initial value calls defaultSettings() immediately)
    ============================================================ */
-/* the full font library — loaded via the Google Fonts link in index.html,
+/* the full font library; loaded via the Google Fonts link in index.html,
    plus a few system fonts that need no loading at all */
 const FONT_LIST = [
   "Fraunces", "Inter", "Lora", "Cormorant Garamond", "Cormorant", "Playfair Display", "EB Garamond",
@@ -72,7 +73,7 @@ const Extra = {
     this.cats = (await S().all("cats")).sort((a, b) => (a.created || 0) - (b.created || 0));
     const x = await S().all("excludedNames"); this.excludedNames = new Set(x.map(r => r.id));
     const hc = await S().all("hiddenCats"); this.hiddenCats = new Set(hc.map(r => r.id));
-    const saved = localStorage.getItem("codex.settings");
+    const saved = localStorage.getItem(acctKey("codex.settings"));
     if (saved) { try { this.settings = Object.assign(defaultSettings(), JSON.parse(saved)); } catch (e) {} }
     applySettings(this.settings);
   },
@@ -96,7 +97,7 @@ async function logFeed(action, detail) {
 window.CodexFeed = { log: logFeed };
 
 /* ============================================================
-   SETTINGS  — theme colour, fonts, restore deleted
+   SETTINGS; theme colour, fonts, restore deleted
    ============================================================ */
 function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
@@ -154,7 +155,7 @@ function applySettings(s) {
 
 /* inject one <style> block covering every Title/Heading/Caption style, so
    the same look applies both in the document editor and in the rendered
-   reading view — this is what makes "pick Georgia for Heading 1 in Settings"
+   reading view; this is what makes "pick Georgia for Heading 1 in Settings"
    actually show up when you type a Heading 1 in a document. */
 function applyTypography(typo) {
   let styleEl = document.getElementById("typographyStyle");
@@ -171,7 +172,7 @@ function applyTypography(typo) {
   }).join("\n");
   styleEl.textContent = css;
 }
-function saveSettings() { localStorage.setItem("codex.settings", JSON.stringify(Extra.settings)); applySettings(Extra.settings); }
+function saveSettings() { localStorage.setItem(acctKey("codex.settings"), JSON.stringify(Extra.settings)); applySettings(Extra.settings); }
 
 function viewSettings() {
   const s = Extra.settings;
@@ -180,14 +181,28 @@ function viewSettings() {
   const inkSwatches = ["#2c2a26", "#111111", "#5b3fd6", "#3f6f8f", "#3f8f6b", "#b8893b", "#c2603f", "#8a3f6f", "#e8e3d8"];
   const hiddenCount = Extra.hidden.size;
   const excludedCount = Extra.excludedNames.size;
+  const acct = window.CodexAccount ? CodexAccount.current() : null;
   view().innerHTML = `<div class="wrap">
     <div class="page-kicker">Settings</div>
     <h1>Settings</h1>
     <p class="muted">Make it yours. Changes apply instantly and are remembered on this device.</p>
 
+    ${acct ? `<section class="set-block">
+      <h3>Account</h3>
+      <p class="faint" style="margin:2px 0 10px">Signed in as <b>${esc(acct.name)}</b>${acct.email ? ` (${esc(acct.email)})` : ""}${acct.guest ? " as a guest" : ""}.
+        Your account and everything you write live on this device, in this browser; use <b>Back up my work</b> in the sidebar for a portable copy.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost sm" id="acctSignOut">Sign out</button>
+        <button class="btn ghost sm" id="acctTplDownload" title="Turn this workspace into the template every NEW account starts from">Download as new-user template</button>
+      </div>
+      <p class="faint" style="font-size:12px;margin:8px 0 0">The template download turns the workspace you're in right now into a
+        <b>template.js</b> file. Replace <b>site/data/template.js</b> in the project with it and every new account will start
+        from a copy of this workspace.</p>
+    </section>` : ""}
+
     <section class="set-block">
       <h3>Accent colour</h3>
-      <p class="faint" style="margin:2px 0 12px">Pick any colour — the whole site follows it. Light and dark mode both still work.</p>
+      <p class="faint" style="margin:2px 0 12px">Pick any colour; the whole site follows it. Light and dark mode both still work.</p>
       <div class="swatch-row">
         ${swatches.map(c => `<button class="swatch" style="background:${c}" data-accent="${c}" title="${c}"></button>`).join("")}
         <label class="swatch wheel" title="Custom colour"><input type="color" id="accentPicker" value="${s.accent || "#7c5cff"}"></label>
@@ -197,7 +212,7 @@ function viewSettings() {
 
     <section class="set-block">
       <h3>Background colour</h3>
-      <p class="faint" style="margin:2px 0 12px">Not feeling black-and-white or the usual light/dark? Pick any background —
+      <p class="faint" style="margin:2px 0 12px">Not feeling black-and-white or the usual light/dark? Pick any background;
         text colour adjusts automatically to stay readable on it.</p>
       <div class="swatch-row">
         ${bgSwatches.map(c => `<button class="swatch" style="background:${c}" data-bg="${c}" title="${c}"></button>`).join("")}
@@ -224,7 +239,7 @@ function viewSettings() {
 
     <section class="set-block">
       <h3>Interface text colour</h3>
-      <p class="faint" style="margin:2px 0 12px">The colour of the words across the interface — menus, labels, buttons, and reading text.
+      <p class="faint" style="margin:2px 0 12px">The colour of the words across the interface; menus, labels, buttons, and reading text.
         Pick any colour, or leave it <b>Automatic</b> and it follows your background so it always stays readable.</p>
       <div class="swatch-row">
         ${inkSwatches.map(c => `<button class="swatch" style="background:${c}" data-ink="${c}" title="${c}"></button>`).join("")}
@@ -234,10 +249,10 @@ function viewSettings() {
     </section>
 
     <section class="set-block">
-      <h3>Typography — every text style</h3>
-      <p class="faint" style="margin:2px 0 12px">Font, size, and colour for each style, independently — mix and match
+      <h3>Typography; every text style</h3>
+      <p class="faint" style="margin:2px 0 12px">Font, size, and colour for each style, independently; mix and match
         (Georgia for Heading 1, Lora for body, whatever you want). These are exactly the styles you can pick when
-        writing in a Document — write a Heading 1 there and it looks like this.</p>
+        writing in a Document; write a Heading 1 there and it looks like this.</p>
       <div class="typo-table">
         <div class="typo-head"><span>Style</span><span>Font</span><span>Size</span><span>Colour</span><span>Preview</span></div>
         ${TYPO_STYLES.map(st => {
@@ -257,18 +272,18 @@ function viewSettings() {
     <section class="set-block">
       <h3>Your custom Canon sections</h3>
       <p class="faint" style="margin:2px 0 10px">Sections you've added under "The Canon" with the <b>+</b> button. Delete one here, from the section's
-        own page, or with the ✕ next to it in the sidebar — any notes filed there move to "My Notes" first, nothing is destroyed.</p>
+        own page, or with the ✕ next to it in the sidebar; any notes filed there move to "My Notes" first, nothing is destroyed.</p>
       ${Extra.cats.length ? `<div class="section-mgr-list">${Extra.cats.map(c => `
         <div class="section-mgr-row">
           <span>${esc(c.name)}</span>
           <button class="btn ghost sm" data-delsection="${esc(c.name)}" style="color:var(--danger)">Delete</button>
-        </div>`).join("")}</div>` : `<p class="faint">You haven't added any custom sections yet — use the <b>+</b> next to "The Canon" in the sidebar.</p>`}
+        </div>`).join("")}</div>` : `<p class="faint">You haven't added any custom sections yet; use the <b>+</b> next to "The Canon" in the sidebar.</p>`}
     </section>
 
     <section class="set-block">
       <h3>Hidden Canon sections</h3>
       <p class="faint" style="margin:2px 0 10px">Built-in sections (Characters, Noble Houses, etc.) you've hidden from the sidebar with the ✕ or
-        "Hide section" button. Their entries were never touched — restore any of them here.</p>
+        "Hide section" button. Their entries were never touched; restore any of them here.</p>
       ${Extra.hiddenCats.size ? `<div class="section-mgr-list">${Array.from(Extra.hiddenCats).map(name => `
         <div class="section-mgr-row">
           <span>${esc(name)}</span>
@@ -278,23 +293,23 @@ function viewSettings() {
 
     <section class="set-block">
       <h3>Deleted entries</h3>
-      <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed — restore it here.</p>
+      <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed; restore it here.</p>
       ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
         <div class="hidden-list" id="hiddenList"></div>` : `<p class="faint">Nothing deleted.</p>`}
     </section>
 
     <section class="set-block">
       <h3>Removed from Name Index</h3>
-      <p class="faint" style="margin:2px 0 10px">Names you've removed from the Name Index stop being cross-linked in your text, but nothing about them is deleted — restore any of them here.</p>
+      <p class="faint" style="margin:2px 0 10px">Names you've removed from the Name Index stop being cross-linked in your text, but nothing about them is deleted; restore any of them here.</p>
       ${excludedCount ? `<button class="btn ghost sm" id="restoreNamesAll">Restore all ${excludedCount} name${excludedCount === 1 ? "" : "s"}</button>
         <div class="recog" style="margin-top:10px">${Array.from(Extra.excludedNames).map(n => `<span class="chip" data-restorename="${esc(n)}" style="cursor:pointer">${esc(n)} ✕</span>`).join("")}</div>`
         : `<p class="faint">Nothing removed.</p>`}
     </section>
 
     <section class="set-block">
-      <h3>Assistant — connect AI <span class="ai-conn-badge" id="aiConnBadge">Not connected</span></h3>
+      <h3>Assistant; connect AI <span class="ai-conn-badge" id="aiConnBadge">Not connected</span></h3>
       <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste an API key below, then in the ✦ Assistant type a
-        question and press <b>Enter</b> for a written answer — reasoned, but grounded <b>only</b> in your own canon,
+        question and press <b>Enter</b> for a written answer; reasoned, but grounded <b>only</b> in your own canon,
         never invented. Your key is stored <b>only in this browser</b>, is never uploaded, and is deliberately kept
         out of your backups. Each provider keeps its own key, so switching between them never loses any of the others.</p>
       <div class="set-row">
@@ -314,8 +329,8 @@ function viewSettings() {
         <div class="set-row">
           <label>Model</label>
           <select id="aiModel">
-            <option value="gemini-flash-latest">Gemini Flash (latest) — fast, free tier, recommended</option>
-            <option value="gemini-pro-latest">Gemini Pro (latest) — most capable, needs Google billing enabled (no free tier)</option>
+            <option value="gemini-flash-latest">Gemini Flash (latest); fast, free tier, recommended</option>
+            <option value="gemini-pro-latest">Gemini Pro (latest); most capable, needs Google billing enabled (no free tier)</option>
           </select>
         </div>
         <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -330,11 +345,11 @@ function viewSettings() {
         <div class="set-row">
           <label>Model</label>
           <select id="dsModel">
-            <option value="deepseek-v4-flash">DeepSeek V4 Flash — fast &amp; cheap, recommended</option>
-            <option value="deepseek-v4-pro">DeepSeek V4 Pro — more capable, costs more</option>
+            <option value="deepseek-v4-flash">DeepSeek V4 Flash; fast &amp; cheap, recommended</option>
+            <option value="deepseek-v4-pro">DeepSeek V4 Pro; more capable, costs more</option>
           </select>
         </div>
-        <p class="faint" style="margin:2px 0">DeepSeek is <b>pay-as-you-go, not free</b> — you'll need a small balance on your account for it to answer.</p>
+        <p class="faint" style="margin:2px 0">DeepSeek is <b>pay-as-you-go, not free</b>; you'll need a small balance on your account for it to answer.</p>
         <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <a class="btn ghost sm" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Get a key →</a>
           <a class="btn ghost sm" href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">Add balance →</a>
@@ -382,6 +397,9 @@ function viewSettings() {
       <div style="margin-top:8px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>
     </section>
   </div>`;
+
+  if ($("#acctSignOut")) $("#acctSignOut").onclick = () => window.CodexAccount && CodexAccount.signOut();
+  if ($("#acctTplDownload")) $("#acctTplDownload").onclick = downloadTemplate;
 
   $$(".swatch[data-accent]").forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker").oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
@@ -449,7 +467,7 @@ function viewSettings() {
     });
     dsModelEl.onchange = () => localStorage.setItem("codex.deepseekModel", dsModelEl.value);
 
-    /* Groq and xAI model names shift over time — "Refresh models" pulls the
+    /* Groq and xAI model names shift over time; "Refresh models" pulls the
        account's real, currently-working list straight from each provider
        rather than trusting a hardcoded guess that can go stale. */
     async function refreshModelList(provider, keyEl, modelEl, hintEl, storeKey) {
@@ -529,7 +547,36 @@ function viewSettings() {
 }
 
 /* ============================================================
-   TASK MANAGER  — a real-time to-do list
+   NEW-USER TEMPLATE EXPORT
+   Serializes the CURRENT workspace into a data/template.js file.
+   Drop the download into site/data/ (replacing template.js) and
+   every account created after that starts from a copy of it.
+   ============================================================ */
+const TEMPLATE_STORES = ["folders", "cats", "docs", "notes", "tasks", "stories", "timeline", "decks", "canvases", "sheets", "mindmaps"];
+async function downloadTemplate() {
+  await S().ready;
+  const stores = {};
+  let count = 0;
+  for (const st of TEMPLATE_STORES) {
+    const rows = await S().all(st);
+    if (rows.length) { stores[st] = rows; count += rows.length; }
+  }
+  if (!count) { toast("This workspace is empty; nothing to turn into a template yet"); return; }
+  const wsName = window.CodexWorkspaces ? CodexWorkspaces.current().name : "Starter workspace";
+  const file = "/* Starter template; replicated into every NEW account's own workspace\n" +
+    "   on first sign-in. Generated from the workspace \"" + wsName.replace(/\*\//g, "") + "\".\n" +
+    "   To ship it: replace site/data/template.js with this file. */\n" +
+    "window.CODEX_TEMPLATE = " + JSON.stringify({ name: wsName, stores }, null, 2) + ";\n";
+  const blob = new Blob([file], { type: "text/javascript" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "template.js";
+  a.click();
+  toast("Template downloaded: " + count + " items. Replace site/data/template.js with it.");
+}
+
+/* ============================================================
+   TASK MANAGER; a real-time to-do list
    ============================================================ */
 async function viewTasks() {
   await S().ready;
@@ -538,7 +585,7 @@ async function viewTasks() {
   view().innerHTML = `<div class="wrap">
     <div class="page-kicker">Workspace</div>
     <h1>Task Manager</h1>
-    <p class="muted">${open} open · ${tasks.length} total. Cross things off as you go — it saves as you type.</p>
+    <p class="muted">${open} open · ${tasks.length} total. Cross things off as you go; it saves as you type.</p>
     <div class="task-add"><input id="taskInput" placeholder="Add a task and press Enter…" autocomplete="off">
       <button class="btn" id="taskAddBtn">Add</button></div>
     <div class="task-list" id="taskList">
@@ -588,9 +635,9 @@ async function viewFeed() {
 }
 
 /* ============================================================
-   SPEECH  — read-aloud (TTS) + dictation (STT)
+   SPEECH ; read-aloud (TTS) + dictation (STT)
    A small fixed mini-player appears whenever something is being
-   read, with Pause/Resume and Stop — and reading always stops the
+   read, with Pause/Resume and Stop; and reading always stops the
    moment you navigate to a different page, so it never keeps
    talking about a section you've left.
 
@@ -598,7 +645,7 @@ async function viewFeed() {
    spoken as a queue of short utterances, rather than one giant
    utterance. Chrome has a long-standing bug where a single long
    SpeechSynthesisUtterance silently stalls after roughly 15s, after
-   which pause()/resume() stop responding — exactly what "can't
+   which pause()/resume() stop responding; exactly what "can't
    pause it" on long entries looks like. Short chunks keep every
    utterance well under that window, and a periodic pause+resume
    "nudge" while reading works around the same Chrome bug for
@@ -637,7 +684,7 @@ const Speech = {
     if (!("speechSynthesis" in window)) { toast("Speech not supported here"); return; }
     speechSynthesis.cancel();
     this._queue = chunkForSpeech(text);
-    if (!this._queue.length) { toast("Nothing to read — select some text first, or open an entry."); return; }
+    if (!this._queue.length) { toast("Nothing to read; select some text first, or open an entry."); return; }
     this._idx = 0;
     this.reading = true; this.paused = false;
     showPlayer();
@@ -711,7 +758,7 @@ function updatePlayer() {
 }
 function hidePlayer() { const el = document.getElementById("speechPlayer"); if (el) el.hidden = true; }
 
-/* stop reading the instant you navigate away — nothing should keep
+/* stop reading the instant you navigate away; nothing should keep
    talking about a page you've already left */
 window.addEventListener("hashchange", () => { if (Speech.reading) Speech.stop(); });
 
