@@ -2234,3 +2234,76 @@ a.a-chip{text-decoration:none;display:inline-block}
 .read-ch h1,.read-ch h2,.read-ch h3,.read-ch h4{font-family:var(--serif);margin:22px 0 10px}
 .read-ch pre,.read-ch code{font-size:13px;background:var(--panel2);padding:2px 5px;border-radius:2px}
 .read-ch pre{padding:10px 12px;overflow-x:auto}
+
+/* ============================================================
+   THE ASSISTANT'S BRAIN; styles for the expanded rail
+   The idle greeting, the persona's voice line, comparisons,
+   evidence rows, the capability tour, canon statistics, and the
+   markdown a connected model writes in.
+   ============================================================ */
+
+/* the idle greeting and the voice the persona speaks in */
+.a-greet{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.a-greet .ag-hi{font-family:var(--serif);font-style:italic;font-size:21px;color:var(--ink)}
+.a-voice{font-family:var(--serif);font-style:italic;font-size:14px;color:var(--blush);
+  line-height:1.5;margin:2px 0 8px}
+.a-voice.inline{display:inline;margin:0;font-size:13.5px}
+
+/* "I read X as Y"; the typo note above a guessed answer */
+.dym{font-size:12px;color:var(--ink-faint);margin-bottom:7px;font-style:italic}
+.dym b{color:var(--ink-soft)}
+
+/* evidence rows: a quoted sentence with the entry it came from */
+.ev-row{padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;line-height:1.5}
+.ev-row:last-child{border-bottom:none}
+.ev-row .ev-q{color:var(--ink)}
+.ev-src{display:inline-block;margin-left:6px;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--gold);text-decoration:none;white-space:nowrap}
+.ev-src:hover{color:var(--blush)}
+
+/* two names side by side */
+.cmp-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.cmp-table th{font-family:var(--serif);font-style:italic;font-size:14.5px;font-weight:400;
+  color:var(--ink);text-align:left;padding:5px 8px;border-bottom:1px solid var(--line-strong)}
+.cmp-table td{padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-soft)}
+.cmp-table td:first-child{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-faint);white-space:nowrap;padding-top:7px}
+.cmp-sum{font-size:13.5px;line-height:1.55;color:var(--ink-soft);margin-top:9px}
+.cmp-sum b{color:var(--ink)}
+
+/* the capability tour; also the /help answer */
+.cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
+.cap-card{border:1px solid var(--line);background:var(--panel2);border-radius:2px;padding:9px 11px}
+.cap-card.open{cursor:pointer}
+.cap-card.open:hover{border-color:var(--blush)}
+.cap-card .ck{font-family:var(--serif);font-style:italic;font-size:14.5px;color:var(--ink)}
+.cap-card .cv{font-size:11.5px;color:var(--ink-soft);line-height:1.45;margin-top:3px}
+@media (max-width:1200px){.cap-grid{grid-template-columns:1fr}}
+
+/* canon statistics tiles */
+.stat-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:8px 0 12px}
+.stat-tiles>div{border:1px solid var(--line);background:var(--panel2);border-radius:2px;
+  padding:9px 6px;text-align:center}
+.stat-tiles b{display:block;font-family:var(--serif);font-size:19px;font-weight:400;color:var(--ink)}
+.stat-tiles span{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-faint)}
+
+/* the writing spark on a random pull */
+.spark-line{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);
+  font-family:var(--serif);font-style:italic;font-size:14px;color:var(--gold);line-height:1.5}
+
+/* the "thinking" dots while a model reads */
+.a-dots i{display:inline-block;font-style:normal;animation:adots 1.2s infinite}
+.a-dots i:nth-child(2){animation-delay:.2s}
+.a-dots i:nth-child(3){animation-delay:.4s}
+@keyframes adots{0%,60%,100%{opacity:.2}30%{opacity:1}}
+[data-motion="calm"] .a-dots i{animation:none;opacity:.6}
+
+/* the markdown a model answers in */
+.am-text ul,.am-text ol{margin:4px 0 10px;padding-left:22px}
+.am-text li{margin:3px 0;line-height:1.55}
+.am-text .md-h{font-family:var(--serif);font-style:italic;font-size:15.5px;font-weight:400;
+  color:var(--ink);margin:12px 0 5px}
+.am-text code{font-size:13px;background:var(--panel2);padding:1px 5px;border-radius:2px}
+.am-text blockquote{border-left:2px solid var(--gold);margin:10px 0;padding:2px 0 2px 12px;
+  font-style:italic;color:var(--ink-soft)}
+.am-text strong{color:var(--ink)}

@@ -737,12 +737,29 @@ function panelAssistant(el) {
         the entries you wrote, finds the passages that match, and answers from them; which is why it
         cannot tell you a fact it has not read.</p>`}
 
+    <div class="rule-head mt"><span class="k">Voice &amp; opinions</span><span class="hr"></span></div>
+    <div class="sfx-row"><span class="sfx-label">Answer in ${esc(window.CodexLucky ? CodexLucky.name() : "Lucky")}'s personality
+      <em>The “${esc(window.CodexLucky ? CodexLucky.persona().name : "Sweetheart")}” voice colours greetings, opinions
+      and phrasing; on this device and through a model alike. Facts stay grounded either way; off means plain answers.</em></span>
+      <button class="switch${s.aiVoice !== false ? " on" : ""}" id="aiVoiceSwitch" role="switch"
+        aria-checked="${s.aiVoice !== false}"><span></span></button></div>
+
     <div class="rule-head mt"><span class="k">Standing instructions</span><span class="hr"></span></div>
-    <p class="faint set-help">Extra guidance on how it should read and answer. Used by both ways of answering.</p>
+    <p class="faint set-help">Extra guidance on how answers should read. Carried with every request when a
+      model is connected.</p>
     <textarea class="import-body" id="aiInstr" placeholder="e.g. Prefer my own terminology. When I ask who someone is, give a short blurb in my voice, not a raw quote.">${esc(s.aiInstr || "")}</textarea>
     <div style="margin-top:10px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>`;
 
   $("#saveAiInstr", el).onclick = () => { Extra.settings.aiInstr = $("#aiInstr", el).value; saveSettings(); toast("Saved"); };
+  $("#aiVoiceSwitch", el).onclick = () => {
+    const next = Extra.settings.aiVoice === false;   // false -> on, anything else -> off
+    Extra.settings.aiVoice = next ? true : false;
+    saveSettings();
+    const b = $("#aiVoiceSwitch", el);
+    b.classList.toggle("on", next);
+    b.setAttribute("aria-checked", String(next));
+    toast(next ? "Personality on" : "Plain answers from now on");
+  };
   if (!AI) return;
 
   $$("[data-aimode]", el).forEach(b => b.onclick = () => {

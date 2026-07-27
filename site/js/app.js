@@ -1372,11 +1372,14 @@ function trimToWords(seg, cutHead, cutTail) {
 }
 /* Search reaches everything; the assistant only reads what you let it.
    Passing forAssistant=true honours the "Let the assistant read it"
-   switch set when the entry was imported. */
-function searchAll(q, forAssistant) {
+   switch set when the entry was imported; scope="canon" additionally
+   keeps to the built-in collections, which is what the rail's scope
+   chip promises when it says "Canon only". */
+function searchAll(q, forAssistant, scope) {
   q = q.trim().toLowerCase(); if (!q) return [];
   const terms = q.split(/\s+/); const res = [];
-  const pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
+  let pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
+  if (forAssistant && scope === "canon") pool = pool.filter(e => CANON_ORDER.includes(e.category));
   for (const e of pool) {
     const hay = e._hay, title = e.title.toLowerCase(); let score = 0;
     for (const t of terms) {
@@ -1543,7 +1546,7 @@ function firstSentenceWith(text, name) {
 
 /* answer a free-text question by synthesizing across passages */
 function assistantAnswer(q) {
-  const results = searchAll(q, true);
+  const results = searchAll(q, true, rail.scope);
   if (!results.length) return `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.</div>`;
   const overview = queryOverviewHtml(q, results);
   const sources = results.slice(0, 6).map(e =>
@@ -1694,33 +1697,48 @@ function assistantLookup(q, structured) {
   q = (q || "").trim();
   if (!q) { if (!structured) assistantIdle(); return null; }
   assistantHistory.push(q);
+  // "what about her sister?" leans on the last subject; the brain swaps
+  // pronouns and ellipses for real names before anything tries to match
+  if (window.CodexBrain) q = CodexBrain.resolve(q);
 
-  let html = null;
+  let html = null, brain = null, named = null;
   // reports first: they are explicit commands, so they should win over a
   // name that happens to look similar
   const rep = tryReport(q); if (rep) html = rep;
+  // then the brain: comparisons, connections, dates, opinions, memory,
+  // small talk; each shape of question answered as that shape
+  if (!html && window.CodexBrain) {
+    brain = CodexBrain.answer(q, { scope: rail.scope, length: rail.length });
+    if (brain) html = brain.html;
+  }
   if (!html) { const sum = trySummarizeDoc(q); if (sum) html = sum; }
   if (!html) { const con = tryConsistency(q); if (con) html = con; }
   if (!html) { const cmd = tryCommand(q); if (cmd) html = cmd; }
   if (!html) { const op = tryOpinion(q); if (op) html = op; }
   if (!html) {
-    const named = matchNamedSubject(q, true) || partialEntity(q, true);
+    named = matchNamedSubject(q, true) || partialEntity(q, true);
     if (named) html = blurbCard(named);
   }
   if (!html && q.split(/\s+/).length >= 2) html = assistantAnswer(q);
-  if (!html && searchAll(q, true).length) html = assistantAnswer(q);
+  if (!html && searchAll(q, true, rail.scope).length) html = assistantAnswer(q);
   if (!html) {
-    html = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
+    html = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>
+      Try a character, house, place, or a question; or teach me with <b>remember: [a fact]</b>.</div>`;
   }
+  // whatever answered, the brain's memory follows the conversation
+  if (window.CodexBrain) CodexBrain.observe(q, named || (brain && brain.subject) || null);
 
   if (!structured) { body.innerHTML = html; bindAssistantLinks(body); return null; }
 
-  const hits = searchAll(q, true);
+  // a brain answer knows exactly which entries it used; everything else
+  // falls back to what retrieval found for the question
+  const hits = (brain && brain.sources && brain.sources.length)
+    ? brain.sources : searchAll(q, true, rail.scope);
   const sources = hits.slice(0, rail.length === "brief" ? 3 : 6);
-  const grounded = hits.length
+  const grounded = (brain && brain.grounded) || (hits.length
     ? `Grounded in ${hits.length} of your own ${hits.length === 1 ? "entry" : "entries"} · nothing invented`
-    : `No matching entries · nothing invented`;
-  return { html, sources, grounded, follows: followUpsFor(q, hits) };
+    : `No matching entries · nothing invented`);
+  return { html, sources, grounded, follows: followUpsFor(q, hits), asked: q };
 }
 function partialEntity(q, forAssistant) {
   const ql = q.toLowerCase();
@@ -1729,24 +1747,35 @@ function partialEntity(q, forAssistant) {
   return m || null;
 }
 const QUICK_ACTIONS = [
+  { label: "What can you do?", q: "what can you do" },
   { label: "List characters", q: "list all characters" },
-  { label: "List noble houses", q: "list all houses" },
-  { label: "Favourite house", q: "favourite house" },
+  { label: "Canon stats", q: "stats" },
   { label: "Check consistency", q: "check consistency" },
-  { label: "Summarize this document", q: "summarize this document" },
+  { label: "Surprise me", q: "surprise me" },
 ];
 
 /* The slash commands the rail advertises. Each maps onto a phrasing
-   the parser above already understands, so the menu is a shortcut to
-   real behaviour rather than a second, parallel language. */
+   the parser above (or the brain) already understands, so the menu is a
+   shortcut to real behaviour rather than a second, parallel language. */
 const COMMANDS = [
+  { cmd: "/help", what: "Everything I can do, in one card", q: "what can you do" },
   { cmd: "/consistency", what: "Flag facts that disagree across entries", q: "check consistency" },
   { cmd: "/summarize", what: "Brief on this entry or open document", q: "summarize this document" },
+  { cmd: "/compare", what: "Two names side by side; facts and shared scenes", q: "compare ", open: true },
+  { cmd: "/relation", what: "How two names connect, sentence by sentence", q: "relationship between ", open: true },
+  { cmd: "/timeline", what: "Dated events for a subject, in order", q: "timeline of ", open: true },
+  { cmd: "/facts", what: "The declared Key: Value facts for a name", q: "facts ", open: true },
+  { cmd: "/define", what: "Look a term up in your lexicon", q: "define ", open: true },
+  { cmd: "/remember", what: "Teach me a fact; it becomes a note in your canon", q: "remember: ", open: true },
+  { cmd: "/memories", what: "Everything you have taught me so far", q: "what do you remember" },
+  { cmd: "/opinion", what: "My honest take on a name, with the numbers", q: "what do you think of ", open: true },
   { cmd: "/who", what: "Everyone who appears in a subject", q: "who appears in ", open: true },
   { cmd: "/list", what: "Live list; characters in a place, houses, dates", q: "list all ", open: true },
   { cmd: "/namecheck", what: "Is this name already used?", q: "namecheck ", open: true },
   { cmd: "/whereis", what: "Every entry that mentions a name", q: "whereis ", open: true },
   { cmd: "/describe", what: "A blurb on any name in your canon", q: "describe ", open: true },
+  { cmd: "/stats", what: "The shape of your canon, in numbers", q: "stats" },
+  { cmd: "/random", what: "A random entry and a spark to write from", q: "surprise me" },
   { cmd: "/orphans", what: "Entries nothing else refers to", q: "orphans" },
   { cmd: "/unused", what: "Names indexed but used only once", q: "unused names" },
   { cmd: "/longest", what: "Your biggest entries, by words", q: "longest entries" },
@@ -1760,7 +1789,10 @@ const COMMANDS = [
    are the questions a writer asks about the shape of a canon rather than
    its contents: what is dangling, what did I only use once, where has
    the weight gone. */
-const REPORT_TRIGGER = /^\s*(whereis|where is|describe|orphans?|unused names?|unused|longest( entries)?|recent( entries)?|wordcount|word count)\b/i;
+/* "where is X" is deliberately NOT here any more: asked naturally it now
+   goes to the brain, which answers with the sentences that place X
+   somewhere; the /whereis command still lists every mentioning entry. */
+const REPORT_TRIGGER = /^\s*(whereis|describe|orphans?|unused names?|unused|longest( entries)?|recent( entries)?|wordcount|word count)\b/i;
 
 function tryReport(q) {
   const m = REPORT_TRIGGER.exec(q);
@@ -1774,7 +1806,7 @@ function tryReport(q) {
   const rows = list => list.map(r => `<div class="glance-row"><span class="gk">${esc(r.k)}</span>
     <span class="gv">${esc(r.v)}</span></div>`).join("");
 
-  if (head === "whereis" || head === "where is") {
+  if (head === "whereis") {
     if (!arg) return `<div class="assistant-hint">Give me a name: <b>/whereis Enyokia</b>.</div>`;
     const hits = mentionsOf(arg, null, true);
     if (!hits.length) return `<div class="assistant-hint">Nothing mentions “${esc(arg)}” yet.</div>`;
@@ -1836,15 +1868,21 @@ function tryReport(q) {
   return null;
 }
 
-/* ---------- the rail's own state ---------- */
-const rail = { scope: "canon", length: "brief", turns: 0 };
+/* ---------- the rail's own state ----------
+   scope defaults to "everything" because that is what the assistant has
+   always actually read (notes included); the chip now tells the truth
+   AND works. chat is the running transcript handed to a connected
+   model, so follow-up questions carry their context. */
+const rail = { scope: "everything", length: "brief", turns: 0, chat: [] };
 
 function assistantIdle() {
   const hist = assistantHistory.list();
   $("#assistantBody").innerHTML = `
+    ${window.CodexBrain ? CodexBrain.greetingHtml() : ""}
     <div class="assistant-hint">
-      I answer from your own entries and nothing else. Look up a name, ask a question in plain
-      words, give me a task, or type <b>/</b> for commands.
+      I answer from your own entries and nothing else. Look up a name, ask in plain words, compare
+      two names, trace a connection, ask my opinion; or teach me something new with
+      <b>remember: [a fact]</b>. Type <b>/</b> for every command.
     </div>
     <div class="a-sect">
       <div class="a-sect-k">Try one</div>
@@ -1881,6 +1919,12 @@ function bindAssistantChips(root) {
   $$("[data-quick]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.quick));
   $$("[data-recent]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.recent));
   $$("[data-follow]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.follow));
+  // capability cards prime the input with a phrasing to finish, the same
+  // way an "open" slash command does
+  $$("[data-prime]", root).forEach(c => c.onclick = () => {
+    const input = $("#assistantInput");
+    if (input) { input.value = c.dataset.prime; input.focus(); }
+  });
 }
 
 /* ---------- one question, one answer, appended as a turn ---------- */
@@ -1923,11 +1967,28 @@ function askAssistant(q) {
   bindAnswerActions(turn);
   turn.scrollIntoView({ block: "start", behavior: "smooth" });
 
+  // the transcript a connected model sees; the resolved question, so
+  // "what about her?" arrives as the name it meant
+  rail.chat.push({ role: "user", content: answer.asked || q });
+  if (rail.chat.length > 20) rail.chat.splice(0, rail.chat.length - 20);
+
   // With a model connected, the on-device answer above is shown at once
   // and then reasoned over: same retrieval, same citations, better prose.
   // The local answer is never thrown away, so a failure downgrades
   // instead of breaking.
-  if (window.CodexAI && CodexAI.on()) enrichWithModel(turn, q, answer);
+  if (window.CodexAI && CodexAI.on()) enrichWithModel(turn, answer.asked || q, answer);
+  else rail.chat.push({ role: "assistant", content: turnPlainText(turn) });
+}
+
+/* the answer as plain text, for the transcript a model receives later;
+   status chrome (the model header, the action buttons) is stripped so
+   the transcript reads as an answer, not a screenshot of the UI */
+function turnPlainText(turn) {
+  const them = turn.querySelector(".a-them");
+  if (!them) return "";
+  const copy = them.cloneNode(true);
+  copy.querySelectorAll(".a-model, .a-actions, .a-ground").forEach(el => el.remove());
+  return (copy.innerText || "").replace(/\s+/g, " ").trim().slice(0, 800);
 }
 
 /* ---------- the model pass ---------- */
@@ -1938,25 +1999,32 @@ async function enrichWithModel(turn, q, local) {
   pending.className = "a-model pending";
   pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
     <span class="am-who">${esc(CodexAI.label())}</span>
-    <span class="am-state">reading your entries…</span></div>`;
+    <span class="am-state">reading your entries<span class="a-dots"><i>.</i><i>.</i><i>.</i></span></span></div>`;
   them.insertBefore(pending, them.querySelector(".a-actions"));
 
-  const r = await CodexAI.ask(q, local.sources || []);
+  // history stops just before the question that was pushed in askAssistant
+  const r = await CodexAI.ask(q, local.sources || [],
+    { history: rail.chat.slice(0, -1), length: rail.length });
   if (!turn.isConnected) return;                  // thread was cleared mid-flight
 
   if (!r.ok) {
+    // the transcript keeps the device answer, read before the failure
+    // notice lands in the turn and muddies the text
+    rail.chat.push({ role: "assistant", content: turnPlainText(turn) });
     pending.className = "a-model failed";
     pending.innerHTML = `<div class="am-head"><span class="am-glyph">✧</span>
       <span class="am-who">${esc(CodexAI.label())} could not answer</span></div>
       <div class="am-why">${esc(r.why)} The answer above was worked out on this device instead.</div>`;
     return;
   }
+  rail.chat.push({ role: "assistant", content: String(r.text).slice(0, 2000) });
   pending.className = "a-model";
   pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
     <span class="am-who">${esc(r.model || CodexAI.label())}</span>
     <span class="am-state">from ${r.sent} of your entries</span></div>
-    <div class="am-text">${esc(r.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
-      .replace(/^/, "<p>").replace(/$/, "</p>")}</div>`;
+    <div class="am-text">${window.CodexBrain ? CodexBrain.md(r.text)
+      : esc(r.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
+        .replace(/^/, "<p>").replace(/$/, "</p>")}</div>`;
   // the local answer stays, folded away, so you can always compare
   const localBlock = them.querySelector(".a-local-wrap");
   if (!localBlock) {
@@ -2000,15 +2068,18 @@ function bindAnswerActions(turn) {
 function followUpsFor(q, sources) {
   const out = [];
   const subj = usableSubject(matchNamedSubject(q, true)) ||
+               (window.CodexBrain && usableSubject(CodexBrain.subject())) ||
                // the first result whose title is short enough to read as a name
                (sources.map(s => usableSubject(s.title)).filter(Boolean)[0] || null);
   if (subj) {
     out.push(`Who appears alongside ${subj}?`);
+    if (!/think of|opinion|timeline/i.test(q)) out.push(`What do you think of ${subj}?`);
+    out.push(`Timeline of ${subj}`);
     out.push(`Check consistency for ${subj}`);
   }
   if (!/consistency/i.test(q)) out.push("Check my canon for contradictions");
   if (!/\bcharacters?\b/i.test(q)) out.push("List all characters");
-  if (!/\bhouses?\b/i.test(q)) out.push("List all noble houses");
+  if (!/\bstats\b/i.test(q)) out.push("Canon stats");
   if (document.getElementById("docEditor")) out.push("Summarize this document");
   return out.slice(0, 3);
 }
@@ -2480,12 +2551,25 @@ async function init() {
 
   $("#assistantToggle").onclick = () => $("#assistant").hidden ? openAssistant() : closeAssistant();
   $("#assistantClose").onclick = closeAssistant;
-  $("#assistantNew").onclick = () => { rail.turns = 0; assistantIdle(); $("#assistantInput").focus(); };
+  // a new thread forgets everything: the turns on screen, the subject the
+  // brain was tracking, and the transcript a connected model would see
+  $("#assistantNew").onclick = () => {
+    rail.turns = 0; rail.chat = [];
+    window.CodexBrain && CodexBrain.reset();
+    assistantIdle(); $("#assistantInput").focus();
+  };
   $("#assistantHistory").onclick = () => { rail.turns = 0; assistantIdle(); };
-  $("#assistantScope").onclick = () => {
+  const scopeChip = $("#assistantScope");
+  const paintScope = () => {
+    scopeChip.textContent = (rail.scope === "canon" ? "Canon only" : "Canon + notes") + " ▾";
+  };
+  paintScope();
+  scopeChip.onclick = () => {
     rail.scope = rail.scope === "canon" ? "everything" : "canon";
-    $("#assistantScope").textContent = (rail.scope === "canon" ? "Canon only" : "Canon + notes") + " ▾";
-    toast(rail.scope === "canon" ? "Reading canon entries only" : "Reading canon entries and your notes");
+    paintScope();
+    toast(rail.scope === "canon"
+      ? "Reading the built-in canon collections only"
+      : "Reading canon entries, your notes and your own sections");
   };
   $("#assistantLength").onclick = () => {
     rail.length = rail.length === "brief" ? "full" : "brief";
@@ -2556,7 +2640,7 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot, CANON_ORDER,
   recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll,
   currentGen, isStale };
 })();

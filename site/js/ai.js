@@ -49,9 +49,8 @@ const PROVIDERS = {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     }),
-    body: (model, system, user, maxTokens) => ({
-      model, max_tokens: maxTokens, system,
-      messages: [{ role: "user", content: user }],
+    body: (model, system, messages, maxTokens) => ({
+      model, max_tokens: maxTokens, system, messages,
     }),
     read: j => (j && j.content && j.content.map(c => c.text || "").join("").trim()) || "",
     error: j => (j && j.error && j.error.message) || "",
@@ -62,9 +61,9 @@ const PROVIDERS = {
     base: "https://api.openai.com/v1/chat/completions",
     keyHint: "sk-…",
     headers: k => ({ "content-type": "application/json", authorization: "Bearer " + k }),
-    body: (model, system, user, maxTokens) => ({
+    body: (model, system, messages, maxTokens) => ({
       model, max_tokens: maxTokens,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      messages: [{ role: "system", content: system }].concat(messages),
     }),
     read: j => (j && j.choices && j.choices[0] && j.choices[0].message &&
       String(j.choices[0].message.content || "").trim()) || "",
@@ -80,9 +79,9 @@ const PROVIDERS = {
     keyHint: "optional",
     headers: k => Object.assign({ "content-type": "application/json" },
       k ? { authorization: "Bearer " + k } : {}),
-    body: (model, system, user, maxTokens) => ({
+    body: (model, system, messages, maxTokens) => ({
       model, max_tokens: maxTokens,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      messages: [{ role: "system", content: system }].concat(messages),
     }),
     read: j => {
       if (!j) return "";
@@ -157,15 +156,51 @@ function label() {
    room for interpretation, that they are the only source. It is asked to
    say so when they do not answer the question, because a confident
    invention about your own canon is worse than an admission. */
-const SYSTEM = [
+const SYSTEM_BASE = [
   "You are a careful archivist for one writer's fictional world.",
-  "Answer ONLY from the passages given to you below. They are the writer's own notes and manuscripts.",
+  "Answer ONLY from the passages given to you. They are the writer's own notes and manuscripts.",
   "If the passages do not contain the answer, say plainly that this is not established in the entries yet, and stop. Do not invent names, dates, relationships, or events.",
   "Do not add lore. Do not guess. Do not fill gaps with genre convention.",
+  "If the writer asks for your opinion, a judgement, or a recommendation, you may give one; ground it in the passages, explain your reasoning, and make clear it is your reading rather than established canon.",
   "Refer to entries by their titles when it helps the writer find them.",
   "Write in clear prose, British spelling, no bullet lists unless the question is a list.",
-  "Be concise: a short paragraph or two unless asked for more.",
 ].join(" ");
+
+/* The persona is Lucky's chosen one, the same voice the on-device brain
+   speaks with, so switching the model on does not change who you are
+   talking to. It colours phrasing only; the grounding rules above always
+   win. Switched off in Settings, this contributes nothing. */
+function personaLine() {
+  try {
+    const s = window.CodexExtra && CodexExtra.settings;
+    if (s && s.aiVoice === false) return "";
+    const L = window.CodexLucky;
+    if (!L) return "";
+    const p = L.persona();
+    return "You have a light personality: you are " + L.name() + ", a cat archivist whose mood is \"" +
+      p.name + "\" (" + p.moodLine + ") Let a small touch of that voice colour your answers; never let it change or obscure the facts.";
+  } catch (e) { return ""; }
+}
+
+/* Standing instructions typed into Settings, Assistant. They used to be
+   saved and then read by nothing; now every request carries them. */
+function standingInstructions() {
+  try {
+    const s = window.CodexExtra && CodexExtra.settings;
+    const t = s && String(s.aiInstr || "").trim();
+    return t ? "The writer's standing instructions, which you should follow: " + t.slice(0, 1500) : "";
+  } catch (e) { return ""; }
+}
+
+function systemFor(opts) {
+  const parts = [SYSTEM_BASE];
+  parts.push(opts && opts.length === "full"
+    ? "The writer has asked for full answers: be thorough, and use everything relevant the passages hold."
+    : "Be concise: a short paragraph or two unless asked for more.");
+  const p = personaLine(); if (p) parts.push(p);
+  const si = standingInstructions(); if (si) parts.push(si);
+  return parts.join(" ");
+}
 
 function buildContext(entries, perEntry) {
   return entries.map((e, i) => {
@@ -174,10 +209,32 @@ function buildContext(entries, perEntry) {
   }).join("\n\n---\n\n");
 }
 
+/* Earlier turns of the conversation, sanitised: only user/assistant
+   roles, capped in length, and consecutive same-role turns merged;
+   Anthropic requires strict alternation and the others tolerate it. */
+function cleanHistory(history) {
+  const rows = [];
+  (Array.isArray(history) ? history : []).forEach(m => {
+    if (!m || (m.role !== "user" && m.role !== "assistant")) return;
+    const content = String(m.content || "").trim().slice(0, 4000);
+    if (!content) return;
+    const last = rows[rows.length - 1];
+    if (last && last.role === m.role) last.content += "\n" + content;
+    else rows.push({ role: m.role, content });
+  });
+  // the transcript must end just before the new user turn
+  while (rows.length && rows[rows.length - 1].role === "user") rows.pop();
+  while (rows.length && rows[0].role === "assistant") rows.shift();
+  return rows.slice(-8);
+}
+
 /* ---------- one question ----------
    `entries` is what the local search already decided was relevant, so the
    API path is grounded in exactly the same retrieval as the device path.
-   Resolves to { ok, text, why } and never throws. */
+   opts.history carries the earlier turns of this thread (plain text, no
+   passages; the passages ride with the current question only, so a long
+   conversation does not multiply the bill). opts.length is the rail's
+   Brief/Full chip. Resolves to { ok, text, why } and never throws. */
 async function ask(question, entries, opts) {
   opts = opts || {};
   const c = conf();
@@ -192,6 +249,9 @@ async function ask(question, entries, opts) {
 
   const ctx = buildContext(use, c.contextChars);
   const user = `PASSAGES FROM MY ENTRIES\n\n${ctx}\n\n---\n\nMY QUESTION: ${question}`;
+  const messages = cleanHistory(opts.history).concat([{ role: "user", content: user }]);
+  // a full-length answer needs room; a brief one should not pay for it
+  const maxTokens = opts.length === "full" ? Math.min(8000, Math.max(c.maxTokens, 2400)) : c.maxTokens;
 
   // A hung request must not leave a spinner forever.
   const ctrl = new AbortController();
@@ -200,7 +260,7 @@ async function ask(question, entries, opts) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: p.headers(c.key),
-      body: JSON.stringify(p.body(c.model, SYSTEM, user, c.maxTokens)),
+      body: JSON.stringify(p.body(c.model, systemFor(opts), messages, maxTokens)),
       signal: ctrl.signal,
     });
     const raw = await res.text();
