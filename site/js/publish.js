@@ -204,7 +204,11 @@ async function viewWork(folderId) {
 
       <aside class="work-rail">
         <div class="gold-card">
-          <div class="gold-card-head">✦ Share this work ✦</div>
+          <div class="gold-card-head">✦ The community ✦</div>
+          <div id="communityCard"><p class="faint" style="font-size:13px">Checking…</p></div>
+        </div>
+        <div class="gold-card" style="margin-top:14px">
+          <div class="gold-card-head">✦ Share privately ✦</div>
           <div id="shareList"></div>
         </div>
       </aside>
@@ -253,6 +257,67 @@ async function viewWork(folderId) {
   bindCover(f);
   renderComments(comments, st);
   renderShares(shares, st, folderId);
+  renderCommunityCard(folderId, f, st, live.length);
+}
+
+/* ---------- the community card ----------
+   Publishing here is the loud version of a reading link: the published
+   chapters are COPIED to the public shelves where anyone can find them.
+   The card says which of the two states the work is in and what the
+   community has made of it so far. */
+async function renderCommunityCard(folderId, f, st, liveCount) {
+  const box = $("#communityCard");
+  if (!box) return;
+  const B = window.CodexBooks;
+  if (!B || !C() || !C().configured()) {
+    box.innerHTML = `<p class="faint" style="font-size:13px;line-height:1.5">Needs a connected database;
+      see <code>supabase/README.md</code>.</p>`;
+    return;
+  }
+  if (!st.signedIn) {
+    box.innerHTML = `<p class="faint" style="font-size:13px;line-height:1.5">Sign in from
+      <a href="#/settings">Settings → Account</a> to put this on the public shelves.</p>`;
+    return;
+  }
+  let out = null;
+  try { out = await B.communityCopyOf(folderId); } catch (e) {}
+  if (!out) {
+    box.innerHTML = `
+      <p class="faint" style="font-size:13px;line-height:1.5">Not on the shelves yet. Publishing copies
+        the <b>published</b> chapters (${liveCount} right now) where anyone can read, kudos and comment.
+        Drafts stay home.</p>
+      <button class="btn sm" id="commGo" style="width:100%" ${liveCount ? "" : "disabled title='Publish a chapter first'"}>Publish to the community</button>`;
+    const go = $("#commGo");
+    if (go) go.onclick = async () => {
+      go.disabled = true; go.textContent = "Publishing…";
+      try {
+        const id = await B.publishWork(folderId);
+        if (id) { toast("On the shelves ✦"); viewWork(folderId); }
+        else { go.disabled = false; go.textContent = "Publish to the community"; }
+      } catch (e) { toast(e.message || String(e)); go.disabled = false; go.textContent = "Publish to the community"; }
+    };
+    return;
+  }
+  const stale = (f.publish && f.publish.communityAt || 0) < (f.updated || 0);
+  box.innerHTML = `
+    <div class="comm-stats">
+      <span><b>${(+out.reads || 0).toLocaleString()}</b> reads</span>
+      <span><b>${out.kudos_count}</b> kudos</span>
+      <span><b>${out.library_count}</b> in libraries</span>
+      <span><b>${out.comment_count}</b> comments</span>
+    </div>
+    <a class="btn ghost sm" style="width:100%;margin-top:8px" href="#/book/${esc(out.id)}">View public page</a>
+    <button class="btn sm" id="commUpdate" style="width:100%;margin-top:8px">${stale ? "Update the community copy" : "Republish latest"}</button>
+    <button class="btn ghost sm danger" id="commDown" style="width:100%;margin-top:8px">Take it down</button>`;
+  $("#commUpdate").onclick = async () => {
+    try { await B.publishWork(folderId); toast("Community copy updated"); viewWork(folderId); }
+    catch (e) { toast(e.message || String(e)); }
+  };
+  $("#commDown").onclick = async () => {
+    if (!confirm("Take this book off the community shelves?\n\nReaders lose access; its kudos, comments and library saves go with it. Your work here is untouched.")) return;
+    try { await B.unpublishWork(out.id); toast("Taken down"); viewWork(folderId); }
+    catch (e) { toast(e.message || String(e)); }
+  };
 }
 
 /* A chapter is not a separate kind of thing; it is a document filed
@@ -322,6 +387,9 @@ function editDetails(f) {
       <input class="import-title" id="wdSchedule" value="${esc(pub.schedule || "")}" placeholder="e.g. Updates Fridays"></label>
     <label class="wd-row"><span>Tags</span>
       <input class="import-title" id="wdTags" value="${esc((pub.tags || []).join(", "))}" placeholder="Comma separated"></label>
+    <label class="wd-row"><span>Mature</span>
+      <span class="wd-check"><input type="checkbox" id="wdMature" ${pub.mature ? "checked" : ""}>
+        <span class="faint" style="font-size:13px">18+; hidden on Discover unless a reader opts in</span></span></label>
     <label class="wd-row col"><span>Blurb</span>
       <textarea class="import-body" id="wdBlurb" placeholder="The few lines a reader sees first.">${esc(pub.blurb || "")}</textarea></label>
     <div class="wd-btns">
@@ -340,6 +408,7 @@ function editDetails(f) {
       status: $("#wdStatus", el).value,
       schedule: $("#wdSchedule", el).value.trim(),
       tags: $("#wdTags", el).value.split(",").map(t => t.trim()).filter(Boolean).slice(0, 12),
+      mature: $("#wdMature", el).checked,
       blurb: $("#wdBlurb", el).value.trim(),
     });
     await S().put("folders", f);

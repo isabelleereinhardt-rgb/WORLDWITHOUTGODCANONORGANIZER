@@ -31,7 +31,10 @@ begin
   for p in
     select policyname, tablename from pg_policies
     where schemaname = 'public'
-      and tablename in ('profiles', 'workspaces', 'workspace_members', 'items', 'shares', 'comments')
+      and tablename in ('profiles', 'workspaces', 'workspace_members', 'items', 'shares', 'comments',
+                        'community_profiles', 'community_books', 'community_chapters', 'community_kudos',
+                        'community_library', 'community_follows', 'community_comments',
+                        'community_progress', 'community_posts')
   loop
     execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
   end loop;
@@ -468,6 +471,384 @@ do $$ begin
 exception when others then
   raise notice 'skipped storage.objects policies (%); add them under Storage > Policies when needed', sqlerrm;
 end $$;
+
+-- ============================================================
+-- THE COMMUNITY ; the public side of the Space.
+--
+-- Everything above this line is private-by-default: your workspace,
+-- readable only by you and whoever holds a link you made. The
+-- community tables are the opposite on purpose; a book published
+-- here is meant to be found, read, and responded to by strangers,
+-- the way Wattpad and AO3 work.
+--
+-- The split matters. Publishing COPIES the published chapters of a
+-- work into these tables; it never exposes the workspace itself.
+-- Unpublishing deletes the copy. Your drafts stay physics-private.
+--
+-- Reads are public (anon may browse). Writes always belong to
+-- somebody: books to their author, kudos/library/follows/comments
+-- to the account that made them. The stat counters on books are
+-- maintained by triggers running as the schema owner, so a client
+-- cannot inflate its own numbers by writing to the book row.
+-- ============================================================
+
+-- ---------- public identity ----------
+-- Publishing, commenting and posting all hang off a pen name, kept
+-- apart from the private profile so joining the community is a
+-- deliberate step and the name is chosen, not leaked.
+create table if not exists public.community_profiles (
+  id             uuid primary key references auth.users on delete cascade,
+  name           text not null check (char_length(name) between 1 and 60),
+  bio            text not null default '' check (char_length(bio) <= 600),
+  avatar         jsonb not null default '{}'::jsonb,
+  follower_count int  not null default 0,
+  book_count     int  not null default 0,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+-- ---------- books ----------
+-- One row per published work. (owner, local_folder_id) ties it back
+-- to the project it came from, so publishing again updates in place
+-- instead of minting duplicates.
+create table if not exists public.community_books (
+  id              uuid primary key default gen_random_uuid(),
+  owner           uuid not null references public.community_profiles on delete cascade,
+  local_folder_id text not null,
+  title           text not null check (char_length(title) between 1 and 200),
+  blurb           text not null default '' check (char_length(blurb) <= 2000),
+  cover           text,                       -- data URL, scaled client-side
+  genre           text not null default '',
+  tags            text[] not null default '{}',
+  status          text not null default 'Ongoing',
+  mature          boolean not null default false,
+  language        text not null default 'English',
+  word_count      int    not null default 0,
+  chapter_count   int    not null default 0,
+  reads           bigint not null default 0,
+  kudos_count     int    not null default 0,
+  library_count   int    not null default 0,
+  comment_count   int    not null default 0,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (owner, local_folder_id)
+);
+create index if not exists cbooks_updated_idx on public.community_books (updated_at desc);
+create index if not exists cbooks_created_idx on public.community_books (created_at desc);
+create index if not exists cbooks_kudos_idx   on public.community_books (kudos_count desc);
+create index if not exists cbooks_reads_idx   on public.community_books (reads desc);
+create index if not exists cbooks_genre_idx   on public.community_books (genre);
+create index if not exists cbooks_tags_idx    on public.community_books using gin (tags);
+
+-- ---------- chapters ----------
+-- Content is plain text with newlines; the reader renders paragraphs.
+-- local_id is the doc id in the author's workspace, for re-publish.
+create table if not exists public.community_chapters (
+  id         uuid primary key default gen_random_uuid(),
+  book_id    uuid not null references public.community_books on delete cascade,
+  local_id   text not null,
+  position   int  not null default 0,
+  title      text not null default '',
+  content    text not null default '',
+  word_count int  not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (book_id, local_id)
+);
+create index if not exists cch_book_idx on public.community_chapters (book_id, position);
+
+-- ---------- kudos ----------
+-- One per reader per book, AO3-style. Guests may leave kudos through
+-- an RPC below, deduplicated on a key their browser keeps.
+create table if not exists public.community_kudos (
+  id         uuid primary key default gen_random_uuid(),
+  book_id    uuid not null references public.community_books on delete cascade,
+  user_id    uuid references auth.users on delete cascade,
+  guest_key  text,
+  created_at timestamptz not null default now(),
+  check (user_id is not null or guest_key is not null)
+);
+create unique index if not exists ckudos_user_idx  on public.community_kudos (book_id, user_id)  where user_id is not null;
+create unique index if not exists ckudos_guest_idx on public.community_kudos (book_id, guest_key) where user_id is null;
+
+-- ---------- library ----------
+-- "Saved to read", Wattpad-style. chapters_seen remembers how many
+-- chapters existed when you last looked, so the shelf can say
+-- "2 new chapters" without another table.
+create table if not exists public.community_library (
+  user_id       uuid not null references auth.users on delete cascade,
+  book_id       uuid not null references public.community_books on delete cascade,
+  chapters_seen int  not null default 0,
+  added_at      timestamptz not null default now(),
+  primary key (user_id, book_id)
+);
+create index if not exists clib_book_idx on public.community_library (book_id);
+
+-- ---------- follows ----------
+create table if not exists public.community_follows (
+  follower   uuid not null references auth.users on delete cascade,
+  author     uuid not null references public.community_profiles on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (follower, author),
+  check (follower <> author)
+);
+create index if not exists cfol_author_idx on public.community_follows (author);
+
+-- ---------- comments ----------
+-- On the book (chapter_id null) or on one chapter. One level of
+-- replies via parent_id. Soft-deleted so a reply thread keeps its
+-- shape when something above it goes.
+create table if not exists public.community_comments (
+  id         uuid primary key default gen_random_uuid(),
+  book_id    uuid not null references public.community_books on delete cascade,
+  chapter_id uuid references public.community_chapters on delete cascade,
+  parent_id  uuid references public.community_comments on delete cascade,
+  author_id  uuid not null references public.community_profiles on delete cascade,
+  body       text not null check (char_length(body) between 1 and 5000),
+  deleted    boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists ccom_book_idx    on public.community_comments (book_id, created_at desc);
+create index if not exists ccom_chapter_idx on public.community_comments (chapter_id);
+
+-- ---------- reading progress ----------
+create table if not exists public.community_progress (
+  user_id     uuid not null references auth.users on delete cascade,
+  book_id     uuid not null references public.community_books on delete cascade,
+  chapter_pos int  not null default 0,
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, book_id)
+);
+
+-- ---------- rooms ----------
+-- Shared threads: a room name, posts, one level of replies. The room
+-- list itself lives in the app (a fixed set plus one per genre), so a
+-- room with nobody in it costs nothing.
+create table if not exists public.community_posts (
+  id         uuid primary key default gen_random_uuid(),
+  room       text not null check (char_length(room) between 1 and 40),
+  author_id  uuid not null references public.community_profiles on delete cascade,
+  parent_id  uuid references public.community_posts on delete cascade,
+  body       text not null check (char_length(body) between 1 and 4000),
+  deleted    boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists cpost_room_idx on public.community_posts (room, created_at desc);
+
+-- ---------- counters ----------
+-- SECURITY DEFINER on purpose: the trigger fires as whoever caused it
+-- (a reader leaving kudos), and that person has no right to update the
+-- book row directly. The function runs as the schema owner instead.
+--
+-- Each swallows its own errors: when an account is deleted, cascades
+-- tear down kudos and comments while their book is itself mid-deletion,
+-- and a counter update against a half-gone row must not abort the
+-- teardown. A skipped count during demolition costs nothing.
+create or replace function public.community_book_counters()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+declare b uuid;
+begin
+  b := coalesce(new.book_id, old.book_id);
+  update public.community_books set
+    kudos_count   = (select count(*) from public.community_kudos   k where k.book_id = b),
+    library_count = (select count(*) from public.community_library l where l.book_id = b),
+    comment_count = (select count(*) from public.community_comments c where c.book_id = b and not c.deleted)
+  where id = b;
+  return coalesce(new, old);
+exception when others then
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists ckudos_counter on public.community_kudos;
+create trigger ckudos_counter after insert or delete on public.community_kudos
+  for each row execute function public.community_book_counters();
+drop trigger if exists clib_counter on public.community_library;
+create trigger clib_counter after insert or delete on public.community_library
+  for each row execute function public.community_book_counters();
+drop trigger if exists ccom_counter on public.community_comments;
+create trigger ccom_counter after insert or update or delete on public.community_comments
+  for each row execute function public.community_book_counters();
+
+-- chapter changes roll up onto the book: size, count, and the
+-- updated_at that "recently updated" sorts by
+create or replace function public.community_chapter_rollup()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+declare b uuid;
+begin
+  b := coalesce(new.book_id, old.book_id);
+  update public.community_books set
+    chapter_count = (select count(*)                       from public.community_chapters c where c.book_id = b),
+    word_count    = (select coalesce(sum(c.word_count), 0) from public.community_chapters c where c.book_id = b),
+    updated_at    = now()
+  where id = b;
+  return coalesce(new, old);
+exception when others then
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists cch_rollup on public.community_chapters;
+create trigger cch_rollup after insert or update or delete on public.community_chapters
+  for each row execute function public.community_chapter_rollup();
+
+create or replace function public.community_follow_counter()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+declare a uuid;
+begin
+  a := coalesce(new.author, old.author);
+  update public.community_profiles set
+    follower_count = (select count(*) from public.community_follows f where f.author = a)
+  where id = a;
+  return coalesce(new, old);
+exception when others then
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists cfol_counter on public.community_follows;
+create trigger cfol_counter after insert or delete on public.community_follows
+  for each row execute function public.community_follow_counter();
+
+create or replace function public.community_bookcount()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+declare o uuid;
+begin
+  o := coalesce(new.owner, old.owner);
+  update public.community_profiles set
+    book_count = (select count(*) from public.community_books b where b.owner = o)
+  where id = o;
+  return coalesce(new, old);
+exception when others then
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists cbooks_count on public.community_books;
+create trigger cbooks_count after insert or delete on public.community_books
+  for each row execute function public.community_bookcount();
+
+drop trigger if exists cprofiles_touch on public.community_profiles;
+create trigger cprofiles_touch before update on public.community_profiles
+  for each row execute function public.touch_updated_at();
+
+-- ---------- anonymous participation ----------
+-- Browsing needs no account. These two let a signed-out reader also
+-- count a read and leave kudos, each through a narrow function
+-- rather than table access.
+create or replace function public.community_bump_reads(book uuid)
+returns void language sql security definer set search_path = public
+as $$
+  update public.community_books set reads = reads + 1 where id = book;
+$$;
+
+create or replace function public.community_kudos_guest(book uuid, key text)
+returns boolean language plpgsql security definer set search_path = public
+as $$
+begin
+  if key is null or char_length(key) < 8 or char_length(key) > 80 then
+    raise exception 'bad guest key';
+  end if;
+  insert into public.community_kudos (book_id, guest_key)
+  values (book, key)
+  on conflict (book_id, guest_key) where user_id is null do nothing;
+  return found;
+end;
+$$;
+
+grant execute on function public.community_bump_reads(uuid) to anon, authenticated;
+grant execute on function public.community_kudos_guest(uuid, text) to anon, authenticated;
+
+-- ---------- community access rules ----------
+alter table public.community_profiles enable row level security;
+alter table public.community_books    enable row level security;
+alter table public.community_chapters enable row level security;
+alter table public.community_kudos    enable row level security;
+alter table public.community_library  enable row level security;
+alter table public.community_follows  enable row level security;
+alter table public.community_comments enable row level security;
+alter table public.community_progress enable row level security;
+alter table public.community_posts    enable row level security;
+
+-- profiles: anyone may look at an author; only you may be you
+create policy "anyone reads community profiles" on public.community_profiles
+  for select using (true);
+create policy "create own community profile" on public.community_profiles
+  for insert with check (id = auth.uid());
+create policy "update own community profile" on public.community_profiles
+  for update using (id = auth.uid()) with check (id = auth.uid());
+create policy "delete own community profile" on public.community_profiles
+  for delete using (id = auth.uid());
+
+-- books and chapters: the whole point is that strangers can read them
+create policy "anyone reads community books" on public.community_books
+  for select using (true);
+create policy "authors publish books" on public.community_books
+  for insert with check (owner = auth.uid());
+create policy "authors update own books" on public.community_books
+  for update using (owner = auth.uid()) with check (owner = auth.uid());
+create policy "authors unpublish own books" on public.community_books
+  for delete using (owner = auth.uid());
+
+create policy "anyone reads community chapters" on public.community_chapters
+  for select using (true);
+create policy "authors write own chapters" on public.community_chapters
+  for all using (exists (select 1 from public.community_books b
+                         where b.id = book_id and b.owner = auth.uid()))
+  with check  (exists (select 1 from public.community_books b
+                       where b.id = book_id and b.owner = auth.uid()));
+
+-- kudos: visible to all (that is what a count is), given as yourself,
+-- and takeable-back. Guest kudos arrive via the RPC above.
+create policy "anyone reads kudos" on public.community_kudos
+  for select using (true);
+create policy "signed-in kudos" on public.community_kudos
+  for insert with check (user_id = auth.uid());
+create policy "remove own kudos" on public.community_kudos
+  for delete using (user_id = auth.uid());
+
+-- your library and your reading position are nobody's business;
+-- the aggregate library_count on the book is all the world sees
+create policy "own library" on public.community_library
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "own progress" on public.community_progress
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- follows are public, as on every platform like this
+create policy "anyone reads follows" on public.community_follows
+  for select using (true);
+create policy "follow as yourself" on public.community_follows
+  for insert with check (follower = auth.uid());
+create policy "unfollow as yourself" on public.community_follows
+  for delete using (follower = auth.uid());
+
+-- comments: public to read, signed as yourself. The book's author may
+-- also moderate; soft-delete or remove anything on their own book.
+create policy "anyone reads community comments" on public.community_comments
+  for select using (true);
+create policy "comment as yourself" on public.community_comments
+  for insert with check (author_id = auth.uid());
+create policy "edit own or moderate" on public.community_comments
+  for update using (author_id = auth.uid()
+    or exists (select 1 from public.community_books b where b.id = book_id and b.owner = auth.uid()));
+create policy "remove own or moderate" on public.community_comments
+  for delete using (author_id = auth.uid()
+    or exists (select 1 from public.community_books b where b.id = book_id and b.owner = auth.uid()));
+
+-- rooms: public to read, post as yourself, tidy up after yourself
+create policy "anyone reads posts" on public.community_posts
+  for select using (true);
+create policy "post as yourself" on public.community_posts
+  for insert with check (author_id = auth.uid());
+create policy "edit own posts" on public.community_posts
+  for update using (author_id = auth.uid()) with check (author_id = auth.uid());
+create policy "remove own posts" on public.community_posts
+  for delete using (author_id = auth.uid());
 
 -- ============================================================
 -- BACKFILL; safe to run any number of times.

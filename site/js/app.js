@@ -2215,7 +2215,7 @@ window.toast = toast;
    A separate place with its own home, its own sections, and one door
    back to the workspace. Everything outward-facing lives here.
    ============================================================ */
-const SPACE_ROUTES = ["space", "work", "community"];
+const SPACE_ROUTES = ["space", "work", "community", "book", "author"];
 function inSpace(hash) {
   const h = hash || location.hash || "#/";
   const path = h.replace(/^#\//, "").split("/")[0];
@@ -2245,13 +2245,15 @@ function buildSpaceNav(nav) {
       <div class="nav-title-row"><div class="nav-title">The Space</div></div>
       ${item("#/space", "home", "Space home")}
       ${item("#/work", "book", "My Works")}
-      ${item("#/community", "people", "Reading Room")}
+      ${item("#/community/discover", "atlas", "Discover", "community")}
     </div>
 
     <div class="nav-section">
-      <div class="nav-title-row"><div class="nav-title">Your shelf</div></div>
-      <div class="nav-item" data-route="#/community/shelf">${svg("read")}<span>Saved to read</span></div>
-      <div class="nav-item" data-route="#/community/chat">${svg("people")}<span>Notes &amp; replies</span></div>
+      <div class="nav-title-row"><div class="nav-title">The community</div></div>
+      <div class="nav-item" data-route="#/community/library">${svg("read")}<span>Saved to read</span></div>
+      <div class="nav-item" data-route="#/community/following">${svg("people")}<span>Following</span></div>
+      <div class="nav-item" data-route="#/community/rooms">${svg("feed")}<span>Rooms</span></div>
+      <div class="nav-item" data-route="#/community/notes">${svg("check")}<span>From readers</span></div>
     </div>
 
     <div class="nav-section">
@@ -2325,7 +2327,10 @@ function route() {
   else if (path === "read") window.CodexPages && CodexPages.read(parts[1] || "");
   else if (path === "space") window.CodexCommunity && CodexCommunity.spaceHome();
   else if (path === "work") window.CodexPublish && CodexPublish.work(parts[1] || "");
-  else if (path === "community") window.CodexCommunity && CodexCommunity.view(parts[1] || "");
+  else if (path === "community") window.CodexCommunity && CodexCommunity.view(parts[1] || "", decodeURIComponent(parts[2] || ""));
+  else if (path === "book") window.CodexBooks && (parts[2] !== undefined && parts[2] !== ""
+    ? CodexBooks.chapter(parts[1], parts[2]) : CodexBooks.book(parts[1] || ""));
+  else if (path === "author") window.CodexBooks && CodexBooks.author(parts[1] || "");
   else if (path === "shared") window.CodexPublish && CodexPublish.shared(parts[1] || "");
   else if (path === "history") window.CodexPages && CodexPages.history(parts[1] || "");
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
