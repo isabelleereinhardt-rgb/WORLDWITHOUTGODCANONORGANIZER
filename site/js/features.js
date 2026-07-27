@@ -100,6 +100,15 @@ const ORNAMENTS = [
   ["stars", "✦ ✧ ✦"], ["diamonds", "❖ ❖ ❖"], ["fleur", "❧ ❧ ❧"],
   ["dots", "· · ·"], ["rule", "—— ✦ ——"], ["none", "(none)"],
 ];
+/* How long Lucky takes to cross the window, slowest first. Named rather
+   than numeric because "18 seconds" means nothing to anyone. */
+const PACES = [
+  [90, "Rarely"], [60, "Now and then"], [34, "Often"], [20, "A lot"], [12, "Constantly"],
+];
+function paceLabel(secs) {
+  const hit = PACES.find(p => p[0] === secs);
+  return hit ? hit[1] : "Often";
+}
 
 /* ---------- shared caches (read synchronously by app.js) ---------- */
 const Extra = {
@@ -517,7 +526,17 @@ function panelLucky(el) {
     <div class="sfx-row"><span class="sfx-label">Treats after five pets<em>Off means he just enjoys being petted.</em></span>
       <button class="switch${L.pref("luckyTreatsOn") ? " on" : ""}" data-lhab="luckyTreatsOn" role="switch" aria-checked="${!!L.pref("luckyTreatsOn")}"><span></span></button></div>
     <div class="sfx-row"><span class="sfx-label">Nap on the sprint clock<em>He curls up on the timer while you write.</em></span>
-      <button class="switch${L.pref("luckyNaps") ? " on" : ""}" data-lhab="luckyNaps" role="switch" aria-checked="${!!L.pref("luckyNaps")}"><span></span></button></div>`;
+      <button class="switch${L.pref("luckyNaps") ? " on" : ""}" data-lhab="luckyNaps" role="switch" aria-checked="${!!L.pref("luckyNaps")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Sleep while you write<em>He stops pacing and curls up in the corner whenever a document is open.</em></span>
+      <button class="switch${L.pref("luckySleeps") ? " on" : ""}" data-lhab="luckySleeps" role="switch" aria-checked="${!!L.pref("luckySleeps")}"><span></span></button></div>
+
+    <div class="rule-head mt"><span class="k">How often he strolls past</span><span class="hr"></span></div>
+    <div class="pace-row">
+      <input type="range" id="luckyPace" min="0" max="${PACES.length - 1}"
+        value="${Math.max(0, PACES.findIndex(p => p[0] === L.pref("luckyPace")))}" step="1" class="pace-slider">
+      <span class="pace-read" id="luckyPaceRead">${esc(paceLabel(L.pref("luckyPace")))}</span>
+    </div>
+    <p class="faint set-help">One crossing of the window, end to end.</p>`;
 
   $$("[data-lskin]", el).forEach(b => b.onclick = () => { L.setSkin(b.dataset.lskin); renderSetPanel(); });
   $$("[data-lacc]", el).forEach(b => b.onclick = () => { L.setAcc(b.dataset.lacc); renderSetPanel(); });
@@ -530,6 +549,12 @@ function panelLucky(el) {
     b.classList.toggle("on", next);
     b.setAttribute("aria-checked", String(next));
   });
+  const pace = $("#luckyPace", el), paceRead = $("#luckyPaceRead", el);
+  if (pace) pace.oninput = () => {
+    const secs = PACES[+pace.value][0];
+    paceRead.textContent = paceLabel(secs);
+    L.setPace(secs);
+  };
   const ni = $("#luckyNameInput", el);
   ni.onchange = () => { L.setName(ni.value.trim() || "Lucky"); toast("He answers to " + (ni.value.trim() || "Lucky") + " now"); };
 }

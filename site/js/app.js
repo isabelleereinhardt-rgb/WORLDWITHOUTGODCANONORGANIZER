@@ -519,7 +519,16 @@ function viewHome() {
 let browseSelectMode = false, browseSelected = new Set();
 function viewBrowse(cat) {
   browseSelectMode = false; browseSelected = new Set();
-  renderBrowse(cat);
+  renderBrowse(canonicalCat(cat));
+}
+/* A hand-typed or older bookmark may differ only in case ("#/browse/characters"),
+   which would otherwise render a real collection as empty. Match the stored
+   spelling when one exists and keep the argument as-is when it doesn't. */
+function canonicalCat(cat) {
+  if (!cat) return cat;
+  const want = cat.toLowerCase();
+  const hit = DB.entries.find(e => e.category && e.category.toLowerCase() === want);
+  return hit ? hit.category : cat;
 }
 function renderBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
@@ -1945,7 +1954,11 @@ function route() {
   const h = location.hash || "#/";
   // a reading link is somebody else's view of one work: no sidebar,
   // no assistant, none of the workspace furniture
-  document.getElementById("app").classList.toggle("reader-mode", h.startsWith("#/shared/"));
+  // Lucky's stage is a child of <body>, not of #app, so the reader-mode
+  // class has to be on both for him to be hidden from a reading link.
+  const reader = h.startsWith("#/shared/");
+  document.getElementById("app").classList.toggle("reader-mode", reader);
+  document.body.classList.toggle("reader-mode", reader);
   const parts = h.replace(/^#\//, "").split("/");
   const path = parts[0];
   const arg = decodeURIComponent(parts.slice(1).join("/") || "");

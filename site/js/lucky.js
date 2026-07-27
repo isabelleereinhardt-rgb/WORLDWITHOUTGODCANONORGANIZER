@@ -23,6 +23,9 @@ const save = () => window.CodexSettings && CodexSettings.save();
 const DEF = {
   luckyName: "Lucky", luckySkin: "tabby", luckyAcc: "bell", luckyPersonality: "sweet",
   luckyWalks: true, luckyNaps: true, luckyTips: true, luckyTreatsOn: true,
+  luckySleeps: true,
+  // seconds for one crossing; the slider offers a few named speeds
+  luckyPace: 34,
   luckyPets: 0, luckyPetsTotal: 0, luckyTreats: 0,
   luckyCompanion: "none", luckyTreat: "sardine",
   ambience: "none", volume: 40,
@@ -195,6 +198,7 @@ const PERSONAS = {
     name: "Sweetheart", glyph: "✦", mood: "Content",
     moodLine: "He curls a little closer every day you write.",
     treat: "A treat! For me?",
+    thanks: "He purrs so hard he has to sit down.",
     sprint: "I will keep watch. Write the scene.",
     tips: [
       "Press Ctrl K from anywhere; I search titles and full text at once.",
@@ -213,6 +217,7 @@ const PERSONAS = {
     name: "Grumpy", glyph: "❖", mood: "Unimpressed",
     moodLine: "He will deny enjoying any of this. He is lying.",
     treat: "Finally. Put it down there.",
+    thanks: "He is purring. He would like that stricken from the record.",
     sprint: "Twenty five minutes. No scrolling. I am timing you.",
     tips: [
       "Wow. Still writing. I don't have all day.",
@@ -229,6 +234,7 @@ const PERSONAS = {
     name: "Regal", glyph: "✧", mood: "Gracious",
     moodLine: "He considers your desk a throne and you its steward.",
     treat: "Tribute. Acceptable.",
+    thanks: "The court is satisfied. You may rise.",
     sprint: "The court will not interrupt. Proceed.",
     tips: [
       "The court awaits your next chapter. Do not keep it waiting.",
@@ -244,6 +250,7 @@ const PERSONAS = {
     name: "Sleepy", glyph: "☾", mood: "Drowsy",
     moodLine: "He is mostly asleep, but he is asleep near you.",
     treat: "Mmh. Treat. Thank you.",
+    thanks: "He carries it off to the warm spot and forgets about it.",
     sprint: "I will nap here. Wake me when it rings.",
     tips: [
       "There is no hurry. The canon keeps perfectly well overnight.",
@@ -251,6 +258,41 @@ const PERSONAS = {
       "Everything saves itself. You may close the tab whenever you like.",
       "A short sprint counts. Twenty five minutes is a whole scene sometimes.",
       { needs: "words", text: w => `${w.toLocaleString()} words this week. Rest now.` },
+    ],
+  },
+  gremlin: {
+    name: "Gremlin", glyph: "✸", mood: "Feral",
+    moodLine: "Something was knocked off the desk. No witnesses. No suspects.",
+    treat: "MINE. I am taking this under the sofa.",
+    thanks: "Gone. Under the sofa. It lives there now.",
+    sprint: "Twenty five minutes of chaos. I mean focus. Go.",
+    tips: [
+      "I walked across your keyboard and invented a new character. You are welcome.",
+      "Ctrl K. Press it. Press it again. It is very satisfying.",
+      "I hid something. It is in Settings, then Restore. Probably.",
+      "Write the unhinged version first. You can be respectable in the second draft.",
+      "Delete nothing in anger. I have seen you. Sleep on it.",
+      "Drop a PDF on the page and watch me eat it. I mean index it.",
+      { needs: "words", text: w => `${w.toLocaleString()} words. Absolute menace behaviour. Continue.` },
+      { needs: "entries", text: n => `${n} entries and I have knocked every one of them off a shelf at least once.` },
+    ],
+  },
+  scholar: {
+    name: "Scholar", glyph: "✜", mood: "Studious",
+    moodLine: "He has read your canon twice and has notes.",
+    treat: "Thank you. I shall record this in the ledger.",
+    thanks: "Duly noted, dated, and filed under Provisions.",
+    sprint: "Twenty five minutes, uninterrupted. That is how monographs happen.",
+    tips: [
+      "Ask me to cross-check a name and I will show you every passage that disagrees.",
+      "A cross reference forms the second time you use a name. That is the whole rule.",
+      "Versions keep themselves as you write; compare any two from the toolbar.",
+      "Consistency is not the same as quality, but it is cheaper to fix.",
+      "Cite yourself. Link an entry to the passage it came from while you remember.",
+      "Back up before a big revision. Future you is a stranger with poor judgement.",
+      { needs: "entries", text: n => `${n} entries catalogued. I have read all of them, twice.` },
+      { needs: "streak", text: s => `${s} consecutive days. Regularity beats inspiration; the record shows it.` },
+      { needs: "words", text: w => `${w.toLocaleString()} words this week — a steady, defensible pace.` },
     ],
   },
 };
@@ -517,7 +559,7 @@ function faceSvg(size) {
    THE WALKER
    ============================================================ */
 const Lucky = {
-  el: null, tipIdx: 0, facts: { words: 0, streak: 0, entries: 0 },
+  el: null, tipIdx: 0, _wasSleeping: false, facts: { words: 0, streak: 0, entries: 0 },
 
   name() { return (pref("luckyName") || "Lucky").trim() || "Lucky"; },
   skin() { return pref("luckySkin"); },
@@ -560,12 +602,20 @@ const Lucky = {
   },
   render() {
     if (!this.el) return;
-    if (!pref("luckyWalks")) { this.el.innerHTML = ""; return; }
-    const pets = pref("luckyPets") || 0;
     this.el.setAttribute("data-skin", this.skin());
+
+    // While you are actually writing he stops pacing and curls up in the
+    // corner instead — a cat walking through your eyeline mid-sentence is
+    // the opposite of company.
+    if (this.sleeping()) { this.renderSleeping(); return; }
+
+    if (!pref("luckyWalks")) { this.el.innerHTML = this.askButton(); this.bindAsk(); return; }
+    const pets = pref("luckyPets") || 0;
+    const pace = this.pace();
     this.el.innerHTML = `
-      <div class="lucky-walk" id="luckyWalk" title="Pet me, or ask me about your canon">
-        ${pref("luckyTips") ? `<div class="lucky-tip">
+      <div class="lucky-walk" id="luckyWalk" title="Pet me, or ask me about your canon"
+           style="animation-duration:${pace}s">
+        ${pref("luckyTips") ? `<div class="lucky-tip" style="animation-duration:${pace}s">
           <div class="k">${esc(this.name())} says</div>
           <div class="lucky-tip-text" id="luckyTipText">${esc(this.tip())}</div>
           <div class="lucky-tip-foot">
@@ -577,17 +627,64 @@ const Lucky = {
         <div class="lucky-bob">${walkerSvg()}</div>
         ${companionSvg()}
         ${treatSvg()}
-      </div>`;
+        <div class="lucky-notes" aria-hidden="true"><span>♪</span><span>♫</span><span>♪</span></div>
+        <div class="lucky-sparks" aria-hidden="true"><span>✦</span><span>✧</span><span>✦</span></div>
+      </div>
+      ${this.askButton()}`;
     const walk = $("#luckyWalk", this.el);
     walk.onclick = (e) => {
       if (e.target.closest("#luckyAsk")) return;
       this.pet(walk);
     };
-    const ask = $("#luckyAsk", this.el);
-    if (ask) ask.onclick = (e) => {
-      e.stopPropagation();
+    // Rotate the tip exactly when the stroll wraps, so a new tip never
+    // appears halfway through a visible bubble. A timer drifts out of step
+    // the moment the animation restarts; this cannot.
+    walk.addEventListener("animationiteration", (e) => {
+      if (e.animationName === "lucky-walk") this.nextTip();
+    });
+    this.bindAsk();
+  },
+
+  /* the corner button, always reachable whatever he is doing */
+  askButton() {
+    return `<button class="lucky-hail" id="luckyHail" title="Ask ${esc(this.name())} about your canon">
+      <span class="lh-face">${faceSvg(34)}</span>
+      <span class="lh-text"><span class="lh-name">Ask ${esc(this.name())}</span>
+      <span class="lh-role">Canon assistant</span></span>
+    </button>`;
+  },
+  bindAsk() {
+    const open = (e) => {
+      if (e) e.stopPropagation();
       if (window.CodexAssistant) CodexAssistant.open();
     };
+    const ask = $("#luckyAsk", this.el); if (ask) ask.onclick = open;
+    const hail = $("#luckyHail", this.el); if (hail) hail.onclick = open;
+  },
+
+  /* one crossing, in seconds */
+  pace() { const p = +pref("luckyPace"); return p >= 8 && p <= 200 ? p : 34; },
+
+  /* he sleeps while a document is open, if you let him */
+  sleeping() {
+    if (!pref("luckySleeps")) return false;
+    return /^#\/(doc|deck|read)\//.test(location.hash || "");
+  },
+  renderSleeping() {
+    this.el.innerHTML = `
+      <div class="lucky-sleep" id="luckySleep" title="${esc(this.name())} is asleep. Click to wake him.">
+        <div class="lucky-z" aria-hidden="true"><span>z</span><span>z</span><span>z</span></div>
+        ${napSvg()}
+      </div>
+      ${this.askButton()}`;
+    const s = $("#luckySleep", this.el);
+    if (s) s.onclick = () => {
+      // waking him is just petting him; he goes back to sleep on the next render
+      CodexExtra.settings.luckyPetsTotal = (pref("luckyPetsTotal") || 0) + 1;
+      save();
+      s.classList.remove("waking"); void s.offsetWidth; s.classList.add("waking");
+    };
+    this.bindAsk();
   },
 
   pet(walk) {
@@ -606,15 +703,22 @@ const Lucky = {
       this.render();
       return;
     }
-    // five pets: a treat, a hop, and he takes it off screen
+    // five pets: a treat, a little dance, and he takes it off screen
     CodexExtra.settings.luckyPets = 0;
     CodexExtra.settings.luckyTreats = (pref("luckyTreats") || 0) + 1;
     save();
     Sound.onBell();
     walk.classList.add("treating");
+    const p = persona();
     const txt = $("#luckyTipText", this.el);
-    if (txt) txt.textContent = persona().treat + " A " + (TREAT_NAME[pref("luckyTreat")] || "sardine") + ".";
+    if (txt) txt.textContent = p.treat + " A " + (TREAT_NAME[pref("luckyTreat")] || "sardine") + ".";
+    // the second beat: he stops crowing about the treat and just purrs
+    const thanksAt = setTimeout(() => {
+      const t = $("#luckyTipText", this.el);
+      if (t && p.thanks) t.textContent = p.thanks;
+    }, 2100);
     setTimeout(() => {
+      clearTimeout(thanksAt);
       walk.classList.remove("treating");
       this.tipIdx++;
       this.render();
@@ -778,7 +882,11 @@ window.CodexLucky = {
   name: () => Lucky.name(), skin: () => Lucky.skin(),
   persona, PERSONAS, SKINS, ACCESSORIES, COMPANIONS, TREATS,
   companionSvg: id => COMPANION_SVG[id] || "", treatSvg: id => TREAT_SVG[id] || "",
-  pref, setPref,
+  pref,
+  // every setter here re-draws him: a toggle in Settings that does not
+  // visibly change the cat reads as a broken switch
+  setPref: (k, v) => { setPref(k, v); Lucky.render(); },
+  setPace: secs => { setPref("luckyPace", secs); Lucky.render(); },
   setSkin: id => Lucky.setSkin(id), setAcc: id => Lucky.setAcc(id),
   setPersonality: id => Lucky.setPersonality(id), setName: n => Lucky.setName(n),
   setWalks: on => Lucky.setWalks(on),
@@ -796,9 +904,17 @@ window.CodexLucky = {
 /* Lucky only appears once the app has settled, and only if he is
    switched on. Reduced-motion users get a still cat, handled in CSS. */
 function boot() {
-  Lucky.refreshFacts().then(() => { Lucky.mount(); });
-  // rotate his tip each time the stroll wraps around
-  setInterval(() => Lucky.nextTip(), 34000);
+  // Mount first, then fill in the numbers. Chaining the mount onto the
+  // fact-gathering meant a slow or wedged storage read could leave the
+  // page with no cat at all; the tips that need real counts simply
+  // aren't offered until the counts arrive.
+  Lucky.mount();
+  Lucky.refreshFacts().then(() => Lucky.render()).catch(() => {});
+  // he curls up when a document opens and paces again when it closes
+  window.addEventListener("hashchange", () => {
+    const now = Lucky.sleeping();
+    if (now !== Lucky._wasSleeping) { Lucky._wasSleeping = now; Lucky.render(); }
+  });
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(boot, 900));
 else setTimeout(boot, 900);
