@@ -1951,3 +1951,34 @@ body.reader-mode .lucky-stage{display:none}
   white-space:nowrap;position:relative;top:-4px}
 :root[data-motion="calm"] .gallery figure:hover,
 :root[data-motion="calm"] .tl-point:hover .tl-dot{transform:none}
+
+/* ---- quiz build / responses ---- */
+.qz-list{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.qz-row{display:flex;gap:12px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line);
+  border-radius:2px;background:var(--panel)}
+.qz-row .qz-n{font-family:var(--serif);font-size:11px;color:var(--dim);min-width:20px;padding-top:9px;flex:none}
+.qz-row .qz-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.qz-row input{background:var(--bg-sunken,rgba(0,0,0,.16));border:1px solid var(--line);border-radius:2px;
+  padding:8px 10px;color:var(--ink);font-family:inherit;width:100%}
+.qz-row input:focus{outline:none;border-color:var(--blush)}
+.qz-row .qz-q{font-size:15px}
+.qz-row .qz-a{font-size:14px;color:var(--ink)}
+.qz-row .qz-src{font-family:var(--serif);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold);text-decoration:none}
+.qz-row .qz-src.own{color:var(--dim)}
+.qz-row .qz-tools{display:flex;gap:5px;flex:none;padding-top:6px}
+.qz-row .a-chip[disabled]{opacity:.3;cursor:default}
+.qz-acts{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+.qz-missed{margin-top:6px}
+.qz-att{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.qz-att-row{display:flex;align-items:center;gap:14px;padding:10px 13px;border:1px solid var(--line);
+  border-radius:2px;background:var(--panel)}
+.qz-att-row.pass{border-left:2px solid var(--gold)}
+.qz-att-row .qa-score{font-family:var(--serif);font-size:22px;color:var(--blush);min-width:58px}
+.qz-att-row .qa-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.qz-att-row .qa-n{font-size:14.5px;color:var(--ink)}
+.qz-att-row .qa-when{font-family:var(--serif);font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dim)}
+.qz-att-row .qa-tag{font-family:var(--serif);font-size:8.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.qz-att-row.pass .qa-tag{color:var(--gold)}
