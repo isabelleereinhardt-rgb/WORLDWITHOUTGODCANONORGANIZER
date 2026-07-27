@@ -507,6 +507,51 @@ function boot() {
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else boot();
 
+/* One-time repair for accounts created before the template-only change:
+   they were seeded with an extra World Without God workspace alongside
+   their own. If that extra canon workspace holds nothing of theirs, it
+   is quietly removed so they see just their own workspace. Anything
+   with actual content in it is left alone (they can delete it by hand). */
+async function cleanupExtraCanon() {
+  const n = ns();
+  if (!n || n === "gate") return;              // the owner's original account keeps the canon
+  const flagKey = storeKey("codex.canonCleanupDone");
+  if (localStorage.getItem(flagKey)) return;
+  let list;
+  try { list = JSON.parse(localStorage.getItem(storeKey("codex.workspaces")) || "null"); } catch (e) { return; }
+  if (!list || list.length < 2) { localStorage.setItem(flagKey, "1"); return; }
+  const canon = list.find(w => w.id === "default" && w.hasCanon);
+  if (!canon) { localStorage.setItem(flagKey, "1"); return; }
+  const empty = await new Promise((resolve) => {
+    let req;
+    try { req = indexedDB.open(dbName("default")); } catch (e) { return resolve(true); }
+    req.onerror = () => resolve(true);
+    req.onsuccess = () => {
+      const d = req.result;
+      const skip = ["meta", "feed", "daylog", "revisions"];
+      const names = Array.from(d.objectStoreNames).filter(s => !skip.includes(s));
+      if (!names.length) { d.close(); return resolve(true); }
+      let total = 0, done = 0;
+      let tx;
+      try { tx = d.transaction(names, "readonly"); } catch (e) { d.close(); return resolve(false); }
+      names.forEach(s => {
+        const c = tx.objectStore(s).count();
+        const step = () => { if (++done === names.length) { try { d.close(); } catch (e) {} resolve(total === 0); } };
+        c.onsuccess = () => { total += c.result; step(); };
+        c.onerror = step;
+      });
+    };
+  });
+  if (empty) {
+    const next = list.filter(w => w.id !== "default");
+    localStorage.setItem(storeKey("codex.workspaces"), JSON.stringify(next));
+    const activeKey = storeKey("codex.activeWorkspace");
+    if ((localStorage.getItem(activeKey) || "default") === "default") localStorage.setItem(activeKey, next[0].id);
+    try { indexedDB.deleteDatabase(dbName("default")); } catch (e) {}
+  }
+  localStorage.setItem(flagKey, "1");
+}
+
 async function ensureCloudSpace() {
   const cs = cloudSession();
   if (!cs) return;
@@ -519,7 +564,7 @@ async function ensureCloudSpace() {
 }
 
 window.CodexAccount = {
-  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, ensureCloudSpace, mountChip, seedSpaceFor,
+  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, ensureCloudSpace, cleanupExtraCanon, mountChip, seedSpaceFor,
   isSignedIn: () => !!current(),
 };
 })();

@@ -2398,6 +2398,7 @@ async function init() {
       // from the cloud (or seed the starter template) before anything reads
       if (window.CodexAccount && CodexAccount.ensureCloudSpace) {
         try { await CodexAccount.ensureCloudSpace(); } catch (e) {}
+        try { await CodexAccount.cleanupExtraCanon(); } catch (e) {}
       }
       // if the last-active workspace isn't the default one, redirect storage
       // to that workspace's own isolated database before loading anything

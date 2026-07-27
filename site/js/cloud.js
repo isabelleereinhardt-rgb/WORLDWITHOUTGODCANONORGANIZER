@@ -76,7 +76,7 @@ function friendly(e) {
   if (/Password should be/i.test(m)) return "that password is too short";
   if (/rate limit|too many/i.test(m)) return "too many attempts just now; wait a minute and try again";
   if (/JWT|expired/i.test(m)) return "your session expired; sign in again";
-  if (/row-level security|permission denied/i.test(m)) return "this account can't write to that workspace";
+  if (/row-level security|permission denied/i.test(m)) return "this account can't write to that workspace; re-running supabase/schema.sql in the project dashboard repairs this";
   return m;
 }
 const fail = e => { const err = new Error(friendly(e)); err.raw = e; return err; };
@@ -149,6 +149,14 @@ async function ensureWorkspace() {
   if (existing) {
     const { data } = await c.from("workspaces").select("id").eq("id", existing).maybeSingle();
     if (data) return existing;
+    // A row we created moments ago but cannot read back means the
+    // database's membership rules are missing (older schema run), not
+    // that the workspace is gone. Creating another row every sync would
+    // pile up orphans, so stop and say what repairs it instead.
+    const born = +(localStorage.getItem(remoteIdKey() + ".born") || 0);
+    if (born && Date.now() - born < 86400000) {
+      throw new Error("row-level security: workspace unreadable after creation");
+    }
     // it was deleted, or belongs to another account; start a fresh one
     localStorage.removeItem(remoteIdKey());
     localStorage.removeItem(lastSyncKey());
@@ -160,6 +168,7 @@ async function ensureWorkspace() {
     .select("id").single();
   if (error) throw error;
   setRemoteId(data.id);
+  localStorage.setItem(remoteIdKey() + ".born", String(Date.now()));
   return data.id;
 }
 
@@ -399,10 +408,15 @@ async function adoptRemoteWorkspaces() {
   const W = window.CodexWorkspaces;
   const list = [];
   for (const remote of data) {
+    const { count } = await c.from("items")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", remote.id);
+    if (!count) continue;
     const localId = "ws" + Math.random().toString(36).slice(2, 10);
     list.push({ id: localId, name: remote.name || "My workspace", hasCanon: !!remote.has_canon, createdAt: Date.now() });
     localStorage.setItem(acctKey("codex.sync.ws." + localId), remote.id);
   }
+  if (!list.length) return 0;   // only empty orphans in the cloud: start from the template instead
   localStorage.setItem(acctKey("codex.workspaces"), JSON.stringify(list));
   localStorage.setItem(acctKey("codex.activeWorkspace"), list[0].id);
   // pull each adopted workspace's content down

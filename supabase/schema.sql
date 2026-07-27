@@ -404,3 +404,28 @@ create policy "members delete plates" on storage.objects
     bucket_id = 'plates'
     and public.can_write(((storage.foldername(name))[1])::uuid)
   );
+
+-- ============================================================
+-- BACKFILL; safe to run any number of times.
+-- Repairs rows created by earlier versions of this schema:
+-- every existing user gets a profile row, and every workspace
+-- owner becomes a member of their own workspace (without this,
+-- writes to workspaces made before the membership trigger
+-- existed fail row-level security with "can't write").
+-- ============================================================
+insert into public.profiles (id, display_name)
+select u.id, coalesce(u.raw_user_meta_data->>'display_name', split_part(u.email, '@', 1))
+from auth.users u
+on conflict (id) do nothing;
+
+insert into public.workspace_members (workspace_id, user_id, role)
+select w.id, w.owner, 'owner'
+from public.workspaces w
+on conflict do nothing;
+
+-- Optional tidy-up: earlier broken syncs could leave duplicate EMPTY
+-- workspace rows behind. Uncomment to remove workspaces that have no
+-- items and are older than an hour:
+-- delete from public.workspaces w
+--   where w.created_at < now() - interval '1 hour'
+--     and not exists (select 1 from public.items i where i.workspace_id = w.id);
