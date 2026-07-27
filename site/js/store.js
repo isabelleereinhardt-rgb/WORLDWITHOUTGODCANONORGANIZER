@@ -1,5 +1,5 @@
 /* ============================================================
-   Beep Beep Organizer — storage layer (IndexedDB)
+   Beep Beep Organizer; storage layer (IndexedDB)
    Documents, slide decks, canvases (mood boards), folders,
    imported notes, and media all live here. IndexedDB has far
    more room than localStorage, so images actually persist now.
@@ -8,7 +8,7 @@
    Multi-workspace: each workspace gets its own IndexedDB database
    (codex-db--default for the original World Without God workspace,
    codex-db--<id> for every workspace after that), so switching
-   workspaces fully isolates docs/notes/canvases/etc — nothing
+   workspaces fully isolates docs/notes/canvases/etc; nothing
    bleeds between projects. Call CodexStore.switchWorkspace(id)
    before touching data for a workspace other than the current one.
 
@@ -18,41 +18,76 @@
 "use strict";
 
 const STORES = ["docs", "decks", "canvases", "folders", "notes", "meta",
-  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames", "hiddenCats"];
-const DB_VER = 4;
+  "tasks", "hidden", "cats", "sheets", "mindmaps", "flashcards", "feed", "timeline", "excludedNames", "hiddenCats",
+  "stories", "reading"];
+const DB_VER = 5;
 let db = null;
 let usingFallback = false;
 let currentWorkspace = "default";
 
-function dbNameFor(workspaceId) { return workspaceId === "default" ? "codex-db" : "codex-db--" + workspaceId; }
+/* database names are additionally namespaced per signed-in account
+   (see account.js), so two people on one device never share data */
+function dbNameFor(workspaceId) {
+  if (window.CodexAccount) return CodexAccount.dbName(workspaceId);
+  return workspaceId === "default" ? "codex-db" : "codex-db--" + workspaceId;
+}
 
 /* ---------- open ---------- */
 function openDB(name) {
   return new Promise((resolve) => {
-    if (!("indexedDB" in window)) { usingFallback = true; return resolve(null); }
+    if (!("indexedDB" in window)) return resolve(null);
     let req;
     try { req = indexedDB.open(name, DB_VER); }
-    catch (e) { usingFallback = true; return resolve(null); }
+    catch (e) { return resolve(null); }
+    let settled = false;
+    const settle = v => { if (!settled) { settled = true; resolve(v); } };
     req.onupgradeneeded = () => {
       const d = req.result;
       STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: "id" }); });
     };
     req.onsuccess = () => {
       // if a schema bump ships while this tab is still open, let a NEWER tab's
-      // upgrade through instead of sitting on this connection and blocking it —
+      // upgrade through instead of sitting on this connection and blocking it;
       // this tab just closes its handle; store ops fall back to localStorage
       // for the rest of this tab's life, and a normal reload picks up the rest
-      req.result.onversionchange = () => { try { req.result.close(); } catch (e) {} usingFallback = true; };
-      resolve(req.result);
+      req.result.onversionchange = () => {
+        try { req.result.close(); } catch (e) {}
+        if (db === req.result) { db = null; usingFallback = true; }
+      };
+      settle(req.result);
     };
-    req.onerror = () => { usingFallback = true; resolve(null); };
-    req.onblocked = () => { usingFallback = true; resolve(null); };
+    req.onerror = () => settle(null);
+    // "blocked" usually means an old page (mid-reload) hasn't finished closing
+    // its connection yet; give it a moment instead of instantly giving up,
+    // because onsuccess still fires once the stale connection lets go
+    req.onblocked = () => setTimeout(() => settle(null), 3000);
   });
+}
+
+/* Open the CURRENT workspace's database. Every (re)open goes through here.
+   The generation counter fixes a real race: the initial page-load open and a
+   switchWorkspace() open both used to assign `db` whenever they resolved, so
+   whichever finished LAST silently won; sometimes leaving reads and writes
+   pointed at the wrong workspace's database. A superseded open now discards
+   its handle instead of clobbering the active one. */
+let openGen = 0;
+function beginOpen() {
+  const gen = ++openGen;
+  return (async () => {
+    const handle = await openDB(dbNameFor(currentWorkspace));
+    if (gen !== openGen) { try { if (handle) handle.close(); } catch (e) {} return; }
+    db = handle;
+    usingFallback = !handle;
+    await migrateLegacy();
+  })();
 }
 
 /* ---------- localStorage fallback (namespaced per workspace too) ---------- */
 const LS = {
-  key(s) { return "codex.store." + currentWorkspace + "." + s; },
+  key(s) {
+    const base = "codex.store." + currentWorkspace + "." + s;
+    return window.CodexAccount ? CodexAccount.storeKey(base) : base;
+  },
   all(s) { try { return JSON.parse(localStorage.getItem(this.key(s)) || "[]"); } catch (e) { return []; } },
   saveAll(s, arr) { try { localStorage.setItem(this.key(s), JSON.stringify(arr)); return true; } catch (e) { return false; } },
   put(s, obj) { const a = this.all(s); const i = a.findIndex(x => x.id === obj.id); if (i >= 0) a[i] = obj; else a.unshift(obj); return this.saveAll(s, a); },
@@ -117,10 +152,7 @@ const Store = {
     if (db) { try { db.close(); } catch (e) {} db = null; }
     usingFallback = false;
     currentWorkspace = workspaceId || "default";
-    this.ready = (async () => {
-      db = await openDB(dbNameFor(currentWorkspace));
-      await migrateLegacy();
-    })();
+    this.ready = beginOpen();
     await this.ready;
     return true;
   },
@@ -141,6 +173,9 @@ const Store = {
 /* ---------- one-time migration from the old localStorage format (default workspace only) ---------- */
 async function migrateLegacy() {
   if (currentWorkspace !== "default") return;
+  // the old localStorage format belongs to the device's original data;
+  // only the account that claimed that data should absorb it
+  if (window.CodexAccount && CodexAccount.ns() !== "") return;
   try {
     const done = await Store.get("meta", "legacy-migrated");
     if (done) return;
@@ -152,13 +187,10 @@ async function migrateLegacy() {
   } catch (e) { /* non-fatal */ }
 }
 
-Store.ready = (async () => {
-  db = await openDB(dbNameFor(currentWorkspace));
-  await migrateLegacy();
-})();
+Store.ready = beginOpen();
 
 /* ============================================================
-   Image helper — downscale + compress before storing so a
+   Image helper; downscale + compress before storing so a
    mood board full of pictures still fits and loads fast.
    Returns a data URL (persisted safely in IndexedDB).
    ============================================================ */

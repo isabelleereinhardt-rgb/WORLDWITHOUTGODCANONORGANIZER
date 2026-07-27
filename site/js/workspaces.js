@@ -1,7 +1,7 @@
 /* ============================================================
-   Beep Beep Organizer — workspaces
+   Beep Beep Organizer; workspaces
    Each workspace is a fully separate project: its own documents,
-   notes, canvases, mind maps, tasks, everything — backed by its
+   notes, canvases, mind maps, tasks, everything; backed by its
    own isolated IndexedDB database (see store.js). The default
    workspace keeps the World Without God canon; any workspace you
    create after that starts empty. The assistant/search only ever
@@ -12,21 +12,23 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const WS_KEY = "codex.workspaces";
-const ACTIVE_KEY = "codex.activeWorkspace";
+/* keys are namespaced per signed-in account (account.js), so every
+   account keeps its own workspace list and active selection */
+const WS_KEY = () => window.CodexAccount ? CodexAccount.storeKey("codex.workspaces") : "codex.workspaces";
+const ACTIVE_KEY = () => window.CodexAccount ? CodexAccount.storeKey("codex.activeWorkspace") : "codex.activeWorkspace";
 const uid = () => "ws" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 function list() {
   try {
-    const raw = JSON.parse(localStorage.getItem(WS_KEY) || "null");
+    const raw = JSON.parse(localStorage.getItem(WS_KEY()) || "null");
     if (raw && raw.length) return raw;
   } catch (e) {}
   const seeded = [{ id: "default", name: "World Without God", hasCanon: true, createdAt: Date.now() }];
-  localStorage.setItem(WS_KEY, JSON.stringify(seeded));
+  localStorage.setItem(WS_KEY(), JSON.stringify(seeded));
   return seeded;
 }
-function saveList(arr) { localStorage.setItem(WS_KEY, JSON.stringify(arr)); }
-function activeId() { return localStorage.getItem(ACTIVE_KEY) || "default"; }
+function saveList(arr) { localStorage.setItem(WS_KEY(), JSON.stringify(arr)); }
+function activeId() { return localStorage.getItem(ACTIVE_KEY()) || "default"; }
 function current() { return list().find(w => w.id === activeId()) || list()[0]; }
 function activeHasCanon() { const w = current(); return !!(w && w.hasCanon); }
 
@@ -44,10 +46,10 @@ async function remove(id) {
   if (id === "default") throw new Error("The default workspace can't be deleted.");
   const arr = list().filter(x => x.id !== id); saveList(arr);
   if (window.CodexStore) await CodexStore.deleteWorkspaceDB(id);
-  if (activeId() === id) localStorage.setItem(ACTIVE_KEY, "default");
+  if (activeId() === id) localStorage.setItem(ACTIVE_KEY(), "default");
 }
 async function switchTo(id) {
-  localStorage.setItem(ACTIVE_KEY, id);
+  localStorage.setItem(ACTIVE_KEY(), id);
   if (window.CodexStore) await CodexStore.switchWorkspace(id);
 }
 
@@ -77,7 +79,7 @@ function renderSwitcher() {
     </div>`).join("");
   el.innerHTML = `<div class="export-box" style="width:400px">
     <div class="export-title">Workspaces</div>
-    <p class="faint" style="margin:0 0 12px">Each workspace is a separate project — its own documents, notes,
+    <p class="faint" style="margin:0 0 12px">Each workspace is a separate project: its own documents, notes,
       canvases, everything. The assistant only ever looks at whichever one is active.</p>
     <div class="ws-list">${rows}</div>
     <div class="ws-new"><input id="wsNewName" placeholder="New workspace name…"><button class="btn sm" id="wsNewBtn">Create</button></div>
