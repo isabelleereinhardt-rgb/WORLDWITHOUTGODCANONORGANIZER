@@ -788,13 +788,16 @@ async function viewShared(token) {
     </div>
     ${pub.blurb ? `<p class="reader-blurb">${esc(pub.blurb)}</p>` : ""}
     ${docs.map((d, i) => {
-      const text = plain(d.html).trim();
+      /* same renderer as the community reader: the chapter arrives as
+         written; images and formatting included; sanitized before it
+         touches the page */
+      const body = window.CodexBooks ? CodexBooks.ui.renderRich(d.html)
+        : plain(d.html).trim().split(/\n{1,}/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join("");
       return `<section class="read-ch">
         <div class="rch-head"><div class="ornament">✧ ✦ ✧</div>
           <div class="rch-kicker">Chapter ${i + 1}</div>
           <div class="rch-title">${esc(d.title || "Untitled")}</div></div>
-        ${text ? text.split(/\n{1,}/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join("")
-        : `<p class="faint">Not written yet.</p>`}
+        ${body || `<p class="faint">Not written yet.</p>`}
       </section>`;
     }).join("")}
     <div class="reader-say">

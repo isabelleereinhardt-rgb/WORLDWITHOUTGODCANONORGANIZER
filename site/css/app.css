@@ -2218,3 +2218,19 @@ body.reader-mode .lucky-stage{display:none}
 .part-bar .pb-gap{flex:1}
 
 a.a-chip{text-decoration:none;display:inline-block}
+
+/* rich chapter content in the readers; images, tables, quotes,
+   dividers; carried over from the editor as written */
+.rch-body{overflow-wrap:break-word}
+.read-ch img{max-width:100%;height:auto;display:block;margin:20px auto;border:1px solid var(--line)}
+.read-ch hr{border:none;margin:26px 0;text-align:center}
+.read-ch hr:after{content:"✦ ✧ ✦";color:var(--gold);font-size:11px;letter-spacing:.4em}
+.read-ch blockquote{border-left:2px solid var(--gold);margin:18px 0;padding:2px 0 2px 16px;
+  font-style:italic;color:var(--ink-soft)}
+.read-ch table{border-collapse:collapse;margin:18px auto;max-width:100%;display:block;overflow-x:auto}
+.read-ch td,.read-ch th{border:1px solid var(--line);padding:6px 10px;font-size:14px}
+.read-ch ul,.read-ch ol{margin:14px 0;padding-left:26px}
+.read-ch a{color:var(--blush)}
+.read-ch h1,.read-ch h2,.read-ch h3,.read-ch h4{font-family:var(--serif);margin:22px 0 10px}
+.read-ch pre,.read-ch code{font-size:13px;background:var(--panel2);padding:2px 5px;border-radius:2px}
+.read-ch pre{padding:10px 12px;overflow-x:auto}

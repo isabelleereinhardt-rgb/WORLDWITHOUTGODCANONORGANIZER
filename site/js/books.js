@@ -40,6 +40,67 @@ const nice = n => {
 const toastMsg = m => window.toast && toast(m);
 
 /* ============================================================
+   SANITIZER; what a published chapter is allowed to carry
+
+   A chapter travels as the author wrote it: paragraphs, headings,
+   bold and italics, lists, quotes, dividers, tables, links, and
+   images (the editor stores those as inline data URLs, so they need
+   no host). Everything else; scripts, styles, frames, handlers; is
+   stripped, because this HTML is written by one stranger and shown
+   to another. Run at render time, always: the database accepts
+   whatever an author's client sends, so the reader trusts nothing.
+   ============================================================ */
+const KILL_TAGS = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|FORM|INPUT|BUTTON|SELECT|TEXTAREA|VIDEO|AUDIO|SOURCE|SVG|MATH|BASE|NOSCRIPT|TEMPLATE|CANVAS|DIALOG|SLOT)$/;
+const KEEP_TAGS = /^(P|DIV|BR|SPAN|B|STRONG|I|EM|U|S|STRIKE|DEL|SUB|SUP|H1|H2|H3|H4|H5|H6|UL|OL|LI|BLOCKQUOTE|HR|A|IMG|TABLE|THEAD|TBODY|TFOOT|TR|TD|TH|FIGURE|FIGCAPTION|CODE|PRE|SMALL|MARK)$/;
+
+function scrubNode(root) {
+  Array.from(root.children).forEach(el => {
+    if (KILL_TAGS.test(el.tagName)) { el.remove(); return; }
+    scrubNode(el);
+    if (!KEEP_TAGS.test(el.tagName)) { el.replaceWith(...Array.from(el.childNodes)); return; }
+    Array.from(el.attributes).forEach(a => {
+      const n = a.name.toLowerCase(), v = String(a.value || "").trim();
+      if (n === "style") {
+        const safe = v.split(";").map(s => s.trim())
+          .filter(s => /^(text-align|line-height)\s*:\s*[a-z0-9.%\s-]+$/i.test(s)).join(";");
+        el.removeAttribute(a.name);
+        if (safe) el.setAttribute("style", safe);
+        return;
+      }
+      const ok = (n === "href" && el.tagName === "A" && /^https?:\/\//i.test(v))
+        || (n === "src" && el.tagName === "IMG" && (/^data:image\//i.test(v) || /^https:\/\//i.test(v)))
+        || ((n === "colspan" || n === "rowspan") && /^(TD|TH)$/.test(el.tagName) && /^\d{1,2}$/.test(v))
+        || n === "alt" || n === "title";
+      if (!ok) el.removeAttribute(a.name);
+    });
+    if (el.tagName === "A") {
+      if (!el.getAttribute("href")) { el.replaceWith(...Array.from(el.childNodes)); return; }
+      el.setAttribute("rel", "noopener noreferrer");
+      el.setAttribute("target", "_blank");
+    }
+    if (el.tagName === "IMG" && !el.getAttribute("src")) el.remove();
+  });
+}
+
+function sanitizeHtml(html) {
+  const tpl = document.createElement("template");   // inert: nothing loads or runs while parsing
+  tpl.innerHTML = String(html || "");
+  scrubNode(tpl.content);
+  return tpl.innerHTML;
+}
+
+/* Chapters published before this carried plain text; chapters after it
+   carry sanitized HTML. The reader renders either. */
+function renderRich(content) {
+  const c = String(content || "").trim();
+  if (!c) return "";
+  if (/<[a-z][^>]*>/i.test(c)) return `<div class="rch-body">${sanitizeHtml(c)}</div>`;
+  return c.split(/\n+/).filter(Boolean).map(p =>
+    /^([*✦\-–—\s]{3,})$/.test(p.trim())
+      ? `<div class="ornament" style="margin:22px 0">✦ ✧ ✦</div>` : `<p>${esc(p)}</p>`).join("");
+}
+
+/* ============================================================
    API; every community read and write goes through here
    ============================================================ */
 const sb = () => (C() && C().configured()) ? C().client() : null;
@@ -400,10 +461,12 @@ async function publishWork(folderId) {
     .upsert(bookRow, { onConflict: "owner,local_folder_id" }).select("id").single();
   if (error) throw error;
 
+  /* the chapter travels as written; images, tables, formatting and
+     all; sanitized on the way out and again wherever it is shown */
   const rows = live.map((d, i) => ({
     book_id: book.id, local_id: String(d.id), position: i,
     title: (d.title || "Untitled").slice(0, 200),
-    content: plain(d.html).trim(),
+    content: sanitizeHtml(d.html),
     word_count: words(plain(d.html)),
     updated_at: new Date().toISOString(),
   }));
@@ -691,7 +754,7 @@ async function viewChapter(id, posArg) {
   bumpReads(id);
   saveProgress(id, pos);
   if (me()) markSeen(id, chapters.length).catch(() => {});
-  const text = String(ch.content || "").trim();
+  const body = renderRich(ch.content);
   const author = b.community_profiles || {};
 
   view().innerHTML = `<div class="reader comm-reader">
@@ -703,9 +766,7 @@ async function viewChapter(id, posArg) {
       <div class="rch-head"><div class="ornament">✧ ✦ ✧</div>
         <div class="rch-kicker">Chapter ${pos + 1} of ${chapters.length}</div>
         <div class="rch-title">${esc(ch.title || "Untitled")}</div></div>
-      ${text ? text.split(/\n+/).filter(Boolean).map(p =>
-        /^([*✦\-–—\s]{3,})$/.test(p.trim()) ? `<div class="ornament" style="margin:22px 0">✦ ✧ ✦</div>` : `<p>${esc(p)}</p>`).join("")
-      : `<p class="faint">This chapter is empty.</p>`}
+      ${body || `<p class="faint">This chapter is empty.</p>`}
     </section>
     <div class="cr-nav">
       ${pos > 0 ? `<a class="btn ghost sm" href="#/book/${esc(id)}/${pos - 1}">← Previous</a>` : `<span></span>`}
@@ -802,6 +863,6 @@ window.CodexBooks = {
     listComments, addComment, removeComment, continueReading, commentsOnMyBooks,
     listPosts, addPost, removePost, myBooks, authorProfile, authorBooks,
   },
-  ui: { bookCard, avatarOf, commentThread, statBits, rel, nice },
+  ui: { bookCard, avatarOf, commentThread, statBits, rel, nice, sanitizeHtml, renderRich },
 };
 })();
