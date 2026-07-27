@@ -21,7 +21,7 @@ const view = () => $("#view");
 /* which features exist in the running app today */
 const SHIPPED = {
   backups: true, basics: true, importing: true, crossrefs: true,
-  assistant: true, sprint: false, revisions: false, community: false,
+  assistant: true, sprint: true, revisions: true, community: true,
 };
 
 const FAQS = [
@@ -42,9 +42,9 @@ const FAQS = [
   { needs: "sprint", topic: "Writing", q: "How do I write with fewer distractions?",
     a: "Start a sprint from the Desk. Everything dims for twenty five minutes, ambience plays if you chose one, and Lucky naps on the clock. Your word count and timer keep running in the document toolbar." },
   { needs: "revisions", topic: "Writing", q: "Can I undo a bad revision?",
-    a: "Open Revisions. Every save is listed with its word count, the diff shows exactly what changed, and Restore this version puts it back. Nothing is overwritten silently." },
+    a: "Open Versions from the document toolbar. A version is kept whenever the draft changes by a paragraph or so, or after a pause; each is listed with its word count, the comparison shows exactly what changed, and Restore this version puts it back. Restoring keeps the draft it replaces, so nothing is overwritten silently." },
   { needs: "community", topic: "Community", q: "What is the difference between a workspace and a community space?",
-    a: "A workspace is yours and private: one project, its own database. A community space is public: you publish chapters there, readers comment and react, and nothing from your private workspace goes with it unless you publish it." },
+    a: "A workspace is yours and private. The Reading Room is where your works face outward: give a work a cover and a blurb, make a reading link, and anyone holding the link can read it and leave you a note without an account. Nothing is shared unless you make a link, and revoking the link ends it." },
 ];
 
 const SHORTCUTS = [

@@ -22,7 +22,9 @@ const save = () => window.CodexSettings && CodexSettings.save();
 /* ---------- defaults, all opt-in ---------- */
 const DEF = {
   luckyName: "Lucky", luckySkin: "tabby", luckyAcc: "bell", luckyPersonality: "sweet",
-  luckyWalks: true, luckyNaps: true, luckyPets: 0, luckyPetsTotal: 0, luckyTreats: 0,
+  luckyWalks: true, luckyNaps: true, luckyTips: true, luckyTreatsOn: true,
+  luckyPets: 0, luckyPetsTotal: 0, luckyTreats: 0,
+  luckyCompanion: "none", luckyTreat: "sardine",
   ambience: "none", volume: 40,
   sfx: { click: false, page: false, bell: true, chime: false },
 };
@@ -266,6 +268,127 @@ function tipsFor(id, facts) {
 
 function persona() { return PERSONAS[pref("luckyPersonality")] || PERSONAS.sweet; }
 
+
+/* ---------- the companions who tag along ----------
+   Drawn the same way Lucky is, so a coat change on him carries through
+   to the kitten who copies him. */
+const COMPANION_SVG = {
+  mouse: `<svg width="36" height="24" viewBox="0 0 36 24" fill="none">
+    <path d="M23 16c7 .8 10-1.4 9.4-4.4" stroke="#a99e98" stroke-width="1.5" fill="none" stroke-linecap="round"></path>
+    <ellipse cx="15" cy="15" rx="9.6" ry="6.4" fill="#a9a29d"></ellipse>
+    <circle cx="9.6" cy="8.8" r="3.7" fill="#c0b9b4"></circle>
+    <circle cx="16.4" cy="7.6" r="3.5" fill="#c0b9b4"></circle>
+    <circle cx="9.6" cy="8.8" r="2.1" fill="#e0b4bd"></circle>
+    <circle cx="16.4" cy="7.6" r="2" fill="#e0b4bd"></circle>
+    <circle cx="6.6" cy="14.4" r="4.8" fill="#b8b1ac"></circle>
+    <circle cx="4" cy="13.6" r="1" fill="#33272a"></circle>
+    <circle cx="2.2" cy="15.8" r="1" fill="#d98c9a"></circle>
+    <path d="M3.2 17.4l-2.4 1.4M3 16.2h-2.6" stroke="#e6ded9" stroke-width=".7" stroke-linecap="round"></path>
+    <circle cx="12" cy="21" r="1.5" fill="#e0b4bd"></circle>
+    <circle cx="18.4" cy="21.2" r="1.5" fill="#e0b4bd"></circle>
+    </svg>`,
+  duckling: `<svg width="32" height="30" viewBox="0 0 32 30" fill="none">
+    <ellipse cx="18" cy="18.6" rx="9.6" ry="7.4" fill="#f0cb63"></ellipse>
+    <path d="M19.4 15.4c4.2 1.6 4.8 5.2 1.6 7-2.6-.8-3.4-4.2-1.6-7z" fill="#e0b247"></path>
+    <circle cx="10.4" cy="10" r="5.6" fill="#f6dd8f"></circle>
+    <path d="M5.4 9.4l-4.2 1 4 2.4z" fill="#e08a3c" stroke="#b8681f" stroke-width=".6"></path>
+    <circle cx="8.8" cy="8.8" r="1.1" fill="#33272a"></circle>
+    <path d="M9.6 3.8q1.6-2.8 3.2 0" stroke="#f6dd8f" stroke-width="1.8" fill="none" stroke-linecap="round"></path>
+    <path d="M15 25.6l-1 3.4M21 25.6l1 3.4" stroke="#e08a3c" stroke-width="1.6" stroke-linecap="round"></path>
+    </svg>`,
+  bee: `<svg width="32" height="26" viewBox="0 0 32 26" fill="none" style="animation:lucky-bob .9s ease-in-out infinite">
+    <ellipse cx="17" cy="15" rx="8.6" ry="6" fill="#f0c65c" stroke="#a97f24" stroke-width=".6"></ellipse>
+    <path d="M14 9.6v10.8M18 9.6v10.6M22 11.4v7" stroke="#3a2f22" stroke-width="2.2" stroke-linecap="round"></path>
+    <path d="M25.4 15l3.4-1.6v3.2z" fill="#3a2f22"></path>
+    <ellipse cx="15" cy="7.4" rx="5.4" ry="3.1" fill="#eaf3fa" stroke="#bcd2e2" stroke-width=".7" opacity=".9"></ellipse>
+    <ellipse cx="20.6" cy="8.6" rx="4" ry="2.4" fill="#eaf3fa" stroke="#bcd2e2" stroke-width=".7" opacity=".75"></ellipse>
+    <circle cx="8" cy="14.4" r="4.6" fill="#3a2f22"></circle>
+    <circle cx="6.2" cy="13.4" r="1.1" fill="#fdf7ef"></circle>
+    <path d="M6.4 10.4l-1.8-3.2M9.4 9.8l-.6-3.6" stroke="#3a2f22" stroke-width="1.1" stroke-linecap="round"></path>
+    </svg>`,
+  snail: `<svg width="36" height="26" viewBox="0 0 36 26" fill="none">
+    <path d="M4 21.4h17" stroke="#cbb69c" stroke-width="4.4" stroke-linecap="round"></path>
+    <path d="M6 19.6q1.4-6 7-6" stroke="#cbb69c" stroke-width="4" fill="none" stroke-linecap="round"></path>
+    <circle cx="21.6" cy="12.6" r="8.4" fill="#d9a768" stroke="#a97b45" stroke-width="1"></circle>
+    <path d="M21.6 12.6a3.2 3.2 0 0 1 3.2 3.2 6.4 6.4 0 0 1-9.6-1.6 9 9 0 0 1 12.8 1" fill="none" stroke="#a97b45" stroke-width="1.2"></path>
+    <circle cx="7" cy="16.4" r="3.4" fill="#d6c2a8"></circle>
+    <path d="M5.8 13.4l-1.6-4.4M9 13.2l.8-4.4" stroke="#d6c2a8" stroke-width="1.5" stroke-linecap="round"></path>
+    <circle cx="4" cy="8.4" r="1.1" fill="#33272a"></circle>
+    <circle cx="10" cy="8.2" r="1.1" fill="#33272a"></circle>
+    <path d="M5 18q1.8 1.2 3.4 0" stroke="#a98f74" stroke-width=".8" fill="none" stroke-linecap="round"></path>
+    </svg>`,
+  kitten: `<svg width="40" height="28" viewBox="0 0 40 28" fill="none">
+    <path class="lucky-tail" d="M28 16.4c5.6-.2 5.2-5 3.6-8" stroke="var(--fur)" stroke-width="3.2" stroke-linecap="round"></path>
+    <rect class="lucky-leg" x="15" y="18.6" width="3.2" height="7.4" rx="1.6" fill="var(--fur2)"></rect>
+    <rect class="lucky-leg" x="22.4" y="18.6" width="3.2" height="7.4" rx="1.6" fill="var(--fur2)" style="animation-delay:-.31s"></rect>
+    <rect x="11.6" y="11.6" width="17" height="10" rx="5" fill="var(--fur)"></rect>
+    <ellipse cx="20.6" cy="20" rx="6.6" ry="2.4" fill="var(--belly)"></ellipse>
+    <path d="M16.6 12.2v8.4M20.6 12.2v8.4M24.6 12.6v7.6" stroke="var(--fur3)" stroke-width="1.6" stroke-linecap="round" opacity=".7"></path>
+    <rect class="lucky-leg" x="18.6" y="18.6" width="3.2" height="7.4" rx="1.6" fill="var(--fur)" style="animation-delay:-.16s"></rect>
+    <rect class="lucky-leg" x="25.4" y="18.6" width="3.2" height="7.4" rx="1.6" fill="var(--fur)"></rect>
+    <path d="M6 8.6l.9-5 3.9 3.7z" fill="var(--fur)"></path>
+    <path d="M12.6 7.6l4.1-3.5.3 4.9z" fill="var(--fur)"></path>
+    <path d="M7.4 7.8l.5-2.6 2.1 1.9z" fill="var(--ear)"></path>
+    <path d="M13.8 7.2l2.3-1.9.2 2.7z" fill="var(--ear)"></path>
+    <circle cx="11" cy="12.6" r="6.4" fill="var(--head)"></circle>
+    <circle cx="8.6" cy="12.4" r="1.3" fill="var(--eye)"></circle>
+    <circle cx="13.4" cy="12.4" r="1.3" fill="var(--eye)"></circle>
+    <circle cx="9" cy="11.9" r=".45" fill="#fff"></circle>
+    <circle cx="13.8" cy="11.9" r=".45" fill="#fff"></circle>
+    <path d="M10 15h2l-1 1.2z" fill="var(--nose)"></path>
+    <path d="M11 16.4c-.6.9-1.8.9-2.4.2M11 16.4c.6.9 1.8.9 2.4.2" stroke="var(--fur3)" stroke-width=".8" stroke-linecap="round"></path>
+    <circle cx="6.2" cy="15" r="1.5" fill="var(--ear)" opacity=".5"></circle>
+    <circle cx="15.8" cy="15" r="1.5" fill="var(--ear)" opacity=".5"></circle>
+    </svg>`,
+};
+const COMPANIONS = [
+  ["none", "Walks alone", "Default"],
+  ["mouse", "Crumb the mouse", "Unbothered"],
+  ["kitten", "Pip the kitten", "Copies him"],
+  ["duckling", "Custard the duckling", "Loud"],
+  ["bee", "Thimble the bee", "Busy"],
+  ["snail", "Slowpoke the snail", "Late"],
+];
+
+/* ---------- what he gets after five pets ---------- */
+const TREAT_SVG = {
+  sardine: `<svg width="34" height="20" viewBox="0 0 34 20" fill="none">
+    <path d="M4 10c6-7 16-7 22 0-6 7-16 7-22 0z" fill="#9ec6d8"></path>
+    <path d="M26 10l6-5v10z" fill="#7fadc2"></path>
+    <circle cx="11" cy="9" r="1.4" fill="#2f3a42"></circle>
+    <path d="M14 6.5c3 1 5 3 6 5" stroke="#7fadc2" stroke-width="1.2"></path>
+    </svg>`,
+  cream: `<svg width="36" height="22" viewBox="0 0 36 22" fill="none">
+    <ellipse cx="18" cy="16" rx="15" ry="5" fill="#e7dcd2"></ellipse>
+    <ellipse cx="18" cy="13" rx="11" ry="4" fill="#fdf7ef"></ellipse>
+    <ellipse cx="14" cy="12.2" rx="3" ry="1.1" fill="#fff"></ellipse>
+    </svg>`,
+  biscuit: `<svg width="30" height="22" viewBox="0 0 30 22" fill="none">
+    <rect x="3" y="5" width="24" height="13" rx="4" fill="#d9a86a"></rect>
+    <path d="M8 9.5h.01M14 8.5h.01M20 10h.01M11 14h.01M18 14.5h.01" stroke="#8a5a2c" stroke-width="2.4" stroke-linecap="round"></path>
+    </svg>`,
+  prawn: `<svg width="32" height="24" viewBox="0 0 32 24" fill="none">
+    <path d="M7 8c8-4 17-2 19 5-2 7-11 9-16 4" stroke="#ef9a9a" stroke-width="6" stroke-linecap="round"></path>
+    <path d="M9 6l-4-3M12 5l-2-4" stroke="#ef9a9a" stroke-width="1.6" stroke-linecap="round"></path>
+    <circle cx="9.5" cy="8.5" r="1.2" fill="#7c3b3b"></circle>
+    </svg>`,
+  catnip: `<svg width="30" height="26" viewBox="0 0 30 26" fill="none">
+    <path d="M15 24V8" stroke="#6f8f5f" stroke-width="2" stroke-linecap="round"></path>
+    <path d="M15 14c-6 0-8-3-8-6 4 0 8 2 8 6zM15 11c6 0 8-3 8-6-4 0-8 2-8 6z" fill="#89ab72"></path>
+    <circle cx="15" cy="5" r="2.4" fill="#c9b6e0"></circle>
+    <circle cx="11" cy="7" r="1.4" fill="#c9b6e0"></circle>
+    </svg>`,
+};
+const TREATS = [
+  ["sardine", "Sardine", "Classic"],
+  ["cream", "Saucer of cream", "Rich"],
+  ["biscuit", "Butter biscuit", "Crumbly"],
+  ["prawn", "Prawn", "Fancy"],
+  ["catnip", "Catnip sprig", "Chaotic"],
+];
+const TREAT_NAME = { sardine: "sardine", cream: "saucer of cream", biscuit: "butter biscuit",
+  prawn: "prawn", catnip: "sprig of catnip" };
+
 /* ---------- coat palettes, applied through data-skin ---------- */
 const SKIN_CSS = `
 [data-skin="tabby"]{--fur:#e8963f;--fur2:#cf7f2e;--fur3:#c9741f;--head:#eda256;--belly:#f8e6d2;--ear:#eeb0ae;--nose:#e08b96;--eye:#3a2a22}
@@ -341,6 +464,22 @@ function walkerSvg() {
     <path d="M6 22.5l5 .8M6 26l5-.6M31 23.3l5-.8M31 25.4l5 .6" stroke="var(--belly)" stroke-width="1" stroke-linecap="round"/>
     ${accessorySvg(pref("luckyAcc"))}
   </svg>`;
+}
+
+/* Whoever is tagging along today, trotting a little behind him. */
+function companionSvg() {
+  const id = pref("luckyCompanion");
+  if (!id || id === "none" || !COMPANION_SVG[id]) return "";
+  return `<div class="lucky-pal">${COMPANION_SVG[id]}</div>`;
+}
+
+/* The treat itself: hidden until the fifth pet, then set down in front
+   of him while he hops. */
+function treatSvg() {
+  if (!pref("luckyTreatsOn")) return "";
+  const id = pref("luckyTreat");
+  const svg = TREAT_SVG[id] || TREAT_SVG.sardine;
+  return `<div class="lucky-treat">${svg}</div>`;
 }
 
 /* the sleeping loaf, used on the sprint clock */
@@ -426,7 +565,7 @@ const Lucky = {
     this.el.setAttribute("data-skin", this.skin());
     this.el.innerHTML = `
       <div class="lucky-walk" id="luckyWalk" title="Pet me, or ask me about your canon">
-        <div class="lucky-tip">
+        ${pref("luckyTips") ? `<div class="lucky-tip">
           <div class="k">${esc(this.name())} says</div>
           <div class="lucky-tip-text" id="luckyTipText">${esc(this.tip())}</div>
           <div class="lucky-tip-foot">
@@ -434,15 +573,18 @@ const Lucky = {
             <span class="pet-hint">${pets === 0 ? "Click me" : pets >= 4 ? "One more for a treat" : "Keep petting"}</span>
           </div>
           <button class="lucky-ask" id="luckyAsk">Ask me something →</button>
-        </div>
+        </div>` : ""}
         <div class="lucky-bob">${walkerSvg()}</div>
+        ${companionSvg()}
+        ${treatSvg()}
       </div>`;
     const walk = $("#luckyWalk", this.el);
     walk.onclick = (e) => {
       if (e.target.closest("#luckyAsk")) return;
       this.pet(walk);
     };
-    $("#luckyAsk", this.el).onclick = (e) => {
+    const ask = $("#luckyAsk", this.el);
+    if (ask) ask.onclick = (e) => {
       e.stopPropagation();
       if (window.CodexAssistant) CodexAssistant.open();
     };
@@ -451,6 +593,13 @@ const Lucky = {
   pet(walk) {
     const n = (pref("luckyPets") || 0) + 1;
     CodexExtra.settings.luckyPetsTotal = (pref("luckyPetsTotal") || 0) + 1;
+    if (!pref("luckyTreatsOn")) {
+      // no treats: he simply enjoys the attention
+      CodexExtra.settings.luckyPets = n % 5;
+      save();
+      this.render();
+      return;
+    }
     if (n < 5) {
       CodexExtra.settings.luckyPets = n;
       save();
@@ -464,7 +613,7 @@ const Lucky = {
     Sound.onBell();
     walk.classList.add("treating");
     const txt = $("#luckyTipText", this.el);
-    if (txt) txt.textContent = persona().treat;
+    if (txt) txt.textContent = persona().treat + " A " + (TREAT_NAME[pref("luckyTreat")] || "sardine") + ".";
     setTimeout(() => {
       walk.classList.remove("treating");
       this.tipIdx++;
@@ -547,6 +696,7 @@ const Sprint = {
   finish() {
     const mins = Math.round(this.total / 60);
     this.end(true);
+    window.CodexHelp && CodexHelp.markMilestone("sprint");
     if (window.toast) toast(`Sprint finished. ${mins} minutes at the desk.`);
   },
 
@@ -626,11 +776,14 @@ window.CodexLucky = {
   refreshFacts: () => Lucky.refreshFacts(),
   face: faceSvg, nap: napSvg,
   name: () => Lucky.name(), skin: () => Lucky.skin(),
-  persona, PERSONAS, SKINS, ACCESSORIES,
+  persona, PERSONAS, SKINS, ACCESSORIES, COMPANIONS, TREATS,
+  companionSvg: id => COMPANION_SVG[id] || "", treatSvg: id => TREAT_SVG[id] || "",
   pref, setPref,
   setSkin: id => Lucky.setSkin(id), setAcc: id => Lucky.setAcc(id),
   setPersonality: id => Lucky.setPersonality(id), setName: n => Lucky.setName(n),
   setWalks: on => Lucky.setWalks(on),
+  setCompanion: id => { setPref("luckyCompanion", id); Lucky.render(); },
+  setTreat: id => { setPref("luckyTreat", id); Lucky.render(); },
   ledger: () => [
     { n: pref("luckyPetsTotal") || 0, label: "Pets" },
     { n: pref("luckyTreats") || 0, label: "Treats" },

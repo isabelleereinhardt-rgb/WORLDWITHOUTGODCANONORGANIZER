@@ -42,6 +42,8 @@ const IC = {
   help:   '<circle cx="10" cy="10" r="6.6"/><path d="M8.2 8a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4"/><path d="M10 13.6h.01"/>',
   read:   '<path d="M10 5.6C8.4 4.4 6 4.2 3.6 4.6v10.2c2.4-.4 4.8-.2 6.4 1 1.6-1.2 4-1.4 6.4-1V4.6c-2.4-.4-4.8-.2-6.4 1z"/><path d="M10 5.6v11"/>',
   clock:  '<circle cx="10" cy="10" r="6.6"/><path d="M10 6.4V10l2.6 1.6"/>',
+  book:   '<path d="M4.5 4h7a2 2 0 0 1 2 2v10H6.5a2 2 0 0 0-2 2z"/><path d="M13.5 6a2 2 0 0 1 2-2v12"/>',
+  people: '<circle cx="7.6" cy="8" r="2.6"/><path d="M3.4 16c0-2.3 1.9-4.2 4.2-4.2s4.2 1.9 4.2 4.2"/><circle cx="14" cy="8.6" r="2"/><path d="M13 12c2 0 3.6 1.6 3.6 3.6"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -150,6 +152,9 @@ function noteToEntry(n) {
     images: n.images || [], links: n.links || [], source: null, _user: true,
     // false when "Let the assistant read it" was switched off at import
     aiRead: n.aiRead === false ? false : true,
+    // filed for its names alone: contributes to the Name Index and
+    // cross-linking, but is not a browsable entry
+    namesOnly: !!n.namesOnly,
   };
 }
 /* A short brief written once at import: the most descriptive sentences
@@ -172,9 +177,14 @@ function rebuildEntries() {
   const base = hasCanon ? ORIG_ENTRIES : [];
   const baseEntities = hasCanon ? ORIG_ENTITIES : [];
   const noteEntries = notesCache.map(noteToEntry);
-  DB.entries = base.filter(e => !hidden.has(e.id)).concat(noteEntries.filter(e => !hidden.has(e.id)));
+  const visibleNotes = noteEntries.filter(e => !hidden.has(e.id) && !e.namesOnly);
+  DB.entries = base.filter(e => !hidden.has(e.id)).concat(visibleNotes);
   DB.entities = baseEntities.slice();
-  noteEntries.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  visibleNotes.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  // names-only imports never become entries, but their names still count
+  noteEntries.filter(e => e.namesOnly && !hidden.has(e.id)).forEach(e => {
+    entitiesIn(e.text).forEach(n => { if (!DB.entities.includes(n)) DB.entities.push(n); });
+  });
   const excludedNames = window.CodexExtra ? CodexExtra.excludedNames : new Set();
   if (excludedNames.size) DB.entities = DB.entities.filter(n => !excludedNames.has(n));
   DB.stats.entries = DB.entries.length;
@@ -190,6 +200,7 @@ async function addNote(title, text, images, category, opts) {
   };
   if (opts.summarize) note.brief = briefOf(note.text);
   if (opts.aiRead === false) note.aiRead = false;
+  if (opts.namesOnly) note.namesOnly = true;
   await CodexStore.put("notes", note);
   notesCache.unshift(note);
   refresh();
@@ -251,6 +262,8 @@ function buildNav() {
       <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
       <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
       <div class="nav-item" data-route="#/read">${svg("read")}<span>Read Through</span></div>
+      <div class="nav-item" data-route="#/work">${svg("book")}<span>My Works</span></div>
+      <div class="nav-item" data-route="#/community">${svg("people")}<span>Reading Room</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
       <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
       <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
@@ -608,7 +621,12 @@ function viewEntry(id) {
 
   const facts = factsOf(e, 8);
   const flags = entryFlags(e);
+  const banner = (e._user && e.banner) || null;
   view.innerHTML = `<div class="entry-page">
+    <div class="entry-banner${banner ? " has" : ""}" id="entryBanner">
+      ${banner ? `<img src="${esc(banner)}" alt="">` : `<span class="eb-hint">Drop a banner image</span>`}
+      <input type="file" id="entryBannerFile" accept="image/*" hidden>
+    </div>
     <div class="entry-top">
       <div>
         <div class="page-kicker">${catDot(e.category)} ${esc(e.category)}</div>
@@ -630,7 +648,8 @@ function viewEntry(id) {
       <div class="entry-main reading">
         ${body}
         ${linksHtml}
-        ${relImgs}
+        ${(e.images || []).length ? `<div class="rule-head mt"><span class="k">Plates</span><span class="hr"></span>
+          <span class="meta">${e.images.length}</span></div>${relImgs}` : relImgs}
       </div>
       <aside class="entry-side">
         ${facts.length ? `<div class="gold-card">
@@ -666,6 +685,7 @@ function viewEntry(id) {
 
   $$(".xref", view).forEach(x => x.onclick = () => location.hash = "#/subject/" + encodeURIComponent(x.dataset.subject));
   bindGallery();
+  bindBanner(e);
   renderMargins(e.id);
   $("#addMargin").onclick = () => addMargin(e.id);
   if ($("#flagCheck")) $("#flagCheck").onclick = () => { openAssistant(); askAssistant("check consistency for " + e.title); };
@@ -715,6 +735,28 @@ function galleryHtml(images) {
        <figcaption>${esc(p.split('/').pop() || "image")}</figcaption>
      </figure>`).join("") + `</div>`;
 }
+/* A banner belongs to an entry you wrote; the shipped canon is read-only
+   so there is nowhere to keep one. */
+function bindBanner(e) {
+  const box = $("#entryBanner"), input = $("#entryBannerFile");
+  if (!box) return;
+  if (!e._user) { box.remove(); return; }
+  const take = async (file) => {
+    if (!file) return;
+    try {
+      const url = await window.CodexImg.fileToScaledDataURL(file, 1600, 0.82);
+      await updateNote(e.id, { banner: url });
+      toast("Banner set");
+      viewEntry(e.id);
+    } catch (err) { toast("Couldn't read that image"); }
+  };
+  box.onclick = () => input.click();
+  input.onchange = () => take(input.files[0]);
+  box.ondragover = ev => { ev.preventDefault(); box.classList.add("over"); };
+  box.ondragleave = () => box.classList.remove("over");
+  box.ondrop = ev => { ev.preventDefault(); box.classList.remove("over"); take(ev.dataTransfer.files[0]); };
+}
+
 /* ---------- continuity flags on an entry ----------
    Cheap, specific checks that can be stated plainly. Anything vaguer
    than this belongs to the assistant's full consistency pass, which
@@ -975,6 +1017,9 @@ function viewImport() {
           <span>Write a brief<em>Three telling sentences, kept at the top of the entry.</em></span></label>
         <label class="lore-opt"><input type="checkbox" id="optAiRead" checked>
           <span>Let the assistant read it<em>Off keeps it out of answers. It stays searchable either way.</em></span></label>
+        <label class="lore-opt"><input type="checkbox" id="optNamesOnly">
+          <span>Names only<em>Harvest the names for the Name Index and cross-linking, without adding a
+            browsable entry. Good for a cast list or a glossary dump.</em></span></label>
         <button class="btn" id="addPaste" style="width:100%;margin-top:14px">Save &amp; index</button>
         ${custom.length ? "" : `<p class="faint" style="margin-top:10px;font-size:12px">Want a section of your own?
           Use the <b>+</b> beside "The Canon" in the sidebar; it appears in this list too.</p>`}
@@ -1018,8 +1063,18 @@ function viewImport() {
   $("#addPaste").onclick = async () => {
     const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim(), c = $("#pasteCat").value;
     if (!b) { toast("Nothing to add yet"); return; }
+    const namesOnly = $("#optNamesOnly").checked;
     const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c,
-      { summarize: $("#optSummarize").checked, aiRead: $("#optAiRead").checked });
+      { summarize: !namesOnly && $("#optSummarize").checked,
+        aiRead: namesOnly ? false : $("#optAiRead").checked,
+        namesOnly });
+    if (namesOnly) {
+      const found = Array.from(entitiesIn(b)).length;
+      logImport(`Harvested names from <b>${esc(note.title)}</b> — ${found} recognised, no entry filed.`, c);
+      $("#pasteTitle").value = ""; $("#pasteBody").value = "";
+      refresh();
+      return;
+    }
     logImport(`Added <b>${esc(note.title)}</b> to <b>${esc(c)}</b>.`, c);
     $("#pasteTitle").value = ""; $("#pasteBody").value = "";
     location.hash = "#/entry/" + note.id;
@@ -1888,6 +1943,9 @@ window.toast = toast;
    ============================================================ */
 function route() {
   const h = location.hash || "#/";
+  // a reading link is somebody else's view of one work: no sidebar,
+  // no assistant, none of the workspace furniture
+  document.getElementById("app").classList.toggle("reader-mode", h.startsWith("#/shared/"));
   const parts = h.replace(/^#\//, "").split("/");
   const path = parts[0];
   const arg = decodeURIComponent(parts.slice(1).join("/") || "");
@@ -1914,6 +1972,9 @@ function route() {
   else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
   else if (path === "help") window.CodexHelp && CodexHelp.view();
   else if (path === "read") window.CodexPages && CodexPages.read(parts[1] || "");
+  else if (path === "work") window.CodexPublish && CodexPublish.work(parts[1] || "");
+  else if (path === "community") window.CodexCommunity && CodexCommunity.view(parts[1] || "");
+  else if (path === "shared") window.CodexPublish && CodexPublish.shared(parts[1] || "");
   else if (path === "history") window.CodexPages && CodexPages.history(parts[1] || "");
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();

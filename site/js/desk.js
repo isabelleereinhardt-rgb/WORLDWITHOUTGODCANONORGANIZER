@@ -344,6 +344,8 @@ async function viewDesk() {
           <div class="lucky-meta">Week ${weekOfYear(now)} · ${weekWords.toLocaleString()} words · ${weekMinutes} min at the desk${treatLine()}</div>
         </div>
 
+        <div id="deskReaders"></div>
+
         <div>
           <div class="rule-head">
             <span class="k">On this day in your canon</span><span class="hr"></span>
@@ -366,6 +368,7 @@ async function viewDesk() {
   </div>`;
 
   $("#deskSprint").onclick = () => window.CodexSprint && CodexSprint.start(25);
+  renderReaders();
   $("#deskName").onclick = () => {
     const next = prompt("What should the desk call you?", id.name || "");
     if (next === null) return;
@@ -386,6 +389,38 @@ function minutesSince(byDay, since) {
   const h = Math.floor(mins / 60), m = mins % 60;
   const dur = h ? `${h} hour${h === 1 ? "" : "s"}${m ? ` and ${m} minute${m === 1 ? "" : "s"}` : ""}` : `${m} minute${m === 1 ? "" : "s"}`;
   return `${dur} at the desk since ${new Date(since).toLocaleDateString(undefined, { weekday: "long" })}.`;
+}
+
+/* What readers have sent, when there is an account to have received
+   anything. Silent otherwise — an empty panel promising readers you
+   have no way of having would be worse than no panel. */
+async function renderReaders() {
+  const el = $("#deskReaders");
+  if (!el) return;
+  const C = window.CodexCloud;
+  if (!C || !C.configured() || !C.state().signedIn) { el.innerHTML = ""; return; }
+  let notes = [];
+  try { notes = await C.comments.list(); } catch (e) { el.innerHTML = ""; return; }
+  if (!notes.length) { el.innerHTML = ""; return; }
+  const unread = notes.filter(n => !n.resolved).length;
+  el.innerHTML = `
+    <div class="rule-head">
+      <span class="k">From your readers</span><span class="hr"></span>
+      ${unread ? `<span class="meta">${unread} new</span>` : ""}
+    </div>
+    ${notes.slice(0, 3).map(n => {
+      const who = n.author_name || (n.author_id ? "You" : "A reader");
+      return `<div class="reader-note">
+        <div class="rn-top">
+          <span class="rn-initial">${esc(who.charAt(0).toUpperCase())}</span>
+          <span class="rn-text">${esc(n.body.slice(0, 200))}${n.body.length > 200 ? "…" : ""}</span>
+        </div>
+        <div class="rn-foot">
+          <span class="rn-where">${esc(who)} · ${new Date(n.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+          <span class="hr"></span>
+          <a class="a-chip" href="#/community/notes">Reply</a>
+        </div></div>`;
+    }).join("")}`;
 }
 
 /* Pets and treats only appear once he has actually earned some. */

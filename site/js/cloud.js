@@ -288,11 +288,107 @@ function startAuto() {
   });
 }
 
+/* ============================================================
+   SHARING — a link you can hand to a reader who has no account
+   ============================================================ */
+async function listShares() {
+  const c = client();
+  if (!c || !session) return [];
+  const ws = remoteId();
+  if (!ws) return [];
+  const { data, error } = await c.from("shares").select("*")
+    .eq("workspace_id", ws).eq("revoked", false).order("created_at", { ascending: false });
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function createShare(scope, label, canComment) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const ws = await ensureWorkspace();
+  const { data, error } = await c.from("shares")
+    .insert({ workspace_id: ws, scope: scope || "workspace", label: label || null,
+      can_comment: canComment !== false, created_by: session.user.id })
+    .select("*").single();
+  if (error) throw fail(error);
+  return data;
+}
+
+async function revokeShare(id) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const { error } = await c.from("shares").update({ revoked: true }).eq("id", id);
+  if (error) throw fail(error);
+  return true;
+}
+
+/* The address to hand out. Kept on this origin so a reader lands in the
+   same app, in a read-only view. */
+function shareUrl(token) {
+  return location.origin + location.pathname + "#/shared/" + token;
+}
+
+/* ---------- reading by token, with no account at all ---------- */
+async function readShared(token) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  const { data, error } = await c.rpc("read_shared", { share_token: token });
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function commentViaShare(token, target, name, body) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  const { data, error } = await c.rpc("comment_via_share",
+    { share_token: token, target_id: target, name: name || "", body: body });
+  if (error) throw fail(error);
+  return data;
+}
+
+/* ============================================================
+   COMMENTS — what came back from readers
+   ============================================================ */
+async function listComments(target) {
+  const c = client();
+  if (!c || !session) return [];
+  const ws = remoteId();
+  if (!ws) return [];
+  let q = c.from("comments").select("*").eq("workspace_id", ws)
+    .order("created_at", { ascending: false }).limit(200);
+  if (target) q = q.eq("target", target);
+  const { data, error } = await q;
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function addComment(target, body) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const ws = await ensureWorkspace();
+  const { data, error } = await c.from("comments")
+    .insert({ workspace_id: ws, target, body, author_id: session.user.id })
+    .select("*").single();
+  if (error) throw fail(error);
+  return data;
+}
+
+async function resolveComment(id, resolved) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const { error } = await c.from("comments").update({ resolved: !!resolved }).eq("id", id);
+  if (error) throw fail(error);
+  return true;
+}
+
 window.CodexCloud = {
   configured: () => CONFIGURED,
   state, onChange: fn => listeners.push(fn),
   signUp, signIn, signOut, resetPassword,
   sync: syncNow, uploadEverything,
+  shares: { list: listShares, create: createShare, revoke: revokeShare, url: shareUrl },
+  reader: { read: readShared, comment: commentViaShare },
+  comments: { list: listComments, add: addComment, resolve: resolveComment },
   client,
 };
 

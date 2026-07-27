@@ -64,8 +64,42 @@ function defaultTypography() {
 const DESIGN_VERSION = 2;
 function defaultSettings() {
   return { accent: "", bg: "", fontSize: 15, uiFont: "Crimson Pro", readFont: "Cormorant Garamond",
+    preset: "romantasy", density: "comfortable", ornament: "stars",
     typography: defaultTypography(), designVersion: DESIGN_VERSION };
 }
+
+/* ---------- preset looks ----------
+   Each one sets the same fields the controls below it set, so a preset
+   is a shortcut rather than a mode you get stuck in. */
+const PRESETS = [
+  { id: "romantasy", name: "Romantasy", note: "The house look; rose on plum",
+    swatches: ["#241b1e", "#f6ccd5", "#c9a15c"], theme: "dark",
+    apply: { accent: "", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
+  { id: "parchment", name: "Parchment", note: "Warm paper, ink and gold",
+    swatches: ["#f7f0ea", "#8a6526", "#38242c"], theme: "light",
+    apply: { accent: "#b0567a", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
+  { id: "midnight", name: "Midnight archive", note: "Cool slate, violet ink",
+    swatches: ["#1b1a24", "#8e7cc3", "#c9c4d8"], theme: "dark",
+    apply: { accent: "#8e7cc3", bg: "#1b1a24", uiFont: "Spectral", readFont: "EB Garamond" } },
+  { id: "botanical", name: "Botanical", note: "Green, quiet, unhurried",
+    swatches: ["#f3f1e7", "#5d7a58", "#33402f"], theme: "light",
+    apply: { accent: "#5d7a58", bg: "#f3f1e7", uiFont: "Alegreya", readFont: "Vollkorn" } },
+  { id: "inkpress", name: "Ink press", note: "High contrast, cut glass",
+    swatches: ["#141414", "#e7e3df", "#c2334f"], theme: "dark",
+    apply: { accent: "#c2334f", bg: "#141414", uiFont: "Work Sans", readFont: "Playfair Display" } },
+  { id: "dusk", name: "Dusk", note: "Amber lamp on a cold evening",
+    swatches: ["#241d1b", "#e0a45c", "#f0e2d4"], theme: "dark",
+    apply: { accent: "#e0a45c", bg: "#241d1b", uiFont: "Karla", readFont: "Cardo" } },
+];
+const DENSITIES = [
+  ["snug", "Snug", "More on screen at once"],
+  ["comfortable", "Comfortable", "The default"],
+  ["airy", "Airy", "Room to breathe"],
+];
+const ORNAMENTS = [
+  ["stars", "✦ ✧ ✦"], ["diamonds", "❖ ❖ ❖"], ["fleur", "❧ ❧ ❧"],
+  ["dots", "· · ·"], ["rule", "—— ✦ ——"], ["none", "(none)"],
+];
 
 /* ---------- shared caches (read synchronously by app.js) ---------- */
 const Extra = {
@@ -164,6 +198,11 @@ function applySettings(s) {
   } else {
     ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
   }
+  // density scales the spacing tokens the whole page lays out from
+  const dens = { snug: 0.82, comfortable: 1, airy: 1.22 }[s.density || "comfortable"] || 1;
+  root.setProperty("--dens", String(dens));
+  document.documentElement.dataset.density = s.density || "comfortable";
+  document.documentElement.dataset.ornament = s.ornament || "stars";
   root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
   root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
@@ -206,6 +245,7 @@ const SET_TABS = [
   ["restore", "Restore", "✦"],
   ["backup", "Workspaces & backup", "❖"],
   ["account", "Account & syncing", "✦"],
+  ["report", "Help & report a problem", "✧"],
 ];
 let setTab = "appearance";
 
@@ -239,7 +279,7 @@ function renderSetPanel() {
     appearance: panelAppearance, avatar: panelAvatar, typography: panelTypography,
     sound: panelSound, lucky: panelLucky, assistant: panelAssistant,
     sections: panelSections, restore: panelRestore, backup: panelBackup,
-    account: panelAccount,
+    account: panelAccount, report: panelReport,
   })[setTab](el);
 }
 
@@ -249,7 +289,27 @@ function panelAppearance(el) {
   const accents = ["#f6ccd5", "#d4869c", "#b06a8f", "#c9a15c", "#8e7cc3", "#7c9a76", "#c2603f", "#3f6f8f"];
   const bgs = ["#241b1e", "#f7f0ea", "#fbe9ee", "#221d2e", "#efe3d2", "#1b1a1d", "#17151a", "#f6f3ec"];
   el.innerHTML = `
-    <div class="rule-head"><span class="k">Accent colour</span><span class="hr"></span></div>
+    <div class="rule-head"><span class="k">Preset looks</span><span class="hr"></span>
+      <span class="meta">a starting point; everything below stays adjustable</span></div>
+    <div class="skin-grid">
+      ${PRESETS.map(p => `<button class="skin-card${s.preset === p.id ? " on" : ""}" data-preset="${p.id}">
+        <span class="sk-swatches">${p.swatches.map(c => `<span style="background:${c}"></span>`).join("")}</span>
+        <span class="sk-name">${esc(p.name)}</span>
+        <span class="sk-note">${esc(p.note)}</span></button>`).join("")}
+    </div>
+
+    <div class="rule-head mt"><span class="k">Density</span><span class="hr"></span></div>
+    <p class="faint set-help">How much air the page gives itself.</p>
+    <div class="av-chips">${DENSITIES.map(([id, label, note]) =>
+      `<button class="av-chip${(s.density || "comfortable") === id ? " on" : ""}" data-density="${id}"
+        title="${esc(note)}">${esc(label)}</button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Ornament set</span><span class="hr"></span></div>
+    <p class="faint set-help">The little marks between sections, and the one on Lucky's notices.</p>
+    <div class="av-chips">${ORNAMENTS.map(([id, glyphs]) =>
+      `<button class="av-chip orn${(s.ornament || "stars") === id ? " on" : ""}" data-ornament="${id}">${glyphs}</button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Accent colour</span><span class="hr"></span></div>
     <p class="faint set-help">The whole site follows it; links, active nav, buttons.</p>
     <div class="swatch-row">
       ${accents.map(c => `<button class="swatch" style="background:${c}" data-accent="${c}" title="${c}"></button>`).join("")}
@@ -274,6 +334,17 @@ function panelAppearance(el) {
     <div class="set-row"><label>Reading / heading font<em>The default for headings and reading text.</em></label>
       <select id="readFont">${FONT_LIST.map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select></div>`;
 
+  $$("[data-preset]", el).forEach(b => b.onclick = () => {
+    const p = PRESETS.find(x => x.id === b.dataset.preset);
+    if (!p) return;
+    Object.assign(Extra.settings, p.apply, { preset: p.id });
+    if (p.theme) { document.documentElement.dataset.theme = p.theme; localStorage.setItem("codex.theme", p.theme); }
+    saveSettings();
+    viewSettings("appearance");
+    toast(p.name + " applied");
+  });
+  $$("[data-density]", el).forEach(b => b.onclick = () => { Extra.settings.density = b.dataset.density; saveSettings(); viewSettings("appearance"); });
+  $$("[data-ornament]", el).forEach(b => b.onclick = () => { Extra.settings.ornament = b.dataset.ornament; saveSettings(); viewSettings("appearance"); });
   $$(".swatch[data-accent]", el).forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker", el).oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
   $("#accentReset", el).onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
@@ -420,15 +491,39 @@ function panelLucky(el) {
       </button>`;
     }).join("")}</div>
 
+    <div class="rule-head mt"><span class="k">Who walks with him</span><span class="hr"></span></div>
+    <div class="lucky-skins">
+      ${L.COMPANIONS.map(([id, name, note]) => `
+        <button class="lucky-skin${L.pref("luckyCompanion") === id ? " on" : ""}" data-lpal="${id}" data-skin="${esc(L.skin())}">
+          <span class="ls-face pal-face">${id === "none" ? "✧" : L.companionSvg(id)}</span>
+          <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+
+    <div class="rule-head mt"><span class="k">What he gets after five pets</span><span class="hr"></span></div>
+    <div class="lucky-skins">
+      ${L.TREATS.map(([id, name, note]) => `
+        <button class="lucky-skin${L.pref("luckyTreat") === id ? " on" : ""}" data-ltreat="${id}">
+          <span class="ls-face pal-face">${L.treatSvg(id)}</span>
+          <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+
     <div class="rule-head mt"><span class="k">His habits</span><span class="hr"></span></div>
-    <div class="sfx-row"><span class="sfx-label">Walk along the bottom of the window<em>Turn it off for a completely still page.</em></span>
+    <div class="sfx-row"><span class="sfx-label">Walk across the screen<em>Turn it off for a completely still page.</em></span>
       <button class="switch${L.pref("luckyWalks") ? " on" : ""}" data-lhab="luckyWalks" role="switch" aria-checked="${!!L.pref("luckyWalks")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Show his tips and encouragement<em>The little window he carries as he passes.</em></span>
+      <button class="switch${L.pref("luckyTips") ? " on" : ""}" data-lhab="luckyTips" role="switch" aria-checked="${!!L.pref("luckyTips")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Treats after five pets<em>Off means he just enjoys being petted.</em></span>
+      <button class="switch${L.pref("luckyTreatsOn") ? " on" : ""}" data-lhab="luckyTreatsOn" role="switch" aria-checked="${!!L.pref("luckyTreatsOn")}"><span></span></button></div>
     <div class="sfx-row"><span class="sfx-label">Nap on the sprint clock<em>He curls up on the timer while you write.</em></span>
       <button class="switch${L.pref("luckyNaps") ? " on" : ""}" data-lhab="luckyNaps" role="switch" aria-checked="${!!L.pref("luckyNaps")}"><span></span></button></div>`;
 
   $$("[data-lskin]", el).forEach(b => b.onclick = () => { L.setSkin(b.dataset.lskin); renderSetPanel(); });
   $$("[data-lacc]", el).forEach(b => b.onclick = () => { L.setAcc(b.dataset.lacc); renderSetPanel(); });
   $$("[data-lpers]", el).forEach(b => b.onclick = () => { L.setPersonality(b.dataset.lpers); renderSetPanel(); });
+  $$("[data-lpal]", el).forEach(b => b.onclick = () => { L.setCompanion(b.dataset.lpal); renderSetPanel(); });
+  $$("[data-ltreat]", el).forEach(b => b.onclick = () => { L.setTreat(b.dataset.ltreat); renderSetPanel(); });
   $$("[data-lhab]", el).forEach(b => b.onclick = () => {
     const k = b.dataset.lhab, next = !L.pref(k);
     if (k === "luckyWalks") L.setWalks(next); else L.setPref(k, next);
@@ -614,6 +709,94 @@ function panelAccount(el) {
       try { await C.uploadEverything(); } catch (err) { toast(err.message || String(err)); }
     };
   }
+}
+
+/* ---------- Help & report a problem ----------
+   There is no inbox behind this, so it does not pretend to send
+   anything. It assembles a description of what went wrong, with the
+   details worth having, and hands it to you to send however you like.
+   A form that silently dropped what you wrote would be worse. */
+const REPORT_KINDS = [
+  ["broken", "Something is broken"],
+  ["wrong", "Something looks wrong"],
+  ["lost", "My writing looks wrong or missing"],
+  ["idea", "I want to suggest something"],
+  ["other", "Something else"],
+];
+let reportKind = "broken";
+
+function panelReport(el) {
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Help</span><span class="hr"></span></div>
+    <p class="set-help">The <a href="#/help">Help page</a> answers the common questions in a couple of
+      minutes each. If your writing looks wrong, start there — nothing in this app deletes permanently,
+      and deleted entries wait in <b>Restore</b>.</p>
+
+    <div class="rule-head mt"><span class="k">Report a problem</span><span class="hr"></span></div>
+    <p class="set-help">Nothing is uploaded from here. This writes up what happened, adds the technical
+      details that make it findable, and puts it on your clipboard so you can send it wherever you like.</p>
+    <div class="av-chips">${REPORT_KINDS.map(([id, label]) =>
+      `<button class="av-chip${reportKind === id ? " on" : ""}" data-rkind="${id}">${esc(label)}</button>`).join("")}</div>
+    <textarea class="import-body" id="rpWhat" style="margin-top:12px"
+      placeholder="What were you doing, and what happened instead?"></textarea>
+    <div class="auth-btns">
+      <button class="btn" id="rpCopy">Copy the report</button>
+      <button class="btn ghost sm" id="rpDownload">Save it as a file</button>
+    </div>
+    <div class="auth-msg" id="rpMsg"></div>
+
+    <div class="rule-head mt"><span class="k">What gets included</span><span class="hr"></span></div>
+    <p class="set-help">Your browser and screen size, which workspace is active, how many entries and
+      documents it holds, whether storage fell back to a smaller mode, and your settings. <b>Not</b> the
+      writing itself — you can always attach a backup separately if it would help.</p>`;
+
+  $$("[data-rkind]", el).forEach(b => b.onclick = () => { reportKind = b.dataset.rkind; renderSetPanel(); });
+  $("#rpCopy", el).onclick = async () => {
+    const text = await buildReport();
+    const msg = $("#rpMsg", el);
+    if (navigator.clipboard) { await navigator.clipboard.writeText(text); msg.textContent = "Copied. Paste it anywhere."; }
+    else { window.prompt("Copy this:", text); }
+  };
+  $("#rpDownload", el).onclick = async () => {
+    const text = await buildReport();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.download = "beep-beep-report-" + new Date().toISOString().slice(0, 10) + ".txt";
+    a.click();
+    $("#rpMsg", el).textContent = "Saved.";
+  };
+}
+
+async function buildReport() {
+  const kind = (REPORT_KINDS.find(k => k[0] === reportKind) || [])[1] || reportKind;
+  const what = ($("#rpWhat") && $("#rpWhat").value.trim()) || "(nothing described)";
+  const counts = {};
+  try {
+    for (const st of ["docs", "notes", "canvases", "folders", "timeline", "sheets", "mindmaps"]) {
+      counts[st] = (await S().all(st)).length;
+    }
+  } catch (e) {}
+  const ws = window.CodexWorkspaces ? CodexWorkspaces.current() : null;
+  const cloud = window.CodexCloud && CodexCloud.configured() ? CodexCloud.state() : null;
+  return [
+    "BEEP BEEP ORGANIZER — problem report",
+    "Kind: " + kind,
+    "When: " + new Date().toISOString(),
+    "",
+    "What happened:",
+    what,
+    "",
+    "--- details ---",
+    "Page: " + location.href,
+    "Browser: " + navigator.userAgent,
+    "Screen: " + window.innerWidth + "x" + window.innerHeight,
+    "Workspace: " + (ws ? ws.name + " (" + ws.id + ")" : "unknown"),
+    "Storage: " + (S().usingFallback() ? "localStorage fallback" : "IndexedDB"),
+    "Contents: " + Object.keys(counts).map(k => k + "=" + counts[k]).join(", "),
+    "Entries visible: " + (window.Codex ? Codex.visibleEntries().length : "?"),
+    "Cloud: " + (cloud ? (cloud.signedIn ? "signed in, last sync " + (cloud.lastSync || "never") : "configured, signed out") : "not configured"),
+    "Settings: " + JSON.stringify(Object.assign({}, Extra.settings, { avatar: undefined, typography: undefined })),
+  ].join("\n");
 }
 
 /* ---------- Workspaces & backup ---------- */
