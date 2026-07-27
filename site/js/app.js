@@ -1696,7 +1696,10 @@ function assistantLookup(q, structured) {
   assistantHistory.push(q);
 
   let html = null;
-  const sum = trySummarizeDoc(q); if (sum) html = sum;
+  // reports first: they are explicit commands, so they should win over a
+  // name that happens to look similar
+  const rep = tryReport(q); if (rep) html = rep;
+  if (!html) { const sum = trySummarizeDoc(q); if (sum) html = sum; }
   if (!html) { const con = tryConsistency(q); if (con) html = con; }
   if (!html) { const cmd = tryCommand(q); if (cmd) html = cmd; }
   if (!html) { const op = tryOpinion(q); if (op) html = op; }
@@ -1742,7 +1745,96 @@ const COMMANDS = [
   { cmd: "/who", what: "Everyone who appears in a subject", q: "who appears in ", open: true },
   { cmd: "/list", what: "Live list; characters in a place, houses, dates", q: "list all ", open: true },
   { cmd: "/namecheck", what: "Is this name already used?", q: "namecheck ", open: true },
+  { cmd: "/whereis", what: "Every entry that mentions a name", q: "whereis ", open: true },
+  { cmd: "/describe", what: "A blurb on any name in your canon", q: "describe ", open: true },
+  { cmd: "/orphans", what: "Entries nothing else refers to", q: "orphans" },
+  { cmd: "/unused", what: "Names indexed but used only once", q: "unused names" },
+  { cmd: "/longest", what: "Your biggest entries, by words", q: "longest entries" },
+  { cmd: "/recent", what: "What you touched most recently", q: "recent entries" },
+  { cmd: "/wordcount", what: "Words per collection, and the total", q: "wordcount" },
 ];
+
+/* ---------- reports computed here, from your own entries ----------
+   Every one of these is arithmetic over what you have already written,
+   which is why they work with no key, no account and no network. They
+   are the questions a writer asks about the shape of a canon rather than
+   its contents: what is dangling, what did I only use once, where has
+   the weight gone. */
+const REPORT_TRIGGER = /^\s*(whereis|where is|describe|orphans?|unused names?|unused|longest( entries)?|recent( entries)?|wordcount|word count)\b/i;
+
+function tryReport(q) {
+  const m = REPORT_TRIGGER.exec(q);
+  if (!m) return null;
+  const head = m[1].toLowerCase().replace(/\s+/g, " ");
+  const arg = q.slice(m.index + m[0].length).replace(/^[\s:,-]+/, "").replace(/[?.!]+$/, "").trim();
+  const pool = aiEntries().filter(e => !e.namesOnly);
+
+  const chips = list => `<div class="recog">${list.map(e =>
+    `<a class="chip" href="#/entry/${e.id}">${esc(e.title)}</a>`).join("")}</div>`;
+  const rows = list => list.map(r => `<div class="glance-row"><span class="gk">${esc(r.k)}</span>
+    <span class="gv">${esc(r.v)}</span></div>`).join("");
+
+  if (head === "whereis" || head === "where is") {
+    if (!arg) return `<div class="assistant-hint">Give me a name: <b>/whereis Enyokia</b>.</div>`;
+    const hits = mentionsOf(arg, null, true);
+    if (!hits.length) return `<div class="assistant-hint">Nothing mentions “${esc(arg)}” yet.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">“${esc(arg)}” appears in ${hits.length}
+      ${hits.length === 1 ? "entry" : "entries"}</div>${chips(hits.slice(0, 40))}`;
+  }
+
+  if (head === "describe") {
+    if (!arg) return `<div class="assistant-hint">Give me a name: <b>/describe House Solis</b>.</div>`;
+    const named = matchNamedSubject(arg, true) || partialEntity(arg, true);
+    return named ? blurbCard(named)
+      : `<div class="assistant-hint">“${esc(arg)}” isn't a name I've indexed yet.</div>`;
+  }
+
+  if (head === "orphans" || head === "orphan") {
+    // nothing in the canon refers to these by title
+    const lonely = pool.filter(e => mentionsOf(e.title, e.id, true).length === 0);
+    if (!lonely.length) return `<div class="assistant-hint">Every entry is referred to somewhere else. Tidy canon.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">${lonely.length}
+      ${lonely.length === 1 ? "entry is" : "entries are"} never mentioned anywhere else</div>
+      ${chips(lonely.slice(0, 40))}
+      <div class="a-ground">Not a fault — a note can stand alone. It is where loose threads tend to hide.</div>`;
+  }
+
+  if (head === "unused" || head === "unused name" || head === "unused names") {
+    const once = DB.entities.filter(n => mentionsOf(n, null, true).length <= 1);
+    if (!once.length) return `<div class="assistant-hint">Every indexed name turns up more than once.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">${once.length}
+      ${once.length === 1 ? "name appears" : "names appear"} in only one place</div>
+      <div class="recog">${once.slice(0, 60).map(n =>
+        `<a class="chip" href="#/subject/${encodeURIComponent(n)}">${esc(n)}</a>`).join("")}</div>
+      <div class="a-ground">Either they are waiting for their scene, or they were a passing mention.</div>`;
+  }
+
+  if (head === "longest" || head === "longest entries") {
+    const top = pool.slice().sort((a, b) => (b.wordcount || 0) - (a.wordcount || 0)).slice(0, 12);
+    if (!top.length) return `<div class="assistant-hint">Nothing written yet.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">Your longest entries</div>
+      ${rows(top.map(e => ({ k: e.title, v: (e.wordcount || 0).toLocaleString() + " words" })))}`;
+  }
+
+  if (head === "recent" || head === "recent entries") {
+    const ids = (window.Codex && Codex.recentIds()) || [];
+    const seen = ids.map(id => byId[id]).filter(Boolean);
+    if (!seen.length) return `<div class="assistant-hint">Nothing opened yet this session.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">What you opened most recently</div>${chips(seen)}`;
+  }
+
+  if (head === "wordcount" || head === "word count") {
+    const per = {};
+    pool.forEach(e => { per[e.category] = (per[e.category] || 0) + (e.wordcount || 0); });
+    const total = Object.keys(per).reduce((n, k) => n + per[k], 0);
+    if (!total) return `<div class="assistant-hint">Nothing written yet.</div>`;
+    const sorted = Object.keys(per).sort((a, b) => per[b] - per[a]);
+    return `<div class="ans-label" style="margin-bottom:6px">${total.toLocaleString()} words across
+      ${pool.length} entries</div>
+      ${rows(sorted.map(c => ({ k: c, v: per[c].toLocaleString() + " words" })))}`;
+  }
+  return null;
+}
 
 /* ---------- the rail's own state ---------- */
 const rail = { scope: "canon", length: "brief", turns: 0 };
