@@ -1,366 +1,435 @@
 /* ============================================================
-   Beep Beep Organizer; cloud accounts & cross-device sync
-   (Supabase; configured in data/cloud-config.js)
+   CLOUD; accounts, syncing, sharing
 
-   Design: local-first. IndexedDB stays the source the app reads
-   and writes, so everything keeps working instantly and offline.
-   This module mirrors those writes up to Supabase and pulls other
-   devices' changes down, last-write-wins by each object's
-   "updated" timestamp.
+   Local-first by design. IndexedDB stays the working copy; nothing
+   waits on the network, and the app behaves exactly as it always has
+   when signed out, offline, or with no credentials configured.
 
-   - Auth: Supabase email + password (GoTrue REST). The session
-     (access + refresh token) is kept in localStorage; account.js
-     reads it to decide who is signed in and which storage
-     namespace to use.
-   - Push: store.js calls CodexCloud.track() on every put/delete.
-     Dirty markers (tiny, no data) persist in localStorage so
-     offline edits sync later. A flush reads the real objects back
-     out of IndexedDB and upserts them in batches.
-   - Pull: incremental, "everything of mine with updated > since",
-     applied straight into the right workspace databases.
-   - The workspace list + settings sync through a single
-     user_meta row, compared by JSON against the last synced copy.
+   Sync is a two-way delta. Every local write records itself in the
+   store's outbox; a sync sends those up, then pulls anything the
+   server has seen change since our last pull. Where the same record
+   moved on both sides, the later edit wins and the loser is reported
+   rather than silently dropped.
+
+   Timestamps for ordering come from the server, never the browser,
+   so two devices with drifting clocks cannot disagree.
    ============================================================ */
 (function () {
 "use strict";
-const CFG = window.CODEX_CLOUD || null;
-const SESSION_KEY = "codex.cloudSession";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const S = () => window.CodexStore;
 
-/* ---------- session ---------- */
-function session() {
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) { return null; }
-}
-function saveSession(s) {
-  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-  else localStorage.removeItem(SESSION_KEY);
-}
-function nsOf(s) { return s ? "sb" + (s.user.id || "").replace(/-/g, "") : null; }
-function myNs() { return nsOf(session()); }
-function nsKey(base) { const n = myNs(); return n ? base + "@" + n : base; }
-function isActive() {
-  // sync only runs when the signed-in identity IS the cloud account
-  return !!(CFG && session() && window.CodexAccount && CodexAccount.ns() === myNs());
+const CFG = window.CODEX_CLOUD || {};
+const CONFIGURED = !!(CFG.url && CFG.key);
+
+let sb = null;                 // the supabase client, made on first use
+let session = null;            // the signed-in session, or null
+let syncing = false;
+let lastError = "";
+const listeners = [];
+
+function emit() { listeners.forEach(fn => { try { fn(state()); } catch (e) {} }); }
+function state() {
+  return {
+    configured: CONFIGURED,
+    signedIn: !!session,
+    email: session && session.user ? session.user.email : "",
+    userId: session && session.user ? session.user.id : "",
+    syncing, lastError,
+    lastSync: +(localStorage.getItem(lastSyncKey()) || 0),
+    pending: CONFIGURED && S() ? S().outbox().length : 0,
+  };
 }
 
-/* ---------- status (for the chip + Settings) ---------- */
-let status = { state: CFG ? "idle" : "off", detail: "" };
-const statusListeners = [];
-function setStatus(state, detail) {
-  status = { state, detail: detail || "" };
-  statusListeners.forEach(fn => { try { fn(status); } catch (e) {} });
-}
-function onStatus(fn) { statusListeners.push(fn); fn(status); }
-
-/* ---------- HTTP ---------- */
-function authHeaders(token) {
-  return { apikey: CFG.anonKey, authorization: "Bearer " + (token || CFG.anonKey), "content-type": "application/json" };
-}
-async function ensureToken() {
-  const s = session();
-  if (!s) throw new Error("Not signed in to a cloud account.");
-  if (Date.now() < (s.expires_at || 0) - 120000) return s.access_token;
-  // refresh
-  const res = await fetch(CFG.url + "/auth/v1/token?grant_type=refresh_token", {
-    method: "POST", headers: authHeaders(),
-    body: JSON.stringify({ refresh_token: s.refresh_token }),
+function client() {
+  if (!CONFIGURED) return null;
+  if (sb) return sb;
+  if (!window.supabase || !window.supabase.createClient) return null;
+  sb = window.supabase.createClient(CFG.url, CFG.key, {
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: "codex.auth" },
   });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j.access_token) {
-    saveSession(null);
-    throw new Error("Your cloud session expired; sign in again.");
-  }
-  adoptSession(j);
-  return j.access_token;
-}
-function adoptSession(j) {
-  const user = j.user || {};
-  saveSession({
-    access_token: j.access_token,
-    refresh_token: j.refresh_token,
-    expires_at: Date.now() + (j.expires_in || 3600) * 1000,
-    user: { id: user.id, email: user.email },
-    name: (user.user_metadata && user.user_metadata.name) || (user.email || "").split("@")[0],
-  });
-}
-/* A request came back 401 even though the token hadn't expired (revoked,
-   or adopted from an email link edge case): mark it stale so the next
-   ensureToken() call refreshes it instead of reusing it. */
-function markTokenStale() {
-  const s = session();
-  if (s) { s.expires_at = 0; saveSession(s); }
+  return sb;
 }
 
-function friendlyAuthError(j, fallback) {
-  const raw = (j && (j.error_description || j.msg || j.message || j.error)) || fallback || "Something went wrong.";
-  if (/invalid login credentials/i.test(raw)) return "Wrong email or password.";
-  if (/email address .* is invalid|email_address_invalid/i.test(raw)) return "That email address doesn't look right; double-check it.";
-  if (/email not confirmed/i.test(raw)) return "This email hasn't been confirmed yet; check your inbox for the confirmation link, then sign in.";
-  if (/already registered|already been registered/i.test(raw)) return "There's already an account with that email; sign in instead.";
-  if (/at least 6|password/i.test(raw) && /short|length|weak/i.test(raw)) return "Password needs to be at least 6 characters.";
-  if (/rate limit/i.test(raw)) return "Too many attempts; wait a minute and try again.";
-  return raw;
-}
+/* ---------- per-workspace bookkeeping ---------- */
+const wsId = () => (S() ? S().currentWorkspace() : "default");
+const acctKey = (base) => window.CodexAccount ? CodexAccount.storeKey(base) : base;
+const lastSyncKey = () => acctKey("codex.sync.at." + wsId());
+const remoteIdKey = () => acctKey("codex.sync.ws." + wsId());
+const remoteId = () => localStorage.getItem(remoteIdKey()) || "";
+const setRemoteId = id => localStorage.setItem(remoteIdKey(), id);
 
-/* ---------- auth API (used by the gate) ---------- */
-async function signUp(name, email, pass) {
-  if (!CFG) throw new Error("Cloud sync isn't configured.");
-  if (!email || !/@/.test(email)) throw new Error("A real email address is needed for a cloud account.");
-  if (!pass || pass.length < 6) throw new Error("Pick a password of at least 6 characters.");
-  const res = await fetch(CFG.url + "/auth/v1/signup", {
-    method: "POST", headers: authHeaders(),
-    body: JSON.stringify({ email, password: pass, data: { name: (name || "").trim() || email.split("@")[0] } }),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(friendlyAuthError(j, "Could not create the account."));
-  if (j.access_token) { adoptSession(j); return { ok: true }; }
-  // email confirmation is on: no session until they click the link
-  return { needsConfirm: true };
+/* ============================================================
+   AUTH
+   ============================================================ */
+/* Whatever the network or Postgres says, the person reading it wants
+   to know what to do next. */
+function friendly(e) {
+  const m = (e && (e.message || e.error_description)) || String(e);
+  if (/schema cache|does not exist|PGRST205/i.test(m)) return "the database tables haven't been created yet; run supabase/schema.sql";
+  if (/Failed to fetch|NetworkError|ERR_/i.test(m)) return "couldn't reach the server; check your connection";
+  if (/Invalid login credentials/i.test(m)) return "that email and password don't match an account";
+  if (/Email not confirmed/i.test(m)) return "check your email for the confirmation link first";
+  if (/already registered|already been registered/i.test(m)) return "there's already an account with that email; try signing in";
+  if (/Password should be/i.test(m)) return "that password is too short";
+  if (/rate limit|too many/i.test(m)) return "too many attempts just now; wait a minute and try again";
+  if (/JWT|expired/i.test(m)) return "your session expired; sign in again";
+  if (/row-level security|permission denied/i.test(m)) return "this account can't write to that workspace";
+  return m;
 }
-async function signIn(email, pass) {
-  if (!CFG) throw new Error("Cloud sync isn't configured.");
-  const res = await fetch(CFG.url + "/auth/v1/token?grant_type=password", {
-    method: "POST", headers: authHeaders(),
-    body: JSON.stringify({ email, password: pass }),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j.access_token) throw new Error(friendlyAuthError(j, "Could not sign in."));
-  adoptSession(j);
-  return { ok: true };
-}
-function signOutLocal() { saveSession(null); }
-
-/* ---------- dirty tracking ---------- */
-let applying = false; // (pull uses raw IDB writes, but keep the guard for safety)
-function dirtyList() {
-  try { return JSON.parse(localStorage.getItem(nsKey("codex.cloud.dirty")) || "[]"); } catch (e) { return []; }
-}
-function saveDirty(list) { localStorage.setItem(nsKey("codex.cloud.dirty"), JSON.stringify(list)); }
-function track(store, id, del) {
-  if (!isActive() || applying || !id) return;
-  const ws = window.CodexStore ? CodexStore.currentWorkspace() : "default";
-  const list = dirtyList().filter(d => !(d.ws === ws && d.store === store && d.id === id));
-  list.push({ ws, store, id, del: !!del, t: Date.now() });
-  saveDirty(list);
-  scheduleFlush();
-}
-
-/* ---------- raw IndexedDB access for ANY workspace ---------- */
-async function withWsDB(wsId, fn) {
-  const db = await CodexStore.openWorkspaceDB(wsId);
-  if (!db) throw new Error("Could not open local storage for workspace " + wsId);
-  try { return await fn(db); }
-  finally { try { db.close(); } catch (e) {} }
-}
-function idb(req) { return new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }); }
-function rawGet(db, store, id) { return idb(db.transaction(store, "readonly").objectStore(store).get(id)); }
-function rawPut(db, store, obj) { return idb(db.transaction(store, "readwrite").objectStore(store).put(obj)); }
-function rawDel(db, store, id) { return idb(db.transaction(store, "readwrite").objectStore(store).delete(id)); }
-
-/* ---------- push ---------- */
-let flushTimer = null, cycleTimer = null, busy = false;
-function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(() => flush().catch(() => {}), 2500); }
-
-async function flush() {
-  if (!isActive() || busy) return;
-  const list = dirtyList();
-  const metaDue = metaChanged();
-  if (!list.length && !metaDue) return;
-  busy = true;
-  setStatus("syncing", "Saving to your account…");
+const fail = e => { const err = new Error(friendly(e)); err.raw = e; return err; };
+async function restore() {
+  const c = client();
+  if (!c) return;
   try {
-    const token = await ensureToken();
-    const uid = session().user.id;
-
-    // read the real objects, grouped by workspace
-    const byWs = {};
-    list.forEach(d => (byWs[d.ws] = byWs[d.ws] || []).push(d));
-    const rows = [];
-    for (const ws of Object.keys(byWs)) {
-      await withWsDB(ws, async (db) => {
-        for (const d of byWs[ws]) {
-          if (d.del) {
-            rows.push({ user_id: uid, workspace_id: ws, store: d.store, id: d.id, data: null, updated: d.t, deleted: true, _k: key(d) });
-          } else {
-            const obj = await rawGet(db, d.store, d.id).catch(() => null);
-            if (obj) rows.push({ user_id: uid, workspace_id: ws, store: d.store, id: d.id, data: obj, updated: obj.updated || d.t, deleted: false, _k: key(d) });
-            else rows.push({ user_id: uid, workspace_id: ws, store: d.store, id: d.id, data: null, updated: d.t, deleted: true, _k: key(d) });
-          }
-        }
-      });
-    }
-
-    // upsert in batches, bounded by count and rough byte size
-    const flushedKeys = new Set();
-    let batch = [], bytes = 0;
-    const send = async () => {
-      if (!batch.length) return;
-      const body = JSON.stringify(batch.map(r => { const { _k, ...row } = r; return row; }));
-      const res = await fetch(CFG.url + "/rest/v1/user_data?on_conflict=user_id,workspace_id,store,id", {
-        method: "POST",
-        headers: Object.assign(authHeaders(token), { prefer: "resolution=merge-duplicates,return=minimal" }),
-        body,
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (j.code === "PGRST205" || j.code === "42P01") { setStatus("setup", "The cloud database isn't set up yet."); throw new Error("setup"); }
-        if (res.status === 401) { markTokenStale(); throw new Error("Refreshing your session; syncing again shortly."); }
-        throw new Error(j.message || ("Sync failed (HTTP " + res.status + ")"));
-      }
-      batch.forEach(r => flushedKeys.add(r._k));
-      batch = []; bytes = 0;
-    };
-    for (const r of rows) {
-      const size = JSON.stringify(r.data || "").length;
-      if (batch.length >= 20 || (bytes + size) > 3000000) await send();
-      batch.push(r); bytes += size;
-    }
-    await send();
-
-    // drop exactly what we flushed; anything dirtied meanwhile stays queued
-    saveDirty(dirtyList().filter(d => !flushedKeys.has(key(d))));
-
-    if (metaDue) await pushMeta(token, uid);
-    localStorage.setItem(nsKey("codex.cloud.lastSync"), String(Date.now()));
-    setStatus("synced", "");
-  } catch (e) {
-    if (String(e.message) !== "setup") setStatus(navigator.onLine === false ? "offline" : "error", e.message || "Sync failed.");
-  } finally {
-    busy = false;
-  }
+    const { data } = await c.auth.getSession();
+    session = data.session || null;
+    c.auth.onAuthStateChange((_e, s) => { session = s; emit(); });
+    emit();
+    if (session) syncNow({ quiet: true });
+  } catch (e) { lastError = e.message || String(e); emit(); }
 }
-function key(d) { return d.ws + "|" + d.store + "|" + d.id; }
 
-/* ---------- user_meta (workspace list + settings) ---------- */
-function currentMetaJson() {
-  const ws = localStorage.getItem(CodexAccount.storeKey("codex.workspaces")) || "null";
-  const st = localStorage.getItem(CodexAccount.storeKey("codex.settings")) || "null";
-  return JSON.stringify({ workspaces: JSON.parse(ws), settings: JSON.parse(st) });
+async function signUp(email, password, displayName) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  let data, error;
+  try {
+    ({ data, error } = await c.auth.signUp({
+      email, password, options: { data: { display_name: displayName || "" } },
+    }));
+  } catch (e) { throw fail(e); }
+  if (error) throw fail(error);
+  // With email confirmation on, Supabase returns a user but no session
+  // until the link is clicked. Say so rather than looking broken.
+  if (!data.session) return { needsConfirmation: true };
+  session = data.session;
+  emit();
+  return { needsConfirmation: false };
 }
-function metaChanged() {
-  if (!isActive()) return false;
-  try { return currentMetaJson() !== (localStorage.getItem(nsKey("codex.cloud.metacache")) || ""); }
-  catch (e) { return false; }
-}
-async function pushMeta(token, uid) {
-  const metaJson = currentMetaJson();
-  const meta = JSON.parse(metaJson);
-  const res = await fetch(CFG.url + "/rest/v1/user_meta?on_conflict=user_id", {
-    method: "POST",
-    headers: Object.assign(authHeaders(token), { prefer: "resolution=merge-duplicates,return=minimal" }),
-    body: JSON.stringify([{ user_id: uid, workspaces: meta.workspaces, settings: meta.settings, updated: Date.now() }]),
-  });
-  if (res.ok) localStorage.setItem(nsKey("codex.cloud.metacache"), metaJson);
-}
-async function pullMeta(token) {
-  const res = await fetch(CFG.url + "/rest/v1/user_meta?select=workspaces,settings,updated", { headers: authHeaders(token) });
-  if (!res.ok) return null;
-  const rows = await res.json().catch(() => []);
-  return rows && rows[0] ? rows[0] : null;
-}
-function applyMeta(row) {
-  if (!row) return false;
-  const metaJson = JSON.stringify({ workspaces: row.workspaces, settings: row.settings });
-  if (metaJson === (localStorage.getItem(nsKey("codex.cloud.metacache")) || "")) return false;
-  if (row.workspaces) localStorage.setItem(CodexAccount.storeKey("codex.workspaces"), JSON.stringify(row.workspaces));
-  if (row.settings) localStorage.setItem(CodexAccount.storeKey("codex.settings"), JSON.stringify(row.settings));
-  localStorage.setItem(nsKey("codex.cloud.metacache"), metaJson);
+
+async function signIn(email, password) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  let data, error;
+  try { ({ data, error } = await c.auth.signInWithPassword({ email, password })); }
+  catch (e) { throw fail(e); }
+  if (error) throw fail(error);
+  session = data.session;
+  emit();
+  await syncNow({});
   return true;
 }
 
-/* ---------- pull ---------- */
-async function pull(full) {
-  if (!isActive() || busy) return;
-  busy = true;
-  try {
-    const token = await ensureToken();
-    let since = full ? 0 : Number(localStorage.getItem(nsKey("codex.cloud.since")) || 0);
-    let touchedActive = false;
-    const activeWs = CodexStore.currentWorkspace();
-    while (true) {
-      const res = await fetch(CFG.url + "/rest/v1/user_data?select=workspace_id,store,id,data,updated,deleted" +
-        "&updated=gt." + since + "&order=updated.asc&limit=500", { headers: authHeaders(token) });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (j.code === "PGRST205" || j.code === "42P01") { setStatus("setup", "The cloud database isn't set up yet."); return; }
-        if (res.status === 401) { markTokenStale(); throw new Error("Refreshing your session; syncing again shortly."); }
-        throw new Error(j.message || ("Pull failed (HTTP " + res.status + ")"));
-      }
-      const rows = await res.json();
-      if (!rows.length) break;
-      const byWs = {};
-      rows.forEach(r => (byWs[r.workspace_id] = byWs[r.workspace_id] || []).push(r));
-      for (const ws of Object.keys(byWs)) {
-        await withWsDB(ws, async (db) => {
-          for (const r of byWs[ws]) {
-            const local = await rawGet(db, r.store, r.id).catch(() => null);
-            const localUpdated = (local && local.updated) || 0;
-            if (r.deleted) {
-              if (local && localUpdated <= r.updated) { await rawDel(db, r.store, r.id); if (ws === activeWs) touchedActive = true; }
-            } else if (r.data && r.updated > localUpdated) {
-              await rawPut(db, r.store, r.data);
-              if (ws === activeWs) touchedActive = true;
-            }
-          }
-        });
-      }
-      since = rows[rows.length - 1].updated;
-      localStorage.setItem(nsKey("codex.cloud.since"), String(since));
-      if (rows.length < 500) break;
-    }
-    const meta = await pullMeta(token);
-    if (meta && applyMeta(meta)) touchedActive = true;
-    localStorage.setItem(nsKey("codex.cloud.lastSync"), String(Date.now()));
-    setStatus("synced", "");
-    if (touchedActive && window.Codex && Codex.reloadWorkspace) { await Codex.reloadWorkspace(); window.CodexWorkspaces && CodexWorkspaces.updateBrandLabel(); }
-  } catch (e) {
-    setStatus(navigator.onLine === false ? "offline" : "error", e.message || "Sync failed.");
-  } finally {
-    busy = false;
+async function signOut() {
+  const c = client();
+  if (c) await c.auth.signOut();
+  session = null;
+  emit();
+}
+
+async function resetPassword(email) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  const { error } = await c.auth.resetPasswordForEmail(email, { redirectTo: location.href });
+  if (error) throw fail(error);
+  return true;
+}
+
+/* ============================================================
+   SYNC
+   ============================================================ */
+
+/* The remote row for this local workspace, made on first sync. */
+async function ensureWorkspace() {
+  const c = client();
+  const existing = remoteId();
+  if (existing) {
+    const { data } = await c.from("workspaces").select("id").eq("id", existing).maybeSingle();
+    if (data) return existing;
+    // it was deleted, or belongs to another account; start a fresh one
+    localStorage.removeItem(remoteIdKey());
+    localStorage.removeItem(lastSyncKey());
   }
+  const name = (window.CodexWorkspaces && CodexWorkspaces.current() && CodexWorkspaces.current().name) || "My workspace";
+  const hasCanon = !window.CodexWorkspaces || CodexWorkspaces.activeHasCanon();
+  const { data, error } = await c.from("workspaces")
+    .insert({ owner: session.user.id, name, has_canon: hasCanon })
+    .select("id").single();
+  if (error) throw error;
+  setRemoteId(data.id);
+  return data.id;
 }
 
-/* ---------- first open on a device: bring the account down ---------- */
-function needsBootstrap() {
-  return !!(CFG && session() && !localStorage.getItem(CodexAccount.storeKey("codex.workspaces")));
-}
-async function bootstrapIfNeeded() {
-  if (!needsBootstrap()) return;
-  setStatus("syncing", "Fetching your account…");
-  const s = session();
-  try {
-    const token = await ensureToken();
-    const meta = await pullMeta(token);
-    if (meta && meta.workspaces && meta.workspaces.length) {
-      applyMeta(meta);
-      const list = meta.workspaces;
-      const active = list.find(w => w.template) || list[0];
-      localStorage.setItem(CodexAccount.storeKey("codex.activeWorkspace"), active.id);
-      await pull(true);
-      return;
+/* Push: send everything the outbox is holding, in batches. */
+async function push(ws) {
+  const c = client();
+  const box = S().outbox();
+  if (!box.length) return { sent: 0 };
+  const rows = [];
+  const keys = [];
+  for (const item of box) {
+    keys.push(S().outboxKeyFor(item.store, item.id));
+    if (item.deleted) {
+      rows.push({ workspace_id: ws, store: item.store, local_id: String(item.id),
+        data: {}, deleted: true, updated_by: session.user.id });
+    } else {
+      const rec = await S().get(item.store, item.id);
+      if (!rec) continue;   // written then removed before we got here
+      rows.push({ workspace_id: ws, store: item.store, local_id: String(item.id),
+        data: rec, deleted: false, updated_by: session.user.id });
     }
-  } catch (e) { /* fall through to a fresh local seed; sync catches up later */ }
-  // brand-new cloud account (or the database isn't set up / offline):
-  // start from the template locally, exactly like a new device account
-  CodexAccount.seedSpaceFor(myNs(), s.name || "My");
+  }
+  if (!rows.length) { S().clearOutbox(keys); return { sent: 0 }; }
+
+  // Batched, because a single request carrying every image in the
+  // workspace is the one that times out.
+  const SIZE = 40;
+  for (let i = 0; i < rows.length; i += SIZE) {
+    const { error } = await c.from("items")
+      .upsert(rows.slice(i, i + SIZE), { onConflict: "workspace_id,store,local_id" });
+    if (error) throw error;
+  }
+  S().clearOutbox(keys);
+  return { sent: rows.length };
 }
 
-/* ---------- lifecycle ---------- */
-function start() {
-  if (!CFG || !isActive()) { if (!CFG) setStatus("off", ""); return; }
-  setStatus("syncing", "");
-  pull(false).then(() => flush()).catch(() => {});
-  clearInterval(cycleTimer);
-  cycleTimer = setInterval(() => { flush().then(() => pull(false)).catch(() => {}); }, 45000);
-  window.addEventListener("online", () => { flush().then(() => pull(false)).catch(() => {}); });
+/* Pull: anything the server has seen change since we last looked. */
+async function pull(ws) {
+  const c = client();
+  const since = new Date(+(localStorage.getItem(lastSyncKey()) || 0)).toISOString();
+  const conflicts = [];
+  let applied = 0, newest = 0;
+  const PAGE = 300;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await c.from("items")
+      .select("store,local_id,data,deleted,updated_at")
+      .eq("workspace_id", ws)
+      .gt("updated_at", since)
+      .order("updated_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || !data.length) break;
+
+    for (const row of data) {
+      const stamp = Date.parse(row.updated_at);
+      if (stamp > newest) newest = stamp;
+      const mine = await S().get(row.store, row.local_id);
+      // A record we have also edited since the last sync is a genuine
+      // clash. The newer edit wins; the older one is named, not binned.
+      const pendingHere = S().outbox().some(o => o.store === row.store && String(o.id) === String(row.local_id));
+      if (pendingHere && mine && (mine.updated || 0) > stamp) {
+        conflicts.push({ store: row.store, id: row.local_id, title: mine.title || row.local_id, kept: "yours" });
+        continue;
+      }
+      if (pendingHere && mine) conflicts.push({ store: row.store, id: row.local_id, title: mine.title || row.local_id, kept: "theirs" });
+      if (row.deleted) await S().delQuiet(row.store, row.local_id);
+      else await S().putQuiet(row.store, row.data);
+      applied++;
+    }
+    if (data.length < PAGE) break;
+  }
+  if (newest) localStorage.setItem(lastSyncKey(), String(newest));
+  return { applied, conflicts };
 }
-async function syncNow() { await flush(); await pull(false); }
+
+async function syncNow(opts) {
+  opts = opts || {};
+  if (!CONFIGURED || !session || syncing) return null;
+  const c = client();
+  if (!c) return null;
+  syncing = true; lastError = ""; emit();
+  try {
+    const ws = await ensureWorkspace();
+    const up = await push(ws);
+    const down = await pull(ws);
+    // anything that arrived needs to reach the screen
+    if (down.applied) {
+      if (window.Codex && Codex.reloadWorkspace) await Codex.reloadWorkspace();
+    }
+    if (!opts.quiet) {
+      const bits = [];
+      if (up.sent) bits.push(`${up.sent} sent`);
+      if (down.applied) bits.push(`${down.applied} received`);
+      window.toast && toast(bits.length ? "Synced · " + bits.join(", ") : "Already up to date");
+    }
+    if (down.conflicts.length && window.toast) {
+      const c0 = down.conflicts[0];
+      toast(`${down.conflicts.length} item${down.conflicts.length === 1 ? "" : "s"} changed in both places; kept the newer edit of “${c0.title}”`);
+    }
+    localStorage.setItem(lastSyncKey() + ".ok", String(Date.now()));
+    return { up, down };
+  } catch (e) {
+    lastError = friendly(e);
+    if (!opts.quiet && window.toast) toast("Sync failed · " + lastError);
+    return null;
+  } finally { syncing = false; emit(); }
+}
+
+/* Send everything currently in this workspace up for the first time;
+   used once, when an account adopts the work already in this browser. */
+async function uploadEverything() {
+  if (!session) throw new Error("Sign in first");
+  const n = await S().markAllDirty();
+  const res = await syncNow({ quiet: true });
+  if (res) window.toast && toast(`Uploaded ${n} record${n === 1 ? "" : "s"} to your account`);
+  return res;
+}
+
+/* periodic and opportunistic syncing, gentle enough to ignore */
+let timer = null;
+function startAuto() {
+  clearInterval(timer);
+  timer = setInterval(() => { if (session && navigator.onLine) syncNow({ quiet: true }); }, 90 * 1000);
+  window.addEventListener("online", () => session && syncNow({ quiet: true }));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && session) syncNow({ quiet: true });
+  });
+}
+
+/* ============================================================
+   SHARING; a link you can hand to a reader who has no account
+   ============================================================ */
+async function listShares() {
+  const c = client();
+  if (!c || !session) return [];
+  const ws = remoteId();
+  if (!ws) return [];
+  const { data, error } = await c.from("shares").select("*")
+    .eq("workspace_id", ws).eq("revoked", false).order("created_at", { ascending: false });
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function createShare(scope, label, canComment) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const ws = await ensureWorkspace();
+  const { data, error } = await c.from("shares")
+    .insert({ workspace_id: ws, scope: scope || "workspace", label: label || null,
+      can_comment: canComment !== false, created_by: session.user.id })
+    .select("*").single();
+  if (error) throw fail(error);
+  return data;
+}
+
+async function revokeShare(id) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const { error } = await c.from("shares").update({ revoked: true }).eq("id", id);
+  if (error) throw fail(error);
+  return true;
+}
+
+/* The address to hand out. Kept on this origin so a reader lands in the
+   same app, in a read-only view. */
+function shareUrl(token) {
+  return location.origin + location.pathname + "#/shared/" + token;
+}
+
+/* ---------- reading by token, with no account at all ---------- */
+async function readShared(token) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  const { data, error } = await c.rpc("read_shared", { share_token: token });
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function commentViaShare(token, target, name, body) {
+  const c = client();
+  if (!c) throw new Error("Cloud isn't configured");
+  const { data, error } = await c.rpc("comment_via_share",
+    { share_token: token, target_id: target, name: name || "", body: body });
+  if (error) throw fail(error);
+  return data;
+}
+
+/* ============================================================
+   COMMENTS; what came back from readers
+   ============================================================ */
+async function listComments(target) {
+  const c = client();
+  if (!c || !session) return [];
+  const ws = remoteId();
+  if (!ws) return [];
+  let q = c.from("comments").select("*").eq("workspace_id", ws)
+    .order("created_at", { ascending: false }).limit(200);
+  if (target) q = q.eq("target", target);
+  const { data, error } = await q;
+  if (error) throw fail(error);
+  return data || [];
+}
+
+async function addComment(target, body) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const ws = await ensureWorkspace();
+  const { data, error } = await c.from("comments")
+    .insert({ workspace_id: ws, target, body, author_id: session.user.id })
+    .select("*").single();
+  if (error) throw fail(error);
+  return data;
+}
+
+async function resolveComment(id, resolved) {
+  const c = client();
+  if (!c || !session) throw new Error("Sign in first");
+  const { error } = await c.from("comments").update({ resolved: !!resolved }).eq("id", id);
+  if (error) throw fail(error);
+  return true;
+}
+
+/* First open on a NEW device: list the workspaces this account owns in
+   the cloud and recreate them locally (name + remote link), so signing in
+   anywhere brings your work down instead of starting a stray copy.
+   Returns how many workspaces were adopted. */
+async function adoptRemoteWorkspaces() {
+  const c = client();
+  if (!c) return 0;
+  const { data: sess } = await c.auth.getSession();
+  session = sess && sess.session ? sess.session : session;
+  if (!session) return 0;
+  const { data, error } = await c.from("workspaces")
+    .select("id,name,has_canon").eq("owner", session.user.id)
+    .order("created_at", { ascending: true });
+  if (error || !data || !data.length) return 0;
+  const W = window.CodexWorkspaces;
+  const list = [];
+  for (const remote of data) {
+    const localId = "ws" + Math.random().toString(36).slice(2, 10);
+    list.push({ id: localId, name: remote.name || "My workspace", hasCanon: !!remote.has_canon, createdAt: Date.now() });
+    localStorage.setItem(acctKey("codex.sync.ws." + localId), remote.id);
+  }
+  localStorage.setItem(acctKey("codex.workspaces"), JSON.stringify(list));
+  localStorage.setItem(acctKey("codex.activeWorkspace"), list[0].id);
+  // pull each adopted workspace's content down
+  for (const w of list) {
+    try {
+      await S().switchWorkspace(w.id);
+      await pull(localStorage.getItem(acctKey("codex.sync.ws." + w.id)));
+    } catch (e) { /* a workspace that fails to pull still exists locally */ }
+  }
+  await S().switchWorkspace(list[0].id);
+  return list.length;
+}
 
 window.CodexCloud = {
-  enabled: !!CFG,
-  session, myNs, signUp, signIn, signOutLocal,
-  track, start, syncNow, bootstrapIfNeeded, needsBootstrap,
-  onStatus, get status() { return status; },
-  lastSync: () => Number(localStorage.getItem(nsKey("codex.cloud.lastSync")) || 0),
-  pending: () => dirtyList().length,
+  configured: () => CONFIGURED,
+  adoptRemoteWorkspaces,
+  state, onChange: fn => listeners.push(fn),
+  signUp, signIn, signOut, resetPassword,
+  sync: syncNow, uploadEverything,
+  shares: { list: listShares, create: createShare, revoke: revokeShare, url: shareUrl },
+  reader: { read: readShared, comment: commentViaShare },
+  comments: { list: listComments, add: addComment, resolve: resolveComment },
+  client,
 };
+
+if (CONFIGURED) {
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { restore(); startAuto(); });
+  else { restore(); startAuto(); }
+}
 })();

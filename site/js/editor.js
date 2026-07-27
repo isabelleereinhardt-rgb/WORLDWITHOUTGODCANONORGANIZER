@@ -19,8 +19,42 @@ function getCurrentDoc() { return curDocRef; }
 /* ============================================================
    DOCUMENTS
    ============================================================ */
+/* ---------- naming the next chapter ----------
+   "Untitled document" tells you nothing and has to be renamed by hand
+   every time. Inside a book the obvious name is the next chapter number,
+   so work out what that is: read the chapters already filed there, find
+   the highest number any of them claims; in digits or in words; and go
+   one past it. Never reuse a number that exists, and never assume the
+   count of chapters is the right number, because chapter 1 may have been
+   deleted or the book may start at 0 with a prologue. */
+const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+  "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+  "seventeen", "eighteen", "nineteen", "twenty"];
+function chapterNumberIn(title) {
+  const t = String(title || "").toLowerCase();
+  const digits = t.match(/(?:^|\b)(?:chapter|ch\.?|part)\s*#?\s*(\d{1,4})\b/);
+  if (digits) return parseInt(digits[1], 10);
+  const worded = t.match(/(?:^|\b)(?:chapter|ch\.?|part)\s+([a-z\-]+)/);
+  if (worded) {
+    const i = NUM_WORDS.indexOf(worded[1].replace(/-/g, ""));
+    if (i > -1) return i;
+  }
+  // a bare leading number, as in "12. The long winter"
+  const bare = t.match(/^\s*(\d{1,4})\s*[.):\-]/);
+  if (bare) return parseInt(bare[1], 10);
+  return null;
+}
+async function nextChapterTitle(folderId) {
+  if (!folderId) return "";                      // a loose document keeps no number
+  const docs = (await S().all("docs").catch(() => [])).filter(d => d.folder === folderId);
+  const nums = docs.map(d => chapterNumberIn(d.title)).filter(n => n != null);
+  const next = nums.length ? Math.max.apply(null, nums) + 1 : 1;
+  return "Chapter " + next;
+}
+
 async function list(folderId) {
   curDocRef = null;
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   if (window.CodexFolders) await CodexFolders.ensureCache(true);
   let docs = (await S().all("docs")).sort((a, b) => b.updated - a.updated);
@@ -34,18 +68,28 @@ async function list(folderId) {
       <div class="meta">Edited ${fmtDate(d.updated)}
         <button class="btn ghost sm" data-del="${d.id}" style="margin-left:auto">Delete</button></div>
     </div>`).join("");
+  const inBook = folderId ? (window.CodexFolders._cache || []).find(f => f.id === folderId) : null;
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">Workspace</div>
-    <h1>Documents</h1>
-    <p class="muted">Write lore, drafts, and notes right inside your organizer. They save automatically to this
-      browser; use <b>Back up my work</b> in the sidebar to keep a portable copy.</p>
+    <div class="page-kicker">${inBook ? esc(inBook.name) : "Workspace"}</div>
+    <h1>${inBook ? "Chapters" : "Books"}</h1>
+    <p class="muted">${inBook
+      ? `The chapters of <b>${esc(inBook.name)}</b>, newest edit first. Each one is a document you can
+         write in, and the reading order follows the chapter numbers in their titles.`
+      : `A book is a project with chapters filed into it. Pick a book below to see its chapters, or write
+         a loose document that does not belong to one yet. Everything saves to this browser; use
+         <b>Back up my work</b> in the sidebar to keep a portable copy.`}</p>
     ${folderBar}
-    <div style="margin:16px 0"><button class="btn" id="newDoc">New document</button></div>
+    <div style="margin:16px 0"><button class="btn" id="newDoc">${
+      inBook ? "New chapter" : "New document"}</button></div>
     ${docs.length ? `<div class="list-grid">${cards}</div>` :
-      `<div class="empty-state">No documents here yet. Create one to start writing.</div>`}
+      `<div class="empty-state">${inBook
+        ? "No chapters in this book yet. The first one is the hardest."
+        : "No documents here yet. Create one to start writing."}</div>`}
   </div>`;
   $("#newDoc").onclick = async () => {
-    const d = { id: uid(), title: "", html: "", folder: folderId || null };
+    const d = { id: uid(), title: await nextChapterTitle(folderId), html: "", folder: folderId || null,
+                updated: Date.now() };
     await S().put("docs", d); location.hash = "#/doc/" + d.id;
   };
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
@@ -59,11 +103,13 @@ async function list(folderId) {
 }
 
 async function open(id) {
+  const gen = window.Codex ? Codex.currentGen() : 0;
   await S().ready;
   if (window.CodexFolders) await CodexFolders.ensureCache();
   const doc = await S().get("docs", id);
   if (!doc) { location.hash = "#/docs"; return; }
   const folderSelect = window.CodexFolders ? CodexFolders.selectFor(doc.folder) : "";
+  if (window.Codex && Codex.isStale(gen)) return;
   view().innerHTML = `
     <div class="doc-toolbar">
       <select id="tbBlock" title="Text style">
@@ -96,12 +142,13 @@ async function open(id) {
       <button id="tbHr" title="Divider">Divider</button>
       <span class="sep"></span>
       <button id="tbDictate" title="Dictate (speech to text)">Dictate</button>
-      <button id="tbReadSel" title="Read the selection aloud, or the whole document if nothing's selected">Read aloud</button>
+      <button id="tbReadSel" title="Read selection aloud">Read aloud</button>
       <button id="tbGrammar" title="Check grammar &amp; style">Grammar</button>
       <span class="sep"></span>
       ${folderSelect}
       <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
       <button id="tbExport" title="Export">Export</button>
+      <button id="tbHistory" title="Saved versions of this draft">Versions</button>
       <span class="save-state" id="saveState">Saved</span>
     </div>
     <div class="wrap">
@@ -123,11 +170,16 @@ async function open(id) {
   const updateWordCount = () => {
     const words = (edEl.innerText || "").trim().split(/\s+/).filter(Boolean).length;
     const wc = $("#wordCount"); if (wc) wc.textContent = words + " word" + (words === 1 ? "" : "s");
+    // feeds the Desk heatmap and fortnight bars; only increases are logged
+    if (window.CodexDeskLog) CodexDeskLog.words(doc.id, words);
   };
   const persist = async () => {
     doc.title = titleEl.value; doc.html = edEl.innerHTML;
     await S().put("docs", doc);
     stateEl.textContent = S().usingFallback() ? "Saved (local)" : "Saved";
+    window.CodexSound && CodexSound.onSave();
+    // keeps a version when the draft has moved on materially
+    window.CodexRevisions && CodexRevisions.consider(doc);
   };
   const touch = () => { stateEl.textContent = "Saving…"; updateWordCount(); clearTimeout(saveT); saveT = setTimeout(persist, 600); };
   updateWordCount();
@@ -163,15 +215,15 @@ async function open(id) {
   $("#tbImg").onclick = () => insertImage(edEl, touch);
   $("#tbTable").onclick = () => insertTable(touch);
   $("#tbDictate").onclick = () => toggleDictate(edEl, touch);
-  $("#tbReadSel").onclick = () => {
-    if (!window.CodexSpeech) { toast("Speech not supported here"); return; }
-    // "Read aloud" with no selection is the common case; read the whole document
-    // instead of silently doing nothing (a highlighted selection still wins if present).
-    const sel = (window.getSelection && String(window.getSelection())) || "";
-    CodexSpeech.read(sel.trim() ? sel : (edEl.innerText || ""));
-  };
+  $("#tbReadSel").onclick = () => { window.CodexSpeech ? CodexSpeech.readSelection() : toast("Speech not supported here"); };
   $("#tbGrammar").onclick = () => runGrammarCheck(edEl.innerText);
-  $("#tbAssist").onclick = () => { CodexAssistant.open(); CodexAssistant.scan(edEl.innerText); };
+  $("#tbHistory").onclick = async () => { await persist(); location.hash = "#/history/" + encodeURIComponent(doc.id); };
+  $("#tbAssist").onclick = () => {
+    CodexAssistant.open();
+    // tell the rail what it is looking at, so answers can say so
+    CodexAssistant.context(titleEl.value || "Untitled document", "#/doc/" + encodeURIComponent(doc.id));
+    CodexAssistant.scan(edEl.innerText);
+  };
   $("#tbExport").onclick = () => exportMenu(doc);
   const fsel = $('[data-role="folder-move"]', view());
   if (fsel) fsel.onchange = () => { doc.folder = fsel.value || null; touch(); };
@@ -438,6 +490,7 @@ function bindWriteTimer(btn) {
       btn.textContent = "Start writing timer";
       btn.classList.remove("active");
       toast(`Writing session: ${mins < 1 ? "under a minute" : mins + " min"}`);
+      if (mins >= 1 && window.CodexDeskLog) CodexDeskLog.minutes(mins);
       return;
     }
     t0 = Date.now();
@@ -546,11 +599,7 @@ async function deckList(folderId) {
     <p class="muted">Build simple presentations for your world; lore recaps, house profiles, pitch decks.
       Present fullscreen or export to PDF.</p>
     ${folderBar}
-    <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" id="newDeck">New deck</button>
-      <button class="btn ghost" id="aiDeck" title="Let your connected AI draft a deck from your canon">✦ AI deck from my canon</button>
-    </div>
-    <div id="aiDeckMsg"></div>
+    <div style="margin:16px 0"><button class="btn" id="newDeck">New deck</button></div>
     ${decks.length ? `<div class="list-grid">${cards}</div>` :
       `<div class="empty-state">No decks here yet.</div>`}
   </div>`;
@@ -559,7 +608,6 @@ async function deckList(folderId) {
       slides: [{ title: "Title slide", body: "Click to edit" }] };
     await S().put("decks", d); location.hash = "#/deck/" + d.id;
   };
-  $("#aiDeck").onclick = () => generateAIDeck(folderId);
   $$("[data-open]", view()).forEach(c => c.onclick = e => {
     if (e.target.dataset.del) return; location.hash = "#/deck/" + c.dataset.open;
   });
@@ -567,66 +615,6 @@ async function deckList(folderId) {
     e.stopPropagation();
     if (confirm("Delete this deck?")) { await S().del("decks", b.dataset.del); deckList(folderId); }
   });
-}
-/* extracts every complete {...} object appearing after `fromIndex`, tolerating a
-   truncated/unclosed enclosing array or object; used when Gemini's output gets cut
-   off mid-generation so we still recover whichever slides finished cleanly. */
-function extractObjectsFrom(text, fromIndex) {
-  const out = [];
-  let depth = 0, start = -1;
-  for (let i = fromIndex; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "{") { if (depth === 0) start = i; depth++; }
-    else if (ch === "}") { depth--; if (depth === 0 && start >= 0) { try { out.push(JSON.parse(text.slice(start, i + 1))); } catch (_) {} start = -1; } }
-  }
-  return out;
-}
-function parseDeckJson(raw) {
-  if (!raw) return { title: "", slides: [] };
-  const t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const s = t.indexOf("{"), e = t.lastIndexOf("}");
-  if (s >= 0 && e > s) {
-    try { const obj = JSON.parse(t.slice(s, e + 1)); if (obj && typeof obj === "object") return obj; } catch (_) {}
-  }
-  // truncated mid-array; salvage whatever complete slide objects exist
-  const slidesIdx = t.indexOf('"slides"');
-  const arrStart = slidesIdx >= 0 ? t.indexOf("[", slidesIdx) : -1;
-  const slides = arrStart >= 0 ? extractObjectsFrom(t, arrStart + 1) : [];
-  const titleMatch = t.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  return { title: titleMatch ? titleMatch[1] : "", slides };
-}
-async function generateAIDeck(folderId) {
-  if (!window.CodexAI || !CodexAI.on) { toast("Connect an AI provider first; Settings → Assistant"); location.hash = "#/settings"; return; }
-  const topic = prompt("What should the deck be about? (a character, house, place, event, or a theme from your canon)");
-  if (topic === null) return;
-  const msg = $("#aiDeckMsg");
-  if (msg) msg.innerHTML = `<div class="ai-thinking" style="padding:10px 0">✦ Drafting your deck from your canon<span class="ai-dots"><i></i><i></i><i></i></span></div>`;
-  let context = "";
-  try { context = CodexAI.context(topic || "overview", 14).context; } catch (e) {}
-  const system = "You build a slide deck from a worldbuilding author's OWN canon. Use ONLY the provided excerpts; never invent names, facts, or events. " +
-    "Return STRICT JSON only (no markdown, no prose): an object with EXACTLY these keys; " +
-    "{\"title\":\"deck title\",\"slides\":[{\"title\":\"slide title\",\"body\":\"a few short lines, use \\n for line breaks\"}]}. " +
-    "Every slide must have a non-empty \"title\" or \"body\"; never leave both blank. " +
-    "Open with a strong title slide, then 4–8 content slides. Keep each slide skimmable; a heading plus a handful of concise lines.";
-  const user = `Build a presentation about "${topic || "an overview of this world"}" from these excerpts. Return only the JSON.\n\n${context}`;
-  try {
-    // Gemini's "thinking" overhead (often 1000-2500+ tokens) can eat the visible output;
-    // give real headroom so the JSON doesn't get cut off mid-array.
-    const data = parseDeckJson(await CodexAI.complete(system, user, { maxTokens: 4800 }));
-    const slides = (data.slides || []).map(s => ({
-      title: String(s.title || s.heading || "").slice(0, 120),
-      body: String(s.body || s.content || s.text || "").slice(0, 1200),
-    })).filter(s => s.title || s.body);
-    if (!slides.length) throw new Error("no slides came back");
-    const d = { id: uid(), title: (data.title || topic || "AI deck").slice(0, 120), folder: folderId || null, slides };
-    await S().put("decks", d);
-    window.CodexFeed && CodexFeed.log("Generated AI deck", `${slides.length} slides on "${topic || "overview"}"`);
-    location.hash = "#/deck/" + d.id;
-  } catch (err) {
-    const hint = window.CodexAI && CodexAI.errorHtml ? CodexAI.errorHtml(err) : `AI couldn't build the deck (${esc(err.message)}). Check your key in Settings.`;
-    if (msg) msg.innerHTML = `<div class="empty-state">✦ ${hint}<br><span class="faint">Or use New deck.</span></div>`;
-    window.CodexAI && CodexAI.wireRetry && CodexAI.wireRetry(() => generateAIDeck(folderId));
-  }
 }
 
 let curDeck = null, curSlide = 0;
@@ -729,20 +717,12 @@ function present() {
   };
   draw();
   document.body.appendChild(el);
-  const close = () => {
-    el.remove();
-    document.removeEventListener("keydown", key);
-    window.removeEventListener("hashchange", close);
-  };
   const key = e => {
     if (e.key === "ArrowRight" || e.key === " ") { i = Math.min(i + 1, d.slides.length - 1); draw(); }
     else if (e.key === "ArrowLeft") { i = Math.max(i - 1, 0); draw(); }
-    else if (e.key === "Escape") close();
+    else if (e.key === "Escape") { el.remove(); document.removeEventListener("keydown", key); }
   };
   document.addEventListener("keydown", key);
-  // navigating away (back button, a link) must also tear the overlay down,
-  // or its key listener would keep firing on a page that no longer shows it
-  window.addEventListener("hashchange", close);
   el.onclick = () => { i = Math.min(i + 1, d.slides.length - 1); draw(); };
 }
 function exportDeckPdf(d) {
@@ -757,5 +737,5 @@ function exportDeckPdf(d) {
   w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
-window.CodexEditor = { list, open, deckList, deckOpen, getCurrentDoc };
+window.CodexEditor = { list, open, deckList, deckOpen, getCurrentDoc, nextChapterTitle, chapterNumberIn };
 })();

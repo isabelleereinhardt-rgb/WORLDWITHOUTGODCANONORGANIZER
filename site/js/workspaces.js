@@ -86,7 +86,7 @@ function renderSwitcher() {
     </div>`).join("");
   el.innerHTML = `<div class="export-box" style="width:400px">
     <div class="export-title">Workspaces</div>
-    <p class="faint" style="margin:0 0 12px">Each workspace is a separate project: its own documents, notes,
+    <p class="faint" style="margin:0 0 12px">Each workspace is a separate project; its own documents, notes,
       canvases, everything. The assistant only ever looks at whichever one is active.</p>
     <div class="ws-list">${rows}</div>
     <div class="ws-new"><input id="wsNewName" placeholder="New workspace name…"><button class="btn sm" id="wsNewBtn">Create</button></div>

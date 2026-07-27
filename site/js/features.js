@@ -12,7 +12,6 @@ const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const view = () => $("#view");
 const uid = (p) => (p || "x") + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const S = () => window.CodexStore;
-const acctKey = (base) => window.CodexAccount ? CodexAccount.storeKey(base) : base;
 
 /* ============================================================
    SETTINGS data; fonts + typography (defined before Extra, since
@@ -37,27 +36,78 @@ function fontStack(name) {
   return `'${name}',${serifish ? "Georgia,serif" : "system-ui,sans-serif"}`;
 }
 
-/* every text style you can pick a font/size/colour for, and where it applies */
+/* every text style you can pick a font/size/colour for, and where it applies.
+   Defaults follow the romantasy design: Cormorant Garamond for display
+   levels, Crimson Pro for body and captions. */
 const TYPO_STYLES = [
-  { key: "title", label: "Title", tag: "h1", defFont: "Fraunces", defSize: 34, defColor: "" },
-  { key: "subtitle", label: "Subtitle", tag: "h2", defFont: "Fraunces", defSize: 20, defColor: "" },
-  { key: "h1", label: "Heading 1", tag: "h1", defFont: "Fraunces", defSize: 28, defColor: "" },
-  { key: "h2", label: "Heading 2", tag: "h2", defFont: "Fraunces", defSize: 23, defColor: "" },
-  { key: "h3", label: "Heading 3", tag: "h3", defFont: "Fraunces", defSize: 19, defColor: "" },
-  { key: "h4", label: "Heading 4", tag: "h4", defFont: "Fraunces", defSize: 17, defColor: "" },
-  { key: "h5", label: "Heading 5", tag: "h5", defFont: "Fraunces", defSize: 15.5, defColor: "" },
-  { key: "h6", label: "Heading 6", tag: "h6", defFont: "Fraunces", defSize: 14, defColor: "" },
-  { key: "h7", label: "Heading 7", tag: "div", defFont: "Fraunces", defSize: 13, defColor: "" },
-  { key: "body", label: "Normal Text", tag: "p", defFont: "Fraunces", defSize: 16.5, defColor: "" },
-  { key: "caption", label: "Caption", tag: "p", defFont: "Inter", defSize: 12, defColor: "" },
+  { key: "title", label: "Title", tag: "h1", defFont: "Cormorant Garamond", defSize: 42, defColor: "" },
+  { key: "subtitle", label: "Subtitle", tag: "h2", defFont: "Cormorant Garamond", defSize: 22, defColor: "" },
+  { key: "h1", label: "Heading 1", tag: "h1", defFont: "Cormorant Garamond", defSize: 32, defColor: "" },
+  { key: "h2", label: "Heading 2", tag: "h2", defFont: "Cormorant Garamond", defSize: 26, defColor: "" },
+  { key: "h3", label: "Heading 3", tag: "h3", defFont: "Cormorant Garamond", defSize: 21, defColor: "" },
+  { key: "h4", label: "Heading 4", tag: "h4", defFont: "Cormorant Garamond", defSize: 19, defColor: "" },
+  { key: "h5", label: "Heading 5", tag: "h5", defFont: "Cormorant Garamond", defSize: 17, defColor: "" },
+  { key: "h6", label: "Heading 6", tag: "h6", defFont: "Cormorant Garamond", defSize: 15, defColor: "" },
+  { key: "h7", label: "Heading 7", tag: "div", defFont: "Cormorant Garamond", defSize: 13, defColor: "" },
+  { key: "body", label: "Normal Text", tag: "p", defFont: "Crimson Pro", defSize: 15, defColor: "" },
+  { key: "caption", label: "Caption", tag: "p", defFont: "Crimson Pro", defSize: 12, defColor: "" },
 ];
 function defaultTypography() {
   const t = {};
   TYPO_STYLES.forEach(s => { t[s.key] = { font: s.defFont, size: s.defSize, color: s.defColor }; });
   return t;
 }
+/* bumped whenever the shipped design defaults change; a saved settings
+   blob from an older design gets its *untouched* font fields migrated
+   forward (see ready()), so the revamp actually shows up instead of the
+   previous defaults being restored over it */
+const DESIGN_VERSION = 2;
 function defaultSettings() {
-  return { accent: "", bg: "", inkColor: "", fontSize: 15, uiFont: "Inter", readFont: "Fraunces", typography: defaultTypography() };
+  return { accent: "", bg: "", fontSize: 15, uiFont: "Crimson Pro", readFont: "Cormorant Garamond",
+    preset: "romantasy", density: "comfortable", ornament: "stars",
+    typography: defaultTypography(), designVersion: DESIGN_VERSION };
+}
+
+/* ---------- preset looks ----------
+   Each one sets the same fields the controls below it set, so a preset
+   is a shortcut rather than a mode you get stuck in. */
+const PRESETS = [
+  { id: "romantasy", name: "Romantasy", note: "The house look; rose on plum",
+    swatches: ["#241b1e", "#f6ccd5", "#c9a15c"], theme: "dark",
+    apply: { accent: "", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
+  { id: "parchment", name: "Parchment", note: "Warm paper, ink and gold",
+    swatches: ["#f7f0ea", "#8a6526", "#38242c"], theme: "light",
+    apply: { accent: "#b0567a", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
+  { id: "midnight", name: "Midnight archive", note: "Cool slate, violet ink",
+    swatches: ["#1b1a24", "#8e7cc3", "#c9c4d8"], theme: "dark",
+    apply: { accent: "#8e7cc3", bg: "#1b1a24", uiFont: "Spectral", readFont: "EB Garamond" } },
+  { id: "botanical", name: "Botanical", note: "Green, quiet, unhurried",
+    swatches: ["#f3f1e7", "#5d7a58", "#33402f"], theme: "light",
+    apply: { accent: "#5d7a58", bg: "#f3f1e7", uiFont: "Alegreya", readFont: "Vollkorn" } },
+  { id: "inkpress", name: "Ink press", note: "High contrast, cut glass",
+    swatches: ["#141414", "#e7e3df", "#c2334f"], theme: "dark",
+    apply: { accent: "#c2334f", bg: "#141414", uiFont: "Work Sans", readFont: "Playfair Display" } },
+  { id: "dusk", name: "Dusk", note: "Amber lamp on a cold evening",
+    swatches: ["#241d1b", "#e0a45c", "#f0e2d4"], theme: "dark",
+    apply: { accent: "#e0a45c", bg: "#241d1b", uiFont: "Karla", readFont: "Cardo" } },
+];
+const DENSITIES = [
+  ["snug", "Snug", "More on screen at once"],
+  ["comfortable", "Comfortable", "The default"],
+  ["airy", "Airy", "Room to breathe"],
+];
+const ORNAMENTS = [
+  ["stars", "✦ ✧ ✦"], ["diamonds", "❖ ❖ ❖"], ["fleur", "❧ ❧ ❧"],
+  ["dots", "· · ·"], ["rule", "-- ✦ --"], ["none", "(none)"],
+];
+/* How long Lucky takes to cross the window, slowest first. Named rather
+   than numeric because "18 seconds" means nothing to anyone. */
+const PACES = [
+  [90, "Rarely"], [60, "Now and then"], [34, "Often"], [20, "A lot"], [12, "Constantly"],
+];
+function paceLabel(secs) {
+  const hit = PACES.find(p => p[0] === secs);
+  return hit ? hit[1] : "Often";
 }
 
 /* ---------- shared caches (read synchronously by app.js) ---------- */
@@ -65,16 +115,38 @@ const Extra = {
   hidden: new Set(),      // soft-deleted source-entry ids
   cats: [],               // custom sections [{id,name}]
   excludedNames: new Set(), // names removed from the Name Index / cross-linking
-  hiddenCats: new Set(),  // built-in Canon section names hidden from the sidebar (entries untouched)
   settings: defaultSettings(),
   async ready() {
     await S().ready;
     const h = await S().all("hidden"); this.hidden = new Set(h.map(x => x.id));
     this.cats = (await S().all("cats")).sort((a, b) => (a.created || 0) - (b.created || 0));
     const x = await S().all("excludedNames"); this.excludedNames = new Set(x.map(r => r.id));
-    const hc = await S().all("hiddenCats"); this.hiddenCats = new Set(hc.map(r => r.id));
-    const saved = localStorage.getItem(acctKey("codex.settings"));
-    if (saved) { try { this.settings = Object.assign(defaultSettings(), JSON.parse(saved)); } catch (e) {} }
+    const saved = localStorage.getItem(window.CodexAccount ? CodexAccount.storeKey("codex.settings") : "codex.settings");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        this.settings = Object.assign(defaultSettings(), parsed);
+        // A blob saved before the revamp carries the OLD font defaults, which
+        // would be re-applied over the new design. Migrate any font field the
+        // user never deliberately changed (i.e. still equal to a previous
+        // default) up to the current one; anything genuinely customised is
+        // left alone.
+        if ((parsed.designVersion || 1) < DESIGN_VERSION) {
+          const stale = { uiFont: ["Inter"], readFont: ["Fraunces"] };
+          Object.keys(stale).forEach(k => {
+            if (stale[k].includes(parsed[k])) this.settings[k] = defaultSettings()[k];
+          });
+          const defTypo = defaultTypography();
+          const oldTypoFonts = ["Fraunces", "Inter"];
+          Object.keys(defTypo).forEach(key => {
+            const cur = this.settings.typography && this.settings.typography[key];
+            if (cur && oldTypoFonts.includes(cur.font)) this.settings.typography[key] = defTypo[key];
+          });
+          this.settings.designVersion = DESIGN_VERSION;
+          localStorage.setItem(window.CodexAccount ? CodexAccount.storeKey("codex.settings") : "codex.settings", JSON.stringify(this.settings));
+        }
+      } catch (e) {}
+    }
     applySettings(this.settings);
   },
   async hide(ids) { for (const id of ids) { this.hidden.add(id); await S().put("hidden", { id }); } logFeed("Deleted", ids.length + " item" + (ids.length === 1 ? "" : "s")); },
@@ -85,10 +157,13 @@ const Extra = {
   async excludeNames(names) { for (const n of names) { this.excludedNames.add(n); await S().put("excludedNames", { id: n }); } logFeed("Removed from Name Index", names.length + " name" + (names.length === 1 ? "" : "s")); },
   async unexcludeName(n) { this.excludedNames.delete(n); await S().del("excludedNames", n); },
   async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
-  async hideCat(name) { this.hiddenCats.add(name); await S().put("hiddenCats", { id: name }); logFeed("Hid section", name); },
-  async unhideCat(name) { this.hiddenCats.delete(name); await S().del("hiddenCats", name); },
 };
 window.CodexExtra = Extra;
+window.CodexSettings = {
+  save: () => saveSettings(),
+  // re-derive every colour token for the theme that is active now
+  reapply: () => applySettings(Extra.settings),
+};
 
 /* ---------- activity feed logging ---------- */
 async function logFeed(action, detail) {
@@ -97,7 +172,7 @@ async function logFeed(action, detail) {
 window.CodexFeed = { log: logFeed };
 
 /* ============================================================
-   SETTINGS; theme colour, fonts, restore deleted
+   SETTINGS ; theme colour, fonts, restore deleted
    ============================================================ */
 function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
@@ -115,43 +190,99 @@ function luminance(hex) {
 }
 function applySettings(s) {
   const root = document.documentElement.style;
+  /* The accent has to drive --blush, not just --accent.
+     The label promises "links, active nav, buttons", and every one of
+     those is painted with --blush; which the stylesheet uses about four
+     times as often as --accent. Setting only --accent meant the picker
+     changed a handful of incidental rules and left the site looking
+     exactly the same, which reads as a broken control.
+
+     --onblush is the text that sits ON those fills, so it is chosen for
+     contrast rather than fixed: a pale accent needs dark text on it. */
   if (s.accent) {
     root.setProperty("--accent", s.accent);
     root.setProperty("--accent-ink", mix(s.accent, "#000000", 0.28));
     root.setProperty("--accent-soft", mix(s.accent, "#ffffff", 0.82));
+    root.setProperty("--blush", s.accent);
+    root.setProperty("--blush2", mix(s.accent, "#000000", 0.18));
+    root.setProperty("--onblush", luminance(s.accent) > 0.55 ? "#2b1a20" : "#fff7f8");
   } else {
-    root.removeProperty("--accent"); root.removeProperty("--accent-ink"); root.removeProperty("--accent-soft");
+    ["--accent", "--accent-ink", "--accent-soft", "--blush", "--blush2", "--onblush"]
+      .forEach(p => root.removeProperty(p));
   }
-  if (s.bg) {
-    const dark = luminance(s.bg) < 0.5;
+  /* A custom background is chosen for ONE theme. It used to be stored
+     for both, and because these land as inline styles on :root; which
+     outrank every stylesheet rule, including [data-theme="light"]; a
+     dark background picked in dark mode kept --ink pinned pale after a
+     switch to light. The panels went cream from the stylesheet, the nav
+     text stayed off-white, and the sidebar became white on white.
+
+     So each theme keeps its own background, and the one belonging to the
+     other theme is simply not applied. A background is also only honoured
+     if it actually suits its theme; a near-black "light mode" background
+     would take the ink down with it. */
+  const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const custom = theme === "light" ? s.bgLight : s.bg;
+  const suits = custom ? (luminance(custom) < 0.5) === (theme === "dark") : false;
+  if (custom && suits) {
+    const dark = theme === "dark";
     const ink = dark ? "#f0ece0" : "#2c2a26";
-    root.setProperty("--bg", s.bg);
-    root.setProperty("--bg-raised", mix(s.bg, "#ffffff", dark ? 0.10 : 0.6));
-    root.setProperty("--bg-sunken", mix(s.bg, "#000000", dark ? 0.2 : 0.05));
+    root.setProperty("--bg", custom);
+    root.setProperty("--bg-raised", mix(custom, "#ffffff", dark ? 0.10 : 0.6));
+    root.setProperty("--bg-sunken", mix(custom, "#000000", dark ? 0.2 : 0.05));
     root.setProperty("--ink", ink);
     root.setProperty("--ink-soft", dark ? "#c9c2b0" : "#6a655c");
     root.setProperty("--ink-faint", dark ? "#8c8574" : "#9c968a");
-    root.setProperty("--line", mix(s.bg, ink, dark ? 0.2 : 0.12));
-    root.setProperty("--line-strong", mix(s.bg, ink, dark ? 0.32 : 0.22));
+    root.setProperty("--line", mix(custom, ink, dark ? 0.2 : 0.12));
+    root.setProperty("--line-strong", mix(custom, ink, dark ? 0.32 : 0.22));
+    // panel and chip are what the sidebar and cards actually sit on; left
+    // to the stylesheet they belonged to a different background entirely
+    root.setProperty("--panel", mix(custom, dark ? "#ffffff" : "#ffffff", dark ? 0.06 : 0.55));
+    root.setProperty("--chip", mix(custom, ink, dark ? 0.12 : 0.10));
   } else {
-    ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint", "--line", "--line-strong"].forEach(p => root.removeProperty(p));
+    ["--bg", "--bg-raised", "--bg-sunken", "--ink", "--ink-soft", "--ink-faint",
+     "--line", "--line-strong", "--panel", "--chip"].forEach(p => root.removeProperty(p));
   }
-  // explicit interface text colour wins over the auto-contrast ink from the background
-  if (s.inkColor) {
-    const c = hexToRgb(s.inkColor);
-    if (c) {
-      root.setProperty("--ink", `rgb(${c.r},${c.g},${c.b})`);
-      root.setProperty("--ink-soft", `rgba(${c.r},${c.g},${c.b},.72)`);
-      root.setProperty("--ink-faint", `rgba(${c.r},${c.g},${c.b},.5)`);
-    }
-  } else if (!s.bg) {
-    ["--ink", "--ink-soft", "--ink-faint"].forEach(p => root.removeProperty(p));
-  }
+  // density scales the spacing tokens the whole page lays out from
+  const dens = { snug: 0.82, comfortable: 1, airy: 1.22 }[s.density || "comfortable"] || 1;
+  root.setProperty("--dens", String(dens));
+  document.documentElement.dataset.density = s.density || "comfortable";
+  document.documentElement.dataset.ornament = s.ornament || "stars";
+  applyMotion(s.motion);
   root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
   root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
   applyTypography(s.typography || defaultTypography());
 }
+
+/* Motion is a three-way choice, not the bare system flag. Plenty of people
+   switch animation off at the OS level for reasons that have nothing to do
+   with motion sensitivity; an old laptop, a work machine, a default they
+   never chose; and they should still be able to have a cat that walks.
+   "System" honours the OS; the other two override it in either direction. */
+const MOTIONS = [
+  ["full", "Full", "Lucky strolls, cards settle in, everything moves"],
+  ["system", "Follow my system", "Whatever your device asks for"],
+  ["calm", "Calm", "Nothing travels across the screen; he still blinks and breathes"],
+];
+function systemWantsCalm() {
+  try { return window.matchMedia("(prefers-reduced-motion:reduce)").matches; } catch (e) { return false; }
+}
+function motionMode(setting) {
+  const m = setting || "system";
+  if (m === "full") return "full";
+  if (m === "calm") return "calm";
+  return systemWantsCalm() ? "calm" : "full";
+}
+function applyMotion(setting) {
+  document.documentElement.dataset.motion = motionMode(setting);
+}
+/* if they are following the system and the system changes, follow it live */
+try {
+  window.matchMedia("(prefers-reduced-motion:reduce)").addEventListener("change", () => {
+    if (!Extra.settings || (Extra.settings.motion || "system") === "system") applyMotion("system");
+  });
+} catch (e) {}
 
 /* inject one <style> block covering every Title/Heading/Caption style, so
    the same look applies both in the document editor and in the rendered
@@ -172,401 +303,197 @@ function applyTypography(typo) {
   }).join("\n");
   styleEl.textContent = css;
 }
-function saveSettings() { localStorage.setItem(acctKey("codex.settings"), JSON.stringify(Extra.settings)); applySettings(Extra.settings); }
+function saveSettings() { localStorage.setItem(window.CodexAccount ? CodexAccount.storeKey("codex.settings") : "codex.settings", JSON.stringify(Extra.settings)); applySettings(Extra.settings); }
 
-function viewSettings() {
-  const s = Extra.settings;
-  const swatches = ["#7c5cff", "#c2603f", "#d0699a", "#3f8f6b", "#b8893b", "#3f6f8f", "#9a6bd0", "#d98b2b", "#2f9e8f", "#e0577d"];
-  const bgSwatches = ["#f6f3ec", "#17151a", "#fbe9ee", "#eaf3ec", "#eef1fb", "#fff6e0", "#f1e6f7", "#2a2438"];
-  const inkSwatches = ["#2c2a26", "#111111", "#5b3fd6", "#3f6f8f", "#3f8f6b", "#b8893b", "#c2603f", "#8a3f6f", "#e8e3d8"];
-  const hiddenCount = Extra.hidden.size;
-  const excludedCount = Extra.excludedNames.size;
-  const acct = window.CodexAccount ? CodexAccount.current() : null;
-  view().innerHTML = `<div class="wrap">
+/* ============================================================
+   SETTINGS; one screen, nine panels.
+   Every panel edits something real and saves to this device only.
+   ============================================================ */
+const SET_TABS = [
+  ["appearance", "Appearance", "✦"],
+  ["avatar", "Your avatar", "✧"],
+  ["typography", "Typography", "✧"],
+  ["sound", "Sound & atmosphere", "✦"],
+  ["lucky", "Lucky", "✧"],
+  ["assistant", "Assistant", "❖"],
+  ["sections", "Sections", "✧"],
+  ["restore", "Restore", "✦"],
+  ["backup", "Workspaces & backup", "❖"],
+  ["account", "Account & syncing", "✦"],
+  ["report", "Help & report a problem", "✧"],
+];
+let setTab = "appearance";
+
+function viewSettings(tab) {
+  if (tab) setTab = tab;
+  if (!SET_TABS.some(t => t[0] === setTab)) setTab = "appearance";
+  view().innerHTML = `<div class="wrap wide">
     <div class="page-kicker">Settings</div>
-    <h1>Settings</h1>
-    <p class="muted">Make it yours. Changes apply instantly and are remembered on this device.</p>
-
-    ${acct ? `<section class="set-block">
-      <h3>Account</h3>
-      <p class="faint" style="margin:2px 0 10px">Signed in as <b>${esc(acct.name)}</b>${acct.email ? ` (${esc(acct.email)})` : ""}${acct.guest ? " as a guest" : ""}.
-        ${acct.cloud ? "This is a cloud account: your work syncs to it and follows you onto any device you sign in on."
-          : "Your account and everything you write live on this device, in this browser; use <b>Back up my work</b> in the sidebar for a portable copy."}</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost sm" id="acctSignOut">Sign out</button>
-        <button class="btn ghost sm" id="acctTplDownload" title="Turn this workspace into the template every NEW account starts from">Download as new-user template</button>
-      </div>
-      <p class="faint" style="font-size:12px;margin:8px 0 0">The template download turns the workspace you're in right now into a
-        <b>template.js</b> file. Replace <b>site/data/template.js</b> in the project with it and every new account will start
-        from a copy of this workspace.</p>
-    </section>` : ""}
-
-    ${window.CodexCloud && CodexCloud.enabled ? `<section class="set-block">
-      <h3>Cloud sync <span class="ai-conn-badge" id="cloudBadge">…</span></h3>
-      ${acct && acct.cloud ? `
-        <p class="faint" style="margin:2px 0 10px" id="cloudDetail"></p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn ghost sm" id="cloudSyncNow">Sync now</button>
-          <span class="faint" id="cloudLast" style="font-size:12px"></span>
+    <h1 class="display">Settings</h1>
+    <p class="muted">Make it yours; changes apply instantly and are remembered on this device.</p>
+    <div class="set-shell">
+      <nav class="set-nav">
+        ${SET_TABS.map(([id, label, glyph]) => `
+          <button class="set-tab${setTab === id ? " on" : ""}" data-settab="${id}">
+            <span class="st-glyph">${glyph}</span>${esc(label)}</button>`).join("")}
+        <div class="set-note">
+          <div class="k">Saved on this device</div>
+          <div>Nothing here is uploaded. A backup is the only copy that leaves this machine.</div>
         </div>
-        <div class="cloud-setup-box" id="cloudSetupBox" hidden>
-          <b>One-time setup needed.</b> Your account works, but the cloud database tables don't exist yet, so nothing can sync.
-          Whoever runs the Supabase project fixes this in about a minute:
-          <ol>
-            <li>Open the Supabase project dashboard, then <b>SQL Editor</b></li>
-            <li>Paste the contents of <b>supabase/schema.sql</b> from this project</li>
-            <li>Click <b>Run</b>, then come back here and press <b>Sync now</b></li>
-          </ol>
-        </div>`
-      : `<p class="faint" style="margin:2px 0">Cloud sync is available on this site, but you're using a
-          ${acct && acct.guest ? "guest" : "device-only"} account, which never leaves this device.
-          To sync across devices, sign out and create a cloud account (email + password) at the sign-in screen.</p>`}
-    </section>` : ""}
-
-    <section class="set-block">
-      <h3>Accent colour</h3>
-      <p class="faint" style="margin:2px 0 12px">Pick any colour; the whole site follows it. Light and dark mode both still work.</p>
-      <div class="swatch-row">
-        ${swatches.map(c => `<button class="swatch" style="background:${c}" data-accent="${c}" title="${c}"></button>`).join("")}
-        <label class="swatch wheel" title="Custom colour"><input type="color" id="accentPicker" value="${s.accent || "#7c5cff"}"></label>
-        <button class="btn ghost sm" id="accentReset">Reset</button>
-      </div>
-    </section>
-
-    <section class="set-block">
-      <h3>Background colour</h3>
-      <p class="faint" style="margin:2px 0 12px">Not feeling black-and-white or the usual light/dark? Pick any background;
-        text colour adjusts automatically to stay readable on it.</p>
-      <div class="swatch-row">
-        ${bgSwatches.map(c => `<button class="swatch" style="background:${c}" data-bg="${c}" title="${c}"></button>`).join("")}
-        <label class="swatch wheel" title="Custom colour"><input type="color" id="bgPicker" value="${s.bg || "#f6f3ec"}"></label>
-        <button class="btn ghost sm" id="bgReset">Reset to theme default</button>
-      </div>
-    </section>
-
-    <section class="set-block">
-      <h3>Text</h3>
-      <div class="set-row">
-        <label>Base font size <b id="fsVal">${s.fontSize}px</b></label>
-        <input type="range" id="fontSize" min="13" max="20" step="1" value="${s.fontSize}">
-      </div>
-      <div class="set-row">
-        <label>Interface font</label>
-        <select id="uiFont">${FONT_LIST.map(f => `<option ${f === s.uiFont ? "selected" : ""}>${f}</option>`).join("")}</select>
-      </div>
-      <div class="set-row">
-        <label>Reading / heading font (default)</label>
-        <select id="readFont">${FONT_LIST.map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select>
-      </div>
-    </section>
-
-    <section class="set-block">
-      <h3>Interface text colour</h3>
-      <p class="faint" style="margin:2px 0 12px">The colour of the words across the interface; menus, labels, buttons, and reading text.
-        Pick any colour, or leave it <b>Automatic</b> and it follows your background so it always stays readable.</p>
-      <div class="swatch-row">
-        ${inkSwatches.map(c => `<button class="swatch" style="background:${c}" data-ink="${c}" title="${c}"></button>`).join("")}
-        <label class="swatch wheel" title="Custom colour"><input type="color" id="inkPicker" value="${s.inkColor || "#2c2a26"}"></label>
-        <button class="btn ghost sm" id="inkReset">Automatic</button>
-      </div>
-    </section>
-
-    <section class="set-block">
-      <h3>Typography; every text style</h3>
-      <p class="faint" style="margin:2px 0 12px">Font, size, and colour for each style, independently; mix and match
-        (Georgia for Heading 1, Lora for body, whatever you want). These are exactly the styles you can pick when
-        writing in a Document; write a Heading 1 there and it looks like this.</p>
-      <div class="typo-table">
-        <div class="typo-head"><span>Style</span><span>Font</span><span>Size</span><span>Colour</span><span>Preview</span></div>
-        ${TYPO_STYLES.map(st => {
-          const t = (s.typography && s.typography[st.key]) || { font: st.defFont, size: st.defSize, color: "" };
-          return `<div class="typo-row" data-key="${st.key}">
-            <span class="typo-label">${esc(st.label)}</span>
-            <select class="typo-font" data-key="${st.key}">${FONT_LIST.map(f => `<option ${f === t.font ? "selected" : ""}>${f}</option>`).join("")}</select>
-            <input class="typo-size" type="number" min="9" max="72" step="0.5" data-key="${st.key}" value="${t.size}">
-            <input class="typo-color" type="color" data-key="${st.key}" value="${t.color || "#2c2a26"}">
-            <span class="typo-preview ty-${st.key}" id="typoPreview-${st.key}" style="${t.color ? "color:" + esc(t.color) : ""}">${esc(st.label)}</span>
-          </div>`;
-        }).join("")}
-      </div>
-      <button class="btn ghost sm" id="typoReset" style="margin-top:12px">Reset typography to defaults</button>
-    </section>
-
-    <section class="set-block">
-      <h3>Your custom Canon sections</h3>
-      <p class="faint" style="margin:2px 0 10px">Sections you've added under "The Canon" with the <b>+</b> button. Delete one here, from the section's
-        own page, or with the ✕ next to it in the sidebar; any notes filed there move to "My Notes" first, nothing is destroyed.</p>
-      ${Extra.cats.length ? `<div class="section-mgr-list">${Extra.cats.map(c => `
-        <div class="section-mgr-row">
-          <span>${esc(c.name)}</span>
-          <button class="btn ghost sm" data-delsection="${esc(c.name)}" style="color:var(--danger)">Delete</button>
-        </div>`).join("")}</div>` : `<p class="faint">You haven't added any custom sections yet; use the <b>+</b> next to "The Canon" in the sidebar.</p>`}
-    </section>
-
-    <section class="set-block">
-      <h3>Hidden Canon sections</h3>
-      <p class="faint" style="margin:2px 0 10px">Built-in sections (Characters, Noble Houses, etc.) you've hidden from the sidebar with the ✕ or
-        "Hide section" button. Their entries were never touched; restore any of them here.</p>
-      ${Extra.hiddenCats.size ? `<div class="section-mgr-list">${Array.from(Extra.hiddenCats).map(name => `
-        <div class="section-mgr-row">
-          <span>${esc(name)}</span>
-          <button class="btn ghost sm" data-unhidecat="${esc(name)}">Restore</button>
-        </div>`).join("")}</div>` : `<p class="faint">No sections hidden.</p>`}
-    </section>
-
-    <section class="set-block">
-      <h3>Deleted entries</h3>
-      <p class="faint" style="margin:2px 0 10px">Anything you batch-delete from a collection is hidden, not destroyed; restore it here.</p>
-      ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
-        <div class="hidden-list" id="hiddenList"></div>` : `<p class="faint">Nothing deleted.</p>`}
-    </section>
-
-    <section class="set-block">
-      <h3>Removed from Name Index</h3>
-      <p class="faint" style="margin:2px 0 10px">Names you've removed from the Name Index stop being cross-linked in your text, but nothing about them is deleted; restore any of them here.</p>
-      ${excludedCount ? `<button class="btn ghost sm" id="restoreNamesAll">Restore all ${excludedCount} name${excludedCount === 1 ? "" : "s"}</button>
-        <div class="recog" style="margin-top:10px">${Array.from(Extra.excludedNames).map(n => `<span class="chip" data-restorename="${esc(n)}" style="cursor:pointer">${esc(n)} ✕</span>`).join("")}</div>`
-        : `<p class="faint">Nothing removed.</p>`}
-    </section>
-
-    <section class="set-block">
-      <h3>Assistant; connect AI <span class="ai-conn-badge" id="aiConnBadge">Not connected</span></h3>
-      <p class="faint" style="margin:2px 0 12px">Give the assistant a real brain. Paste an API key below, then in the ✦ Assistant type a
-        question and press <b>Enter</b> for a written answer; reasoned, but grounded <b>only</b> in your own canon,
-        never invented. Your key is stored <b>only in this browser</b>, is never uploaded, and is deliberately kept
-        out of your backups. Each provider keeps its own key, so switching between them never loses any of the others.</p>
-      <div class="set-row">
-        <label>Provider</label>
-        <select id="aiProvider">
-          <option value="gemini">Google Gemini</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="groq">Groq</option>
-          <option value="xai">Grok (xAI)</option>
-        </select>
-      </div>
-      <div id="aiProviderGemini">
-        <div class="set-row">
-          <label>Gemini API key</label>
-          <input type="password" id="aiKey" class="ai-key-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.aiKey") || "")}">
-        </div>
-        <div class="set-row">
-          <label>Model</label>
-          <select id="aiModel">
-            <option value="gemini-flash-latest">Gemini Flash (latest); fast, free tier, recommended</option>
-            <option value="gemini-pro-latest">Gemini Pro (latest); most capable, needs Google billing enabled (no free tier)</option>
-          </select>
-        </div>
-        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <a class="btn ghost sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
-        </div>
-      </div>
-      <div id="aiProviderDeepseek" hidden>
-        <div class="set-row">
-          <label>DeepSeek API key</label>
-          <input type="password" id="dsKey" class="ai-key-input" placeholder="Paste your DeepSeek API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.deepseekKey") || "")}">
-        </div>
-        <div class="set-row">
-          <label>Model</label>
-          <select id="dsModel">
-            <option value="deepseek-v4-flash">DeepSeek V4 Flash; fast &amp; cheap, recommended</option>
-            <option value="deepseek-v4-pro">DeepSeek V4 Pro; more capable, costs more</option>
-          </select>
-        </div>
-        <p class="faint" style="margin:2px 0">DeepSeek is <b>pay-as-you-go, not free</b>; you'll need a small balance on your account for it to answer.</p>
-        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <a class="btn ghost sm" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Get a key →</a>
-          <a class="btn ghost sm" href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">Add balance →</a>
-        </div>
-      </div>
-      <div id="aiProviderGroq" hidden>
-        <div class="set-row">
-          <label>Groq API key</label>
-          <input type="password" id="groqKey" class="ai-key-input" placeholder="Paste your Groq API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.groqKey") || "")}">
-        </div>
-        <div class="set-row">
-          <label>Model</label>
-          <select id="groqModel"><option value="${esc(localStorage.getItem("codex.groqModel") || "llama-3.3-70b-versatile")}">${esc(localStorage.getItem("codex.groqModel") || "llama-3.3-70b-versatile")}</option></select>
-        </div>
-        <p class="faint" style="margin:2px 0" id="groqModelHint">Paste your key, then <b>Refresh models</b> to load your account's real current model list.</p>
-        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <a class="btn ghost sm" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a free key →</a>
-          <button class="btn ghost sm" id="groqRefreshModels">Refresh models</button>
-        </div>
-      </div>
-      <div id="aiProviderXai" hidden>
-        <div class="set-row">
-          <label>xAI (Grok) API key</label>
-          <input type="password" id="xaiKey" class="ai-key-input" placeholder="Paste your xAI API key" autocomplete="off" spellcheck="false" value="${esc(localStorage.getItem("codex.xaiKey") || "")}">
-        </div>
-        <div class="set-row">
-          <label>Model</label>
-          <select id="xaiModel"><option value="${esc(localStorage.getItem("codex.xaiModel") || "grok-4")}">${esc(localStorage.getItem("codex.xaiModel") || "grok-4")}</option></select>
-        </div>
-        <p class="faint" style="margin:2px 0" id="xaiModelHint">Paste your key, then <b>Refresh models</b> to load your account's real current model list. Grok is <b>pay-as-you-go, not free</b>.</p>
-        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <a class="btn ghost sm" href="https://console.x.ai" target="_blank" rel="noopener">Get a key →</a>
-          <button class="btn ghost sm" id="xaiRefreshModels">Refresh models</button>
-        </div>
-      </div>
-      <div style="margin-top:8px">
-        <button class="btn ghost sm" id="aiForget" hidden>Disconnect</button>
-      </div>
-    </section>
-
-    <section class="set-block">
-      <h3>AI behaviour</h3>
-      <p class="faint" style="margin:2px 0 10px">Extra instructions for how the assistant should read and reason about your world. Saved with your work, and fed to the AI on every question.</p>
-      <textarea class="import-body" id="aiInstr" placeholder="e.g. Prefer my own terminology. When I ask who someone is, give a short blurb in my voice, not a raw quote.">${esc(s.aiInstr || "")}</textarea>
-      <div style="margin-top:8px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>
-    </section>
+      </nav>
+      <div class="set-panel" id="setPanel"></div>
+    </div>
   </div>`;
+  $$("[data-settab]").forEach(b => b.onclick = () => viewSettings(b.dataset.settab));
+  renderSetPanel();
+}
 
-  if ($("#acctSignOut")) $("#acctSignOut").onclick = () => window.CodexAccount && CodexAccount.signOut();
-  if ($("#acctTplDownload")) $("#acctTplDownload").onclick = downloadTemplate;
+function renderSetPanel() {
+  const el = $("#setPanel");
+  ({
+    appearance: panelAppearance, avatar: panelAvatar, typography: panelTypography,
+    sound: panelSound, lucky: panelLucky, assistant: panelAssistant,
+    sections: panelSections, restore: panelRestore, backup: panelBackup,
+    account: panelAccount, report: panelReport,
+  })[setTab](el);
+}
 
-  if ($("#cloudBadge") && !$("#cloudDetail")) $("#cloudBadge").textContent = "Available";
-  if ($("#cloudBadge") && $("#cloudDetail") && window.CodexCloud) {
-    const badge = $("#cloudBadge");
-    const BADGES = { synced: "Synced", syncing: "Syncing…", offline: "Offline", setup: "Setup needed", error: "Problem", idle: "Ready", off: "Off" };
-    const DETAILS = {
-      synced: "Everything is saved to your account. Sign in anywhere with the same email and it's all there.",
-      syncing: "Talking to your account…",
-      offline: "You're offline; changes are kept locally and sync as soon as you're back.",
-      setup: "The cloud database needs a one-time setup (below).",
-      error: "Something went wrong while syncing.",
-      idle: "Waiting for the first sync.",
-    };
-    CodexCloud.onStatus(st => {
-      badge.textContent = BADGES[st.state] || st.state;
-      badge.classList.toggle("on", st.state === "synced");
-      const d = $("#cloudDetail");
-      if (d) d.textContent = (DETAILS[st.state] || "") + (st.state === "error" && st.detail ? " (" + st.detail + ")" : "");
-      const box = $("#cloudSetupBox"); if (box) box.hidden = st.state !== "setup";
-      const last = $("#cloudLast");
-      if (last) {
-        const t = CodexCloud.lastSync(), pending = CodexCloud.pending();
-        last.textContent = (t ? "Last synced " + new Date(t).toLocaleTimeString() : "Not synced yet") +
-          (pending ? " · " + pending + " change" + (pending === 1 ? "" : "s") + " waiting" : "");
-      }
-    });
-    if ($("#cloudSyncNow")) $("#cloudSyncNow").onclick = () => CodexCloud.syncNow();
-  }
+/* ---------- Appearance ---------- */
+function panelAppearance(el) {
+  const s = Extra.settings;
+  const accents = ["#f6ccd5", "#d4869c", "#b06a8f", "#c9a15c", "#8e7cc3", "#7c9a76", "#c2603f", "#3f6f8f"];
+  const isLight = document.documentElement.dataset.theme === "light";
+  const curBg = isLight ? s.bgLight : s.bg;
+  // offer backgrounds that suit the theme on screen; a near-black
+  // "light mode" ground is what broke the sidebar in the first place
+  const bgs = isLight
+    ? ["#f7f0ea", "#fbe9ee", "#efe3d2", "#f6f3ec", "#fdf7f3", "#eef2f6", "#f4efe6", "#fbf6ef"]
+    : ["#241b1e", "#221d2e", "#1b1a1d", "#17151a", "#1e2226", "#2a1f22", "#191c22", "#231f1a"];
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Preset looks</span><span class="hr"></span>
+      <span class="meta">a starting point; everything below stays adjustable</span></div>
+    <div class="skin-grid">
+      ${PRESETS.map(p => `<button class="skin-card${s.preset === p.id ? " on" : ""}" data-preset="${p.id}">
+        <span class="sk-swatches">${p.swatches.map(c => `<span style="background:${c}"></span>`).join("")}</span>
+        <span class="sk-name">${esc(p.name)}</span>
+        <span class="sk-note">${esc(p.note)}</span></button>`).join("")}
+    </div>
 
-  $$(".swatch[data-accent]").forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
-  $("#accentPicker").oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
-  $("#accentReset").onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
-  $$(".swatch[data-bg]").forEach(b => b.onclick = () => { Extra.settings.bg = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
-  $("#bgPicker").oninput = e => { Extra.settings.bg = e.target.value; saveSettings(); };
-  $("#bgReset").onclick = () => { Extra.settings.bg = ""; saveSettings(); toast("Background reset to theme default"); };
-  $$(".swatch[data-ink]").forEach(b => b.onclick = () => { Extra.settings.inkColor = b.dataset.ink; $("#inkPicker").value = b.dataset.ink; saveSettings(); });
-  $("#inkPicker").oninput = e => { Extra.settings.inkColor = e.target.value; saveSettings(); };
-  $("#inkReset").onclick = () => { Extra.settings.inkColor = ""; saveSettings(); toast("Text colour set to automatic"); };
-  $("#fontSize").oninput = e => { Extra.settings.fontSize = +e.target.value; $("#fsVal").textContent = e.target.value + "px"; saveSettings(); };
-  $("#uiFont").onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
-  $("#readFont").onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
-  $("#saveAiInstr") && ($("#saveAiInstr").onclick = () => { Extra.settings.aiInstr = $("#aiInstr").value; saveSettings(); toast("Saved"); });
-  $$("[data-delsection]").forEach(b => b.onclick = async () => {
-    // deleteCustomSection() already calls refresh(), which re-renders this page via the router
-    if (window.Codex && Codex.deleteCustomSection) await Codex.deleteCustomSection(b.dataset.delsection);
+    <div class="rule-head mt"><span class="k">Density</span><span class="hr"></span></div>
+    <p class="faint set-help">How much air the page gives itself.</p>
+    <div class="av-chips">${DENSITIES.map(([id, label, note]) =>
+      `<button class="av-chip${(s.density || "comfortable") === id ? " on" : ""}" data-density="${id}"
+        title="${esc(note)}">${esc(label)}</button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Ornament set</span><span class="hr"></span></div>
+    <p class="faint set-help">The little marks between sections, and the one on Lucky's notices.</p>
+    <div class="av-chips">${ORNAMENTS.map(([id, glyphs]) =>
+      `<button class="av-chip orn${(s.ornament || "stars") === id ? " on" : ""}" data-ornament="${id}">${glyphs}</button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Movement</span><span class="hr"></span></div>
+    <p class="faint set-help">Your device currently asks for
+      ${systemWantsCalm() ? "<strong>less</strong> movement" : "<strong>full</strong> movement"}.
+      Override it here if you disagree.</p>
+    <div class="pers-grid">${MOTIONS.map(([id, label, note]) =>
+      `<button class="pers-card${(s.motion || "system") === id ? " on" : ""}" data-motion="${id}">
+        <span class="pc-glyph">${id === "calm" ? "☾" : id === "full" ? "✦" : "✧"}</span>
+        <span><span class="pc-name">${esc(label)}</span><span class="pc-sample">${esc(note)}</span></span>
+      </button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Accent colour</span><span class="hr"></span></div>
+    <p class="faint set-help">The whole site follows it; links, active nav, buttons.</p>
+    <div class="swatch-row">
+      ${accents.map(c => `<button class="swatch" style="background:${c}" data-accent="${c}" title="${c}"></button>`).join("")}
+      <label class="swatch wheel" title="Any colour"><input type="color" id="accentPicker" value="${s.accent || "#f6ccd5"}"></label>
+      <button class="btn ghost sm" id="accentReset">Reset</button>
+    </div>
+
+    <div class="rule-head mt"><span class="k">Background colour</span><span class="hr"></span></div>
+    <p class="faint set-help">This sets the background for
+      <strong>${isLight ? "light" : "dark"}</strong> mode only; the other mode keeps its own,
+      so switching themes never leaves you with unreadable text.</p>
+    <div class="swatch-row">
+      ${bgs.map(c => `<button class="swatch" style="background:${c}" data-bg="${c}" title="${c}"></button>`).join("")}
+      <label class="swatch wheel" title="Any colour"><input type="color" id="bgPicker" value="${curBg || (isLight ? "#f7f0ea" : "#241b1e")}"></label>
+      <button class="btn ghost sm" id="bgReset">Theme default</button>
+    </div>
+
+    <div class="rule-head mt"><span class="k">Text</span><span class="hr"></span></div>
+    <div class="set-row"><label>Base font size <b id="fsVal">${s.fontSize}px</b>
+      <em>Everything scales from here.</em></label>
+      <input type="range" id="fontSize" min="13" max="20" step="1" value="${s.fontSize}"></div>
+    <div class="set-row"><label>Interface font<em>${FONT_LIST.length} in the library.</em></label>
+      <select id="uiFont">${FONT_LIST.map(f => `<option ${f === s.uiFont ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+    <div class="set-row"><label>Reading / heading font<em>The default for headings and reading text.</em></label>
+      <select id="readFont">${FONT_LIST.map(f => `<option ${f === s.readFont ? "selected" : ""}>${f}</option>`).join("")}</select></div>`;
+
+  $$("[data-preset]", el).forEach(b => b.onclick = () => {
+    const p = PRESETS.find(x => x.id === b.dataset.preset);
+    if (!p) return;
+    Object.assign(Extra.settings, p.apply, { preset: p.id });
+    if (p.theme) { document.documentElement.dataset.theme = p.theme; localStorage.setItem("codex.theme", p.theme); }
+    saveSettings();
+    viewSettings("appearance");
+    toast(p.name + " applied");
   });
-  $$("[data-unhidecat]").forEach(b => b.onclick = async () => {
-    await Extra.unhideCat(b.dataset.unhidecat);
-    if (window.Codex && Codex.refresh) Codex.refresh();
-    toast(`"${b.dataset.unhidecat}" restored to the sidebar`);
+  $$("[data-density]", el).forEach(b => b.onclick = () => { Extra.settings.density = b.dataset.density; saveSettings(); viewSettings("appearance"); });
+  $$("[data-ornament]", el).forEach(b => b.onclick = () => { Extra.settings.ornament = b.dataset.ornament; saveSettings(); viewSettings("appearance"); });
+  $$("[data-motion]", el).forEach(b => b.onclick = () => {
+    Extra.settings.motion = b.dataset.motion;
+    saveSettings();
+    applyMotion(Extra.settings.motion);
+    // re-mount him so the walk restarts from the right rather than
+    // resuming mid-stride from wherever the old animation was paused
+    if (window.CodexLucky) CodexLucky.render();
+    viewSettings("appearance");
   });
+  $$(".swatch[data-accent]", el).forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
+  $("#accentPicker", el).oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
+  $("#accentReset", el).onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
+  // written to the key for whichever theme is on screen right now
+  const bgKey = isLight ? "bgLight" : "bg";
+  $$(".swatch[data-bg]", el).forEach(b => b.onclick = () => { Extra.settings[bgKey] = b.dataset.bg; $("#bgPicker").value = b.dataset.bg; saveSettings(); });
+  $("#bgPicker", el).oninput = e => { Extra.settings[bgKey] = e.target.value; saveSettings(); };
+  $("#bgReset", el).onclick = () => { Extra.settings[bgKey] = ""; saveSettings(); toast("Background reset to theme default"); };
+  $("#fontSize", el).oninput = e => { Extra.settings.fontSize = +e.target.value; $("#fsVal").textContent = e.target.value + "px"; saveSettings(); };
+  $("#uiFont", el).onchange = e => { Extra.settings.uiFont = e.target.value; saveSettings(); };
+  $("#readFont", el).onchange = e => { Extra.settings.readFont = e.target.value; saveSettings(); };
+}
 
-  const aiProviderEl = $("#aiProvider"), aiKeyEl = $("#aiKey"), aiModelEl = $("#aiModel"),
-        dsKeyEl = $("#dsKey"), dsModelEl = $("#dsModel"),
-        groqKeyEl = $("#groqKey"), groqModelEl = $("#groqModel"), groqRefreshBtn = $("#groqRefreshModels"), groqHint = $("#groqModelHint"),
-        xaiKeyEl = $("#xaiKey"), xaiModelEl = $("#xaiModel"), xaiRefreshBtn = $("#xaiRefreshModels"), xaiHint = $("#xaiModelHint"),
-        aiBadge = $("#aiConnBadge"), aiForget = $("#aiForget"),
-        panelGemini = $("#aiProviderGemini"), panelDeepseek = $("#aiProviderDeepseek"),
-        panelGroq = $("#aiProviderGroq"), panelXai = $("#aiProviderXai");
-  if (aiProviderEl) {
-    aiModelEl.value = localStorage.getItem("codex.aiModel") || "gemini-flash-latest";
-    dsModelEl.value = localStorage.getItem("codex.deepseekModel") || "deepseek-v4-flash";
-    aiProviderEl.value = localStorage.getItem("codex.aiProvider") || "gemini";
-    const reflectAi = () => {
-      const provider = localStorage.getItem("codex.aiProvider") || "gemini";
-      panelGemini.hidden = provider !== "gemini";
-      panelDeepseek.hidden = provider !== "deepseek";
-      panelGroq.hidden = provider !== "groq";
-      panelXai.hidden = provider !== "xai";
-      const keyByProvider = {
-        gemini: localStorage.getItem("codex.aiKey"),
-        deepseek: localStorage.getItem("codex.deepseekKey"),
-        groq: localStorage.getItem("codex.groqKey"),
-        xai: localStorage.getItem("codex.xaiKey"),
-      };
-      const on = !!keyByProvider[provider];
-      aiBadge.textContent = on ? "Connected" : "Not connected";
-      aiBadge.classList.toggle("on", on);
-      aiForget.hidden = !on;
-    };
-    reflectAi();
-    aiProviderEl.onchange = () => { localStorage.setItem("codex.aiProvider", aiProviderEl.value); reflectAi(); };
-    aiKeyEl.addEventListener("input", () => {
-      const v = aiKeyEl.value.trim();
-      if (v) localStorage.setItem("codex.aiKey", v); else localStorage.removeItem("codex.aiKey");
-      reflectAi();
-    });
-    aiModelEl.onchange = () => localStorage.setItem("codex.aiModel", aiModelEl.value);
-    dsKeyEl.addEventListener("input", () => {
-      const v = dsKeyEl.value.trim();
-      if (v) localStorage.setItem("codex.deepseekKey", v); else localStorage.removeItem("codex.deepseekKey");
-      reflectAi();
-    });
-    dsModelEl.onchange = () => localStorage.setItem("codex.deepseekModel", dsModelEl.value);
+/* ---------- Your avatar ---------- */
+function panelAvatar(el) {
+  if (!window.CodexAvatarBuilder) { el.innerHTML = `<p class="faint">The avatar builder didn't load.</p>`; return; }
+  el.innerHTML = `<div class="rule-head"><span class="k">Your avatar</span><span class="hr"></span></div>
+    <p class="faint set-help">Drawn here, not downloaded. It greets you on the Desk.</p>
+    <div id="avBuilderRoot"></div>`;
+  CodexAvatarBuilder.view($("#avBuilderRoot", el));
+}
 
-    /* Groq and xAI model names shift over time; "Refresh models" pulls the
-       account's real, currently-working list straight from each provider
-       rather than trusting a hardcoded guess that can go stale. */
-    async function refreshModelList(provider, keyEl, modelEl, hintEl, storeKey) {
-      const key = keyEl.value.trim();
-      if (!key) { toast(`Paste your ${provider === "groq" ? "Groq" : "xAI"} key first`); return; }
-      hintEl.textContent = "Loading models…";
-      try {
-        const models = await CodexAI.fetchModels(provider, key);
-        const cur = localStorage.getItem(storeKey);
-        modelEl.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
-        if (cur && models.includes(cur)) modelEl.value = cur;
-        else localStorage.setItem(storeKey, modelEl.value);
-        hintEl.textContent = `${models.length} model${models.length === 1 ? "" : "s"} available on your account.`;
-      } catch (e) {
-        hintEl.textContent = "Couldn't load models: " + e.message;
-      }
-    }
-    groqKeyEl.addEventListener("input", () => {
-      const v = groqKeyEl.value.trim();
-      if (v) localStorage.setItem("codex.groqKey", v); else localStorage.removeItem("codex.groqKey");
-      reflectAi();
-    });
-    groqModelEl.onchange = () => localStorage.setItem("codex.groqModel", groqModelEl.value);
-    groqRefreshBtn.onclick = () => refreshModelList("groq", groqKeyEl, groqModelEl, groqHint, "codex.groqModel");
-
-    xaiKeyEl.addEventListener("input", () => {
-      const v = xaiKeyEl.value.trim();
-      if (v) localStorage.setItem("codex.xaiKey", v); else localStorage.removeItem("codex.xaiKey");
-      reflectAi();
-    });
-    xaiModelEl.onchange = () => localStorage.setItem("codex.xaiModel", xaiModelEl.value);
-    xaiRefreshBtn.onclick = () => refreshModelList("xai", xaiKeyEl, xaiModelEl, xaiHint, "codex.xaiModel");
-
-    aiForget.onclick = () => {
-      const provider = localStorage.getItem("codex.aiProvider") || "gemini";
-      const map = {
-        gemini: [aiKeyEl, "codex.aiKey"], deepseek: [dsKeyEl, "codex.deepseekKey"],
-        groq: [groqKeyEl, "codex.groqKey"], xai: [xaiKeyEl, "codex.xaiKey"],
-      };
-      const [el, key] = map[provider] || map.gemini;
-      localStorage.removeItem(key); el.value = "";
-      reflectAi(); toast("Disconnected");
-    };
-  }
-
+/* ---------- Typography ---------- */
+function panelTypography(el) {
+  const s = Extra.settings;
   if (!s.typography) s.typography = defaultTypography();
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Every text style</span><span class="hr"></span></div>
+    <p class="faint set-help">Font, size and colour for each style, independently. These are the same styles you pick
+      while writing a document, so a Heading 1 there looks exactly like this.</p>
+    <div class="typo-table">
+      <div class="typo-head"><span>Style</span><span>Font</span><span>Size</span><span>Colour</span><span>Preview</span></div>
+      ${TYPO_STYLES.map(st => {
+        const t = (s.typography && s.typography[st.key]) || { font: st.defFont, size: st.defSize, color: "" };
+        return `<div class="typo-row" data-key="${st.key}">
+          <span class="typo-label">${esc(st.label)}</span>
+          <select class="typo-font" data-key="${st.key}">${FONT_LIST.map(f => `<option ${f === t.font ? "selected" : ""}>${f}</option>`).join("")}</select>
+          <input class="typo-size" type="number" min="9" max="72" step="0.5" data-key="${st.key}" value="${t.size}">
+          <input class="typo-color" type="color" data-key="${st.key}" value="${t.color || "#f4e8e7"}">
+          <span class="typo-preview ty-${st.key}" id="typoPreview-${st.key}" style="${t.color ? "color:" + esc(t.color) : ""}">${esc(st.label)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <button class="btn ghost sm" id="typoReset" style="margin-top:14px">Reset typography to defaults</button>`;
+
   const touchTypo = key => {
-    const row = $(`.typo-row[data-key="${key}"]`);
+    const row = $(`.typo-row[data-key="${key}"]`, el);
     const font = row.querySelector(".typo-font").value;
     const size = +row.querySelector(".typo-size").value;
     const color = row.querySelector(".typo-color").value;
@@ -575,35 +502,364 @@ function viewSettings() {
     if (preview) { preview.style.fontFamily = fontStack(font); preview.style.fontSize = size + "px"; preview.style.color = color; }
     saveSettings();
   };
-  $$(".typo-font").forEach(el => el.onchange = () => touchTypo(el.dataset.key));
-  $$(".typo-size").forEach(el => el.oninput = () => touchTypo(el.dataset.key));
-  $$(".typo-color").forEach(el => el.oninput = () => touchTypo(el.dataset.key));
-  $("#typoReset").onclick = () => { s.typography = defaultTypography(); saveSettings(); viewSettings(); };
+  $$(".typo-font", el).forEach(x => x.onchange = () => touchTypo(x.dataset.key));
+  $$(".typo-size", el).forEach(x => x.oninput = () => touchTypo(x.dataset.key));
+  $$(".typo-color", el).forEach(x => x.oninput = () => touchTypo(x.dataset.key));
+  $("#typoReset", el).onclick = () => { s.typography = defaultTypography(); saveSettings(); renderSetPanel(); };
+}
+
+/* ---------- Sound & atmosphere ---------- */
+function panelSound(el) {
+  if (!window.CodexSound) { el.innerHTML = `<p class="faint">The sound engine didn't load.</p>`; return; }
+  const L = window.CodexLucky;
+  const amb = L.pref("ambience"), vol = L.pref("volume");
+  const sfx = Object.assign({ click: false, page: false, bell: true, chime: false }, Extra.settings.sfx || {});
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Sound &amp; atmosphere</span><span class="hr"></span></div>
+    <p class="faint set-help">All of it is generated here on your machine, nothing is downloaded, and everything is
+      off until you switch it on. Browsers only allow sound after you click, so the first sound you hear will be one you asked for.</p>
+
+    <div class="rule-head mt"><span class="k">Ambience while you write</span><span class="hr"></span></div>
+    <div class="amb-grid">
+      ${CodexSound.AMBIENCES.map(([id, name, note, glyph]) => `
+        <button class="amb-card${amb === id ? " on" : ""}" data-setamb="${id}">
+          <span class="ac-glyph">${glyph}</span>
+          <span><span class="ac-name">${esc(name)}</span><span class="ac-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+    <p class="faint set-help">Ambience starts automatically when a sprint begins and stops when it ends.</p>
+
+    <div class="rule-head mt"><span class="k">Interface sounds</span><span class="hr"></span></div>
+    ${CodexSound.SFX.map(([key, label, note]) => `
+      <div class="sfx-row">
+        <span class="sfx-label">${esc(label)}<em>${esc(note)}</em></span>
+        <button class="btn ghost sm" data-hear="${key}">Hear it</button>
+        <button class="switch${sfx[key] ? " on" : ""}" data-sfx="${key}" role="switch" aria-checked="${!!sfx[key]}"><span></span></button>
+      </div>`).join("")}
+
+    <div class="rule-head mt"><span class="k">Volume · <span id="volLab">${vol}%</span></span><span class="hr"></span></div>
+    <input type="range" id="volRange" min="0" max="100" value="${vol}" style="width:100%">`;
+
+  $$("[data-setamb]", el).forEach(b => b.onclick = () => {
+    CodexSound.ambience(b.dataset.setamb);
+    $$("[data-setamb]", el).forEach(x => x.classList.toggle("on", x === b));
+  });
+  $$("[data-hear]", el).forEach(b => b.onclick = () => {
+    const k = b.dataset.hear;
+    if (k === "click") CodexSound.click(false);
+    else if (k === "page") CodexSound.page();
+    else if (k === "bell") CodexSound.bell();
+    else CodexSound.click(true);
+  });
+  $$("[data-sfx]", el).forEach(b => b.onclick = () => {
+    const k = b.dataset.sfx;
+    sfx[k] = !sfx[k];
+    Extra.settings.sfx = sfx;
+    saveSettings();
+    b.classList.toggle("on", sfx[k]);
+    b.setAttribute("aria-checked", String(!!sfx[k]));
+  });
+  $("#volRange", el).oninput = e => { $("#volLab", el).textContent = e.target.value + "%"; CodexSound.setVolume(+e.target.value); };
+}
+
+/* ---------- Lucky ---------- */
+function panelLucky(el) {
+  const L = window.CodexLucky;
+  if (!L) { el.innerHTML = `<p class="faint">Lucky didn't load.</p>`; return; }
+  const skin = L.skin(), acc = L.pref("luckyAcc"), pers = L.pref("luckyPersonality");
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Lucky: your assistant's cat</span><span class="hr"></span></div>
+    <p class="faint set-help">Pick his coat. Five pets earns him a treat.</p>
+    <div class="lucky-skins">
+      ${L.SKINS.map(([id, name, note]) => `
+        <button class="lucky-skin${skin === id ? " on" : ""}" data-lskin="${id}" data-skin="${id}">
+          <span class="ls-face">${L.face(30)}</span>
+          <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+
+    <div class="rule-head mt"><span class="k">His name</span><span class="hr"></span></div>
+    <input class="import-title" id="luckyNameInput" value="${esc(L.name())}" style="max-width:260px">
+    <p class="faint set-help">He answers to it in the assistant, too.</p>
+
+    <div class="rule-head mt"><span class="k">What he's wearing</span><span class="hr"></span></div>
+    <div class="av-chips">${L.ACCESSORIES.map(([id, label]) => `
+      <button class="av-chip${acc === id ? " on" : ""}" data-lacc="${id}">${esc(label)}</button>`).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">How he talks</span><span class="hr"></span></div>
+    <div class="pers-grid">${Object.keys(L.PERSONAS).map(id => {
+      const p = L.PERSONAS[id];
+      return `<button class="pers-card${pers === id ? " on" : ""}" data-lpers="${id}">
+        <span class="pc-glyph">${p.glyph}</span>
+        <span><span class="pc-name">${esc(p.name)}</span><span class="pc-sample">${esc(p.moodLine)}</span></span>
+      </button>`;
+    }).join("")}</div>
+
+    <div class="rule-head mt"><span class="k">Who walks with him</span><span class="hr"></span></div>
+    <div class="lucky-skins">
+      ${L.COMPANIONS.map(([id, name, note]) => `
+        <button class="lucky-skin${L.pref("luckyCompanion") === id ? " on" : ""}" data-lpal="${id}" data-skin="${esc(L.skin())}">
+          <span class="ls-face pal-face">${id === "none" ? "✧" : L.companionSvg(id)}</span>
+          <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+
+    <div class="rule-head mt"><span class="k">What he gets after five pets</span><span class="hr"></span></div>
+    <div class="lucky-skins">
+      ${L.TREATS.map(([id, name, note]) => `
+        <button class="lucky-skin${L.pref("luckyTreat") === id ? " on" : ""}" data-ltreat="${id}">
+          <span class="ls-face pal-face">${L.treatSvg(id)}</span>
+          <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
+        </button>`).join("")}
+    </div>
+
+    <div class="rule-head mt"><span class="k">His habits</span><span class="hr"></span></div>
+    <div class="sfx-row"><span class="sfx-label">Walk across the screen<em>Turn it off for a completely still page.</em></span>
+      <button class="switch${L.pref("luckyWalks") ? " on" : ""}" data-lhab="luckyWalks" role="switch" aria-checked="${!!L.pref("luckyWalks")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Show his tips and encouragement<em>The little window he carries as he passes.</em></span>
+      <button class="switch${L.pref("luckyTips") ? " on" : ""}" data-lhab="luckyTips" role="switch" aria-checked="${!!L.pref("luckyTips")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Treats after five pets<em>Off means he just enjoys being petted.</em></span>
+      <button class="switch${L.pref("luckyTreatsOn") ? " on" : ""}" data-lhab="luckyTreatsOn" role="switch" aria-checked="${!!L.pref("luckyTreatsOn")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Nap on the sprint clock<em>He curls up on the timer while you write.</em></span>
+      <button class="switch${L.pref("luckyNaps") ? " on" : ""}" data-lhab="luckyNaps" role="switch" aria-checked="${!!L.pref("luckyNaps")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">Sleep while you write<em>He stops pacing and curls up in the corner whenever a document is open.</em></span>
+      <button class="switch${L.pref("luckySleeps") ? " on" : ""}" data-lhab="luckySleeps" role="switch" aria-checked="${!!L.pref("luckySleeps")}"><span></span></button></div>
+    <div class="sfx-row"><span class="sfx-label">The “Ask ${esc(L.name())}” button<em>The card in the bottom corner. Off gives you the corner back; the assistant is still in the top bar and on Ctrl J.</em></span>
+      <button class="switch${L.pref("luckyHail") ? " on" : ""}" data-lhab="luckyHail" role="switch" aria-checked="${!!L.pref("luckyHail")}"><span></span></button></div>
+
+    <div class="rule-head mt"><span class="k">How often he strolls past</span><span class="hr"></span></div>
+    <div class="pace-row">
+      <input type="range" id="luckyPace" min="0" max="${PACES.length - 1}"
+        value="${Math.max(0, PACES.findIndex(p => p[0] === L.pref("luckyPace")))}" step="1" class="pace-slider">
+      <span class="pace-read" id="luckyPaceRead">${esc(paceLabel(L.pref("luckyPace")))}</span>
+    </div>
+    <p class="faint set-help">One crossing of the window, end to end.</p>`;
+
+  $$("[data-lskin]", el).forEach(b => b.onclick = () => { L.setSkin(b.dataset.lskin); renderSetPanel(); });
+  $$("[data-lacc]", el).forEach(b => b.onclick = () => { L.setAcc(b.dataset.lacc); renderSetPanel(); });
+  $$("[data-lpers]", el).forEach(b => b.onclick = () => { L.setPersonality(b.dataset.lpers); renderSetPanel(); });
+  $$("[data-lpal]", el).forEach(b => b.onclick = () => { L.setCompanion(b.dataset.lpal); renderSetPanel(); });
+  $$("[data-ltreat]", el).forEach(b => b.onclick = () => { L.setTreat(b.dataset.ltreat); renderSetPanel(); });
+  $$("[data-lhab]", el).forEach(b => b.onclick = () => {
+    const k = b.dataset.lhab, next = !L.pref(k);
+    if (k === "luckyWalks") L.setWalks(next); else L.setPref(k, next);
+    b.classList.toggle("on", next);
+    b.setAttribute("aria-checked", String(next));
+  });
+  const pace = $("#luckyPace", el), paceRead = $("#luckyPaceRead", el);
+  if (pace) pace.oninput = () => {
+    const secs = PACES[+pace.value][0];
+    paceRead.textContent = paceLabel(secs);
+    L.setPace(secs);
+  };
+  const ni = $("#luckyNameInput", el);
+  ni.onchange = () => { L.setName(ni.value.trim() || "Lucky"); toast("He answers to " + (ni.value.trim() || "Lucky") + " now"); };
+}
+
+/* ---------- Assistant ---------- */
+function panelAssistant(el) {
+  const s = Extra.settings;
+  const AI = window.CodexAI;
+  const c = AI ? AI.conf() : { mode: "device", provider: "anthropic", model: "", base: "", key: "", contextEntries: 6 };
+  const prov = AI ? AI.PROVIDERS[c.provider] : null;
+  const live = AI ? AI.on() : false;
+
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Where answers come from</span><span class="hr"></span></div>
+    <div class="pers-grid">
+      <button class="pers-card${c.mode !== "api" ? " on" : ""}" data-aimode="device">
+        <span class="pc-glyph">✧</span>
+        <span><span class="pc-name">On this device</span>
+        <span class="pc-sample">Searches your entries and assembles an answer from your own words.
+          Nothing leaves the browser. Free, private, and cannot invent anything.</span></span>
+      </button>
+      <button class="pers-card${c.mode === "api" ? " on" : ""}" data-aimode="api">
+        <span class="pc-glyph">✦</span>
+        <span><span class="pc-name">A model, with my own key</span>
+        <span class="pc-sample">The same search runs first, then the passages it found are sent to a
+          model you pay for, so answers can be reasoned rather than assembled.</span></span>
+      </button>
+    </div>
+
+    ${c.mode === "api" ? `
+      <div class="ai-warn">
+        <div class="aw-head">✦ What this changes</div>
+        <ul class="aw-list">
+          <li>The entries that match a question <strong>are sent to ${esc(prov ? prov.label : c.provider)}</strong>
+            to answer it. Everything else stays here.</li>
+          <li>You are billed by them per request, not by this app.</li>
+          <li>Your key is kept on this device only. It is never uploaded, never synced, and is
+            deliberately left out of backups; so a backup file cannot leak it.</li>
+          <li>If a request fails you still get the on-device answer, with the reason.</li>
+        </ul>
+      </div>
+
+      <div class="rule-head mt"><span class="k">Provider</span><span class="hr"></span></div>
+      <div class="av-chips">${Object.keys(AI.PROVIDERS).map(id =>
+        `<button class="av-chip${c.provider === id ? " on" : ""}" data-aiprov="${id}">${esc(AI.PROVIDERS[id].label)}</button>`).join("")}</div>
+
+      <div class="ai-grid">
+        <label class="ne-field"><span>Model</span>
+          ${prov && prov.models.length
+            ? `<select class="folder-select" id="aiModel">
+                 ${prov.models.map(m => `<option ${m === c.model ? "selected" : ""}>${esc(m)}</option>`).join("")}
+                 ${prov.models.indexOf(c.model) < 0 && c.model ? `<option selected>${esc(c.model)}</option>` : ""}
+               </select>`
+            : `<input class="import-title" id="aiModel" value="${esc(c.model)}" placeholder="model name">`}
+        </label>
+        <label class="ne-field grow"><span>API key</span>
+          <input class="import-title" id="aiKey" type="password" autocomplete="off"
+            value="${esc(c.key)}" placeholder="${esc(prov ? prov.keyHint : "")}"></label>
+      </div>
+      ${c.provider === "custom" ? `
+        <label class="ne-field" style="margin-top:12px"><span>Endpoint URL</span>
+          <input class="import-title" id="aiBase" value="${esc(c.base)}"
+            placeholder="http://localhost:11434/v1/chat/completions"></label>
+        <p class="faint set-help">Anything that speaks the OpenAI request shape: a proxy, a company
+          gateway, or a model on your own machine through Ollama or LM Studio.</p>` : ""}
+
+      <label class="ne-field" style="margin-top:12px"><span>Entries sent per question</span>
+        <input class="import-title" id="aiCtx" type="number" min="1" max="24" value="${c.contextEntries}"
+          style="max-width:110px"></label>
+      <p class="faint set-help">Fewer means cheaper and more focused; more means broader context.</p>
+
+      <div class="ai-acts">
+        <button class="btn sm" id="aiSave">Save</button>
+        <button class="btn ghost sm" id="aiTest">Test the connection</button>
+        <button class="btn ghost sm danger" id="aiForget">Forget my key</button>
+      </div>
+      <div id="aiTestOut" class="ai-test"></div>
+      <p class="faint set-help">Status: ${live
+        ? `<strong>connected</strong>; the assistant will use ${esc(c.model)}.`
+        : `not connected yet. ${c.key ? "Check the model and endpoint." : "Paste a key to finish."}`}</p>
+    ` : `
+      <p class="faint set-help" style="margin-top:14px">Nothing is sent anywhere. The assistant reads
+        the entries you wrote, finds the passages that match, and answers from them; which is why it
+        cannot tell you a fact it has not read.</p>`}
+
+    <div class="rule-head mt"><span class="k">Standing instructions</span><span class="hr"></span></div>
+    <p class="faint set-help">Extra guidance on how it should read and answer. Used by both ways of answering.</p>
+    <textarea class="import-body" id="aiInstr" placeholder="e.g. Prefer my own terminology. When I ask who someone is, give a short blurb in my voice, not a raw quote.">${esc(s.aiInstr || "")}</textarea>
+    <div style="margin-top:10px"><button class="btn sm" id="saveAiInstr">Save instructions</button></div>`;
+
+  $("#saveAiInstr", el).onclick = () => { Extra.settings.aiInstr = $("#aiInstr", el).value; saveSettings(); toast("Saved"); };
+  if (!AI) return;
+
+  $$("[data-aimode]", el).forEach(b => b.onclick = () => {
+    AI.setConf({ mode: b.dataset.aimode });
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    viewSettings("assistant");
+  });
+  $$("[data-aiprov]", el).forEach(b => b.onclick = () => {
+    const id = b.dataset.aiprov;
+    const models = AI.PROVIDERS[id].models;
+    // moving provider carries the key over but not the model name, which
+    // would be meaningless at the new one
+    AI.setConf({ provider: id, model: models[0] || "" });
+    viewSettings("assistant");
+  });
+  const readForm = () => {
+    const patch = {
+      model: ($("#aiModel", el) || {}).value || "",
+      key: ($("#aiKey", el) || {}).value || "",
+      contextEntries: Number(($("#aiCtx", el) || {}).value) || 6,
+    };
+    const baseEl = $("#aiBase", el);
+    if (baseEl) patch.base = baseEl.value.trim();
+    return patch;
+  };
+  if ($("#aiSave", el)) $("#aiSave", el).onclick = () => {
+    AI.setConf(readForm());
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    toast(AI.on() ? "Connected" : "Saved; not connected yet");
+    viewSettings("assistant");
+  };
+  if ($("#aiTest", el)) $("#aiTest", el).onclick = async () => {
+    AI.setConf(readForm());
+    const out = $("#aiTestOut", el);
+    out.className = "ai-test working";
+    out.textContent = "Asking " + (AI.state().model || "the provider") + "…";
+    const r = await AI.test();
+    out.className = "ai-test " + (r.ok ? "good" : "bad");
+    out.textContent = r.ok
+      ? "Working. It replied: " + String(r.text).slice(0, 120)
+      : "Not working. " + r.why;
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+  };
+  if ($("#aiForget", el)) $("#aiForget", el).onclick = () => {
+    if (!confirm("Forget the API key and go back to answering on this device?")) return;
+    AI.clearKey();
+    window.CodexAssistant && CodexAssistant.refreshModelChip();
+    toast("Key forgotten");
+    viewSettings("assistant");
+  };
+}
+
+/* ---------- Sections ---------- */
+function panelSections(el) {
+  const cats = Extra.cats;
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Your own sections</span><span class="hr"></span></div>
+    <p class="faint set-help">Sections you add sit alongside the built-in collections everywhere: the sidebar, the
+      filing dropdown on Add lore, and the move menu on any entry.</p>
+    <div class="ws-new"><input id="newSectionName" placeholder="New section name…">
+      <button class="btn sm" id="addSection">Add</button></div>
+    ${cats.length ? `<div class="sect-list">${cats.map(c => `
+      <div class="sect-row"><span class="sect-name">${esc(c.name)}</span>
+        <button class="btn ghost sm" data-delsect="${esc(c.id)}">Remove</button></div>`).join("")}</div>`
+    : `<p class="faint" style="margin-top:14px">No sections of your own yet.</p>`}`;
+
+  const add = async () => {
+    const v = $("#newSectionName", el).value.trim();
+    if (!v) return;
+    await Extra.addCat(v);
+    window.Codex && Codex.refresh();
+    viewSettings("sections");
+  };
+  $("#addSection", el).onclick = add;
+  $("#newSectionName", el).onkeydown = e => { if (e.key === "Enter") add(); };
+  $$("[data-delsect]", el).forEach(b => b.onclick = async () => {
+    await Extra.delCat(b.dataset.delsect);
+    window.Codex && Codex.refresh();
+    viewSettings("sections");
+  });
+}
+
+/* ---------- Restore ---------- */
+function panelRestore(el) {
+  const hiddenCount = Extra.hidden.size, excludedCount = Extra.excludedNames.size;
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Deleted entries</span><span class="hr"></span></div>
+    <p class="faint set-help">Anything you delete from a collection is hidden, not destroyed.</p>
+    ${hiddenCount ? `<button class="btn ghost sm" id="restoreAll">Restore all ${hiddenCount} hidden ${hiddenCount === 1 ? "entry" : "entries"}</button>
+      <div class="hidden-list" id="hiddenList"></div>` : `<p class="faint">Nothing deleted.</p>`}
+
+    <div class="rule-head mt"><span class="k">Removed from the Name Index</span><span class="hr"></span></div>
+    <p class="faint set-help">Removed names stop being cross-linked in your text; nothing about them is deleted.</p>
+    ${excludedCount ? `<button class="btn ghost sm" id="restoreNamesAll">Restore all ${excludedCount} name${excludedCount === 1 ? "" : "s"}</button>
+      <div class="recog" style="margin-top:10px">${Array.from(Extra.excludedNames).map(n => `<span class="chip" data-restorename="${esc(n)}" style="cursor:pointer">${esc(n)} ✕</span>`).join("")}</div>`
+    : `<p class="faint">Nothing removed.</p>`}`;
 
   if (hiddenCount) {
-    renderHidden();
-    $("#restoreAll").onclick = async () => { await Extra.unhideAll(); window.Codex && Codex.refresh && Codex.refresh(); toast("Restored"); viewSettings(); };
-  }
-  function renderHidden() {
-    const el = $("#hiddenList"); if (!el) return;
+    const list = $("#hiddenList", el);
     const items = Array.from(Extra.hidden).map(id => (window.Codex && Codex.byId[id])).filter(Boolean).slice(0, 60);
-    el.innerHTML = items.map(e => `<div class="hidden-item"><span>${esc(e.title)} <span class="faint">· ${esc(e.category)}</span></span>
+    list.innerHTML = items.map(e => `<div class="hidden-item"><span>${esc(e.title)} <span class="faint">· ${esc(e.category)}</span></span>
       <button class="btn ghost sm" data-restore="${e.id}">Restore</button></div>`).join("");
-    $$("[data-restore]", el).forEach(b => b.onclick = async () => { await Extra.unhide(b.dataset.restore); window.Codex && Codex.refresh && Codex.refresh(); viewSettings(); });
+    $$("[data-restore]", list).forEach(b => b.onclick = async () => { await Extra.unhide(b.dataset.restore); window.Codex && Codex.refresh(); viewSettings("restore"); });
+    $("#restoreAll", el).onclick = async () => { await Extra.unhideAll(); window.Codex && Codex.refresh(); toast("Restored"); viewSettings("restore"); };
   }
   if (excludedCount) {
-    $("#restoreNamesAll").onclick = async () => { await Extra.unexcludeAllNames(); window.Codex && Codex.refresh && Codex.refresh(); toast("Restored"); viewSettings(); };
-    $$("[data-restorename]").forEach(el => el.onclick = async () => { await Extra.unexcludeName(el.dataset.restorename); window.Codex && Codex.refresh && Codex.refresh(); viewSettings(); });
+    $("#restoreNamesAll", el).onclick = async () => { await Extra.unexcludeAllNames(); window.Codex && Codex.refresh(); toast("Restored"); viewSettings("restore"); };
+    $$("[data-restorename]", el).forEach(x => x.onclick = async () => { await Extra.unexcludeName(x.dataset.restorename); window.Codex && Codex.refresh(); viewSettings("restore"); });
   }
 }
 
-/* ============================================================
-   NEW-USER TEMPLATE EXPORT
-   Serializes the CURRENT workspace into a data/template.js file.
-   Drop the download into site/data/ (replacing template.js) and
-   every account created after that starts from a copy of it.
-   ============================================================ */
-const TEMPLATE_STORES = ["folders", "cats", "docs", "notes", "tasks", "stories", "timeline", "decks", "canvases", "sheets", "mindmaps"];
+/* ---------- Account & syncing ----------
+   Signing in is optional. Everything works without it; an account only
+   adds carrying your work between devices and, later, sharing. */
+/* Turn the CURRENT workspace into the data/template.js file that every
+   NEW account starts from. Drop the download into site/data/. */
+const TEMPLATE_STORES = ["folders", "cats", "docs", "notes", "tasks", "decks", "canvases", "sheets", "mindmaps", "timeline", "quizzes"];
 async function downloadTemplate() {
   await S().ready;
   const stores = {};
@@ -626,8 +882,236 @@ async function downloadTemplate() {
   toast("Template downloaded: " + count + " items. Replace site/data/template.js with it.");
 }
 
+const TPL_SECTION = `
+    <div class="rule-head mt"><span class="k">New-user template</span><span class="hr"></span></div>
+    <p class="set-help">Turn the workspace you are in right now into the starter template every NEW account
+      begins from: download it, then replace <code>site/data/template.js</code> in the project with the file.</p>
+    <button class="btn ghost sm" id="tplDownload">Download as new-user template</button>`;
+
+function panelAccount(el) {
+  const C = window.CodexCloud;
+  if (!C || !C.configured()) {
+    el.innerHTML = `
+      <div class="rule-head"><span class="k">Account &amp; syncing</span><span class="hr"></span></div>
+      <p class="set-help">No cloud is connected, so everything you write stays in this browser and
+        nothing leaves this machine. That is the safest arrangement and needs no account.</p>
+      <p class="set-help">To carry your work between devices, connect a database and put its address
+        and public key into <code>site/js/cloud-config.js</code>. The steps are in
+        <code>supabase/README.md</code> in the repository.</p>` + TPL_SECTION;
+    const t0 = $("#tplDownload", el); if (t0) t0.onclick = downloadTemplate;
+    return;
+  }
+  const s = C.state();
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Account &amp; syncing</span><span class="hr"></span>
+      <span class="meta" id="syncBadge"></span></div>
+    <div id="accountBody"></div>` + TPL_SECTION;
+  const tplBtn = $("#tplDownload", el); if (tplBtn) tplBtn.onclick = downloadTemplate;
+  paint();
+  C.onChange(paint);
+
+  function paint() {
+    const st = C.state();
+    const badge = $("#syncBadge", el);
+    if (badge) badge.textContent = st.syncing ? "Syncing…" : st.pending ? st.pending + " waiting" : "";
+    const body = $("#accountBody", el);
+    if (!body) return;
+
+    if (!st.signedIn) {
+      body.innerHTML = `
+        <p class="set-help">Sign in to carry this workspace between devices. Your writing keeps living in
+          this browser either way; an account adds a copy on the server, it does not move it there.</p>
+        <div class="auth-form">
+          <input class="import-title" id="authEmail" type="email" placeholder="Email" autocomplete="email">
+          <input class="import-title" id="authPass" type="password" placeholder="Password" autocomplete="current-password">
+          <input class="import-title" id="authName" type="text" placeholder="What should we call you? (new accounts only)">
+          <div class="auth-btns">
+            <button class="btn" id="doSignIn">Sign in</button>
+            <button class="btn ghost" id="doSignUp">Create an account</button>
+            <button class="a-chip" id="doReset">Forgot password</button>
+          </div>
+          <div class="auth-msg" id="authMsg">${st.lastError ? esc(st.lastError) : ""}</div>
+        </div>`;
+      const msg = t => { const m = $("#authMsg", el); if (m) m.textContent = t; };
+      const creds = () => [$("#authEmail", el).value.trim(), $("#authPass", el).value];
+      $("#doSignIn", el).onclick = async () => {
+        const [e2, p] = creds();
+        if (!e2 || !p) return msg("Email and password, please.");
+        msg("Signing in…");
+        try { await C.signIn(e2, p); } catch (err) { msg(err.message || String(err)); }
+      };
+      $("#doSignUp", el).onclick = async () => {
+        const [e2, p] = creds();
+        if (!e2 || !p) return msg("Email and password, please.");
+        if (p.length < 8) return msg("Use at least eight characters.");
+        msg("Creating your account…");
+        try {
+          const r = await C.signUp(e2, p, $("#authName", el).value.trim());
+          msg(r.needsConfirmation
+            ? "Check your email for a confirmation link, then come back and sign in."
+            : "Welcome.");
+        } catch (err) { msg(err.message || String(err)); }
+      };
+      $("#doReset", el).onclick = async () => {
+        const [e2] = creds();
+        if (!e2) return msg("Type your email first.");
+        try { await C.resetPassword(e2); msg("Sent. Check your email."); }
+        catch (err) { msg(err.message || String(err)); }
+      };
+      return;
+    }
+
+    const last = st.lastSync ? new Date(st.lastSync).toLocaleString(undefined,
+      { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "not yet";
+    body.innerHTML = `
+      <div class="acct-row">
+        <span class="acct-who"><span class="acct-k">Signed in as</span>${esc(st.email)}</span>
+        <button class="btn ghost sm" id="doSignOut">Sign out</button>
+      </div>
+      <div class="sfx-row"><span class="sfx-label">Last synced<em>${esc(last)}${
+        st.pending ? ` · ${st.pending} change${st.pending === 1 ? "" : "s"} waiting to go up` : ""}</em></span>
+        <button class="btn sm" id="doSync" ${st.syncing ? "disabled" : ""}>${st.syncing ? "Syncing…" : "Sync now"}</button></div>
+      ${st.lastError ? `<p class="auth-msg">Last attempt failed: ${esc(st.lastError)}.</p>` : ""}
+      <div class="rule-head mt"><span class="k">First time on this device?</span><span class="hr"></span></div>
+      <p class="set-help">If this browser already holds work that isn't in your account yet, send it up once.
+        Afterwards everything syncs on its own.</p>
+      <button class="btn ghost sm" id="doUpload">Upload everything in this workspace</button>
+      <div class="rule-head mt"><span class="k">What this changes</span><span class="hr"></span></div>
+      <p class="set-help">Signed out, your writing cannot leave this browser. Signed in, a copy lives on
+        the server so your other devices can reach it; private to your account, but held under access
+        rules rather than by never existing anywhere else.</p>`;
+    $("#doSignOut", el).onclick = async () => { await C.signOut(); };
+    $("#doSync", el).onclick = () => C.sync({});
+    $("#doUpload", el).onclick = async () => {
+      if (!confirm("Send everything in this workspace up to your account?")) return;
+      try { await C.uploadEverything(); } catch (err) { toast(err.message || String(err)); }
+    };
+  }
+}
+
+/* ---------- Help & report a problem ----------
+   There is no inbox behind this, so it does not pretend to send
+   anything. It assembles a description of what went wrong, with the
+   details worth having, and hands it to you to send however you like.
+   A form that silently dropped what you wrote would be worse. */
+const REPORT_KINDS = [
+  ["broken", "Something is broken"],
+  ["wrong", "Something looks wrong"],
+  ["lost", "My writing looks wrong or missing"],
+  ["idea", "I want to suggest something"],
+  ["other", "Something else"],
+];
+let reportKind = "broken";
+
+function panelReport(el) {
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Help</span><span class="hr"></span></div>
+    <p class="set-help">The <a href="#/help">Help page</a> answers the common questions in a couple of
+      minutes each. If your writing looks wrong, start there; nothing in this app deletes permanently,
+      and deleted entries wait in <b>Restore</b>.</p>
+
+    <div class="rule-head mt"><span class="k">Report a problem</span><span class="hr"></span></div>
+    <p class="set-help">Nothing is uploaded from here. This writes up what happened, adds the technical
+      details that make it findable, and puts it on your clipboard so you can send it wherever you like.</p>
+    <div class="av-chips">${REPORT_KINDS.map(([id, label]) =>
+      `<button class="av-chip${reportKind === id ? " on" : ""}" data-rkind="${id}">${esc(label)}</button>`).join("")}</div>
+    <textarea class="import-body" id="rpWhat" style="margin-top:12px"
+      placeholder="What were you doing, and what happened instead?"></textarea>
+    <div class="auth-btns">
+      <button class="btn" id="rpCopy">Copy the report</button>
+      <button class="btn ghost sm" id="rpDownload">Save it as a file</button>
+    </div>
+    <div class="auth-msg" id="rpMsg"></div>
+
+    <div class="rule-head mt"><span class="k">What gets included</span><span class="hr"></span></div>
+    <p class="set-help">Your browser and screen size, which workspace is active, how many entries and
+      documents it holds, whether storage fell back to a smaller mode, and your settings. <b>Not</b> the
+      writing itself; you can always attach a backup separately if it would help.</p>`;
+
+  $$("[data-rkind]", el).forEach(b => b.onclick = () => { reportKind = b.dataset.rkind; renderSetPanel(); });
+  $("#rpCopy", el).onclick = async () => {
+    const text = await buildReport();
+    const msg = $("#rpMsg", el);
+    if (navigator.clipboard) { await navigator.clipboard.writeText(text); msg.textContent = "Copied. Paste it anywhere."; }
+    else { window.prompt("Copy this:", text); }
+  };
+  $("#rpDownload", el).onclick = async () => {
+    const text = await buildReport();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.download = "beep-beep-report-" + new Date().toISOString().slice(0, 10) + ".txt";
+    a.click();
+    $("#rpMsg", el).textContent = "Saved.";
+  };
+}
+
+async function buildReport() {
+  const kind = (REPORT_KINDS.find(k => k[0] === reportKind) || [])[1] || reportKind;
+  const what = ($("#rpWhat") && $("#rpWhat").value.trim()) || "(nothing described)";
+  const counts = {};
+  try {
+    for (const st of ["docs", "notes", "canvases", "folders", "timeline", "sheets", "mindmaps"]) {
+      counts[st] = (await S().all(st)).length;
+    }
+  } catch (e) {}
+  const ws = window.CodexWorkspaces ? CodexWorkspaces.current() : null;
+  const cloud = window.CodexCloud && CodexCloud.configured() ? CodexCloud.state() : null;
+  return [
+    "BEEP BEEP ORGANIZER; problem report",
+    "Kind: " + kind,
+    "When: " + new Date().toISOString(),
+    "",
+    "What happened:",
+    what,
+    "",
+    "--- details ---",
+    "Page: " + location.href,
+    "Browser: " + navigator.userAgent,
+    "Screen: " + window.innerWidth + "x" + window.innerHeight,
+    "Workspace: " + (ws ? ws.name + " (" + ws.id + ")" : "unknown"),
+    "Storage: " + (S().usingFallback() ? "localStorage fallback" : "IndexedDB"),
+    "Contents: " + Object.keys(counts).map(k => k + "=" + counts[k]).join(", "),
+    "Entries visible: " + (window.Codex ? Codex.visibleEntries().length : "?"),
+    "Cloud: " + (cloud ? (cloud.signedIn ? "signed in, last sync " + (cloud.lastSync || "never") : "configured, signed out") : "not configured"),
+    "Settings: " + JSON.stringify(Object.assign({}, Extra.settings, { avatar: undefined, typography: undefined })),
+  ].join("\n");
+}
+
+/* ---------- Workspaces & backup ---------- */
+function panelBackup(el) {
+  const W = window.CodexWorkspaces;
+  const list = W ? W.list() : [];
+  const activeId = W ? W.activeId() : null;
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Workspaces</span><span class="hr"></span></div>
+    <p class="faint set-help">Each workspace is a separate project with its own documents, notes and canvases.
+      The assistant only ever looks at whichever one is active.</p>
+    <div class="sect-list">${list.map(w => `
+      <div class="sect-row">
+        <span class="sect-name">${esc(w.name)}${w.id === activeId ? ` <span class="cur-tag">Current</span>` : ""}</span>
+        ${w.id === activeId ? "" : `<button class="btn sm" data-wsgo="${esc(w.id)}">Switch</button>`}
+      </div>`).join("")}</div>
+    <div class="ws-new"><input id="newWsName" placeholder="New workspace name…">
+      <button class="btn sm" id="addWs">Create</button></div>
+
+    <div class="rule-head mt"><span class="k">Back up my work</span><span class="hr"></span></div>
+    <p class="faint set-help">A backup is the only copy that leaves this machine. It restores everything;
+      entries, documents, canvases, timelines and settings; on any device, by dropping the file onto Add lore.</p>
+    <button class="btn" id="doBackup">Download full backup (.json)</button>`;
+
+  $$("[data-wsgo]", el).forEach(b => b.onclick = () => W && W.switchTo(b.dataset.wsgo));
+  const create = () => {
+    const v = $("#newWsName", el).value.trim();
+    if (!v || !W) return;
+    W.create(v);
+  };
+  $("#addWs", el).onclick = create;
+  $("#newWsName", el).onkeydown = e => { if (e.key === "Enter") create(); };
+  $("#doBackup", el).onclick = () => window.Codex && Codex.backup ? Codex.backup() : document.getElementById("navExport") && document.getElementById("navExport").click();
+}
+
 /* ============================================================
-   TASK MANAGER; a real-time to-do list
+   TASK MANAGER ; a real-time to-do list
    ============================================================ */
 async function viewTasks() {
   await S().ready;
@@ -691,64 +1175,21 @@ async function viewFeed() {
    read, with Pause/Resume and Stop; and reading always stops the
    moment you navigate to a different page, so it never keeps
    talking about a section you've left.
-
-   Long canon entries are split into sentence-sized chunks and
-   spoken as a queue of short utterances, rather than one giant
-   utterance. Chrome has a long-standing bug where a single long
-   SpeechSynthesisUtterance silently stalls after roughly 15s, after
-   which pause()/resume() stop responding; exactly what "can't
-   pause it" on long entries looks like. Short chunks keep every
-   utterance well under that window, and a periodic pause+resume
-   "nudge" while reading works around the same Chrome bug for
-   voices/OSes where even short utterances can stall.
    ============================================================ */
-function chunkForSpeech(text) {
-  const clean = (text || "").replace(/\s+/g, " ").trim();
-  if (!clean) return [];
-  const sentences = clean.match(/[^.!?]+[.!?]*\s*/g) || [clean];
-  const chunks = [];
-  let cur = "";
-  for (const s of sentences) {
-    if (cur && (cur.length + s.length) > 220) { chunks.push(cur.trim()); cur = s; }
-    else cur += s;
-  }
-  if (cur.trim()) chunks.push(cur.trim());
-  return chunks;
-}
 const Speech = {
   reading: false,
   paused: false,
-  _queue: [],
-  _idx: 0,
-  _nudgeTimer: null,
-  _startNudge() {
-    clearInterval(this._nudgeTimer);
-    this._nudgeTimer = setInterval(() => {
-      if (this.reading && !this.paused && "speechSynthesis" in window && speechSynthesis.speaking) {
-        speechSynthesis.pause();
-        speechSynthesis.resume();
-      }
-    }, 12000);
-  },
-  _stopNudge() { clearInterval(this._nudgeTimer); this._nudgeTimer = null; },
   read(text) {
     if (!("speechSynthesis" in window)) { toast("Speech not supported here"); return; }
     speechSynthesis.cancel();
-    this._queue = chunkForSpeech(text);
-    if (!this._queue.length) { toast("Nothing to read; select some text first, or open an entry."); return; }
-    this._idx = 0;
-    this.reading = true; this.paused = false;
-    showPlayer();
-    this._startNudge();
-    this._speakNext();
-  },
-  _speakNext() {
-    if (this._idx >= this._queue.length) { this.reading = false; this.paused = false; this._stopNudge(); hidePlayer(); return; }
-    const u = new SpeechSynthesisUtterance(this._queue[this._idx]);
+    if (!text || !text.trim()) { toast("Nothing to read; select some text first, or open an entry."); return; }
+    const u = new SpeechSynthesisUtterance(text);
     u.rate = 1;
-    u.onend = () => { if (!Speech.reading) return; Speech._idx++; Speech._speakNext(); };
-    u.onerror = () => { Speech.reading = false; Speech.paused = false; Speech._stopNudge(); hidePlayer(); };
+    u.onend = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
+    u.onerror = () => { Speech.reading = false; Speech.paused = false; hidePlayer(); };
+    Speech.reading = true; Speech.paused = false;
     speechSynthesis.speak(u);
+    showPlayer();
   },
   readSelection() {
     const sel = (window.getSelection && String(window.getSelection())) || "";
@@ -757,11 +1198,7 @@ const Speech = {
   pause() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.pause(); this.paused = true; updatePlayer(); } },
   resume() { if ("speechSynthesis" in window && this.reading) { speechSynthesis.resume(); this.paused = false; updatePlayer(); } },
   toggle() { this.paused ? this.resume() : this.pause(); },
-  stop() {
-    if ("speechSynthesis" in window) speechSynthesis.cancel();
-    this.reading = false; this.paused = false; this._queue = []; this._idx = 0;
-    this._stopNudge(); hidePlayer();
-  },
+  stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.reading = false; this.paused = false; hidePlayer(); },
   dictate(onText, onStop) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { toast("Dictation not supported in this browser"); return null; }
@@ -817,6 +1254,6 @@ window.addEventListener("hashchange", () => { if (Speech.reading) Speech.stop();
 function readSelectionGlobal() { Speech.readSelection(); }
 window.CodexReadAloud = readSelectionGlobal;
 
-window.CodexUI = { viewSettings, viewTasks, viewFeed, applySettings };
+window.CodexUI = { viewSettings, viewTasks, viewFeed };
 window.CodexTypo = { STYLES: TYPO_STYLES, FONT_LIST, fontStack };
 })();

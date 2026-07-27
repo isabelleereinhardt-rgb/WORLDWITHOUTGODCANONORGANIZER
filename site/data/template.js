@@ -27,13 +27,13 @@ window.CODEX_TEMPLATE = {
         id: "tpl-doc-start",
         title: "Start here",
         folder: null,
-        html: "<h1 class=\"ty-h1\">Welcome to your workspace</h1><p>This whole workspace is yours: everything you write here is saved automatically on this device.</p><h3 class=\"ty-h3\">Where things live</h3><ul><li><b>Documents</b>: long-form writing, with styles, tables, images, and a word count.</li><li><b>Library</b>: group documents into stories with chapters, a cover, and tags, then read them in a clean reader that remembers your place.</li><li><b>My Characters / My Places</b> (in the sidebar): quick reference notes about your world. Add more sections with the + next to \"The Canon\".</li><li><b>Canvases</b>: freeform mood boards for the feel of a place or person.</li><li><b>Timeline, Mind Maps, Sheets, Tasks</b>: everything else a book brain needs.</li></ul><h3 class=\"ty-h3\">Three good first steps</h3><ol><li>Open <b>Chapter One</b> in the Library and start writing over it.</li><li>Add your first character note from <b>Import &amp; Add Lore</b>.</li><li>Press <b>Ctrl or Cmd + K</b> and search anything you have written; it is all indexed.</li></ol><p>Back up anytime from the sidebar: <b>Back up my work</b> gives you one file with everything, restorable on any device.</p>"
+        html: "<h1 class=\"ty-h1\">Welcome to your workspace</h1><p>This whole workspace is yours: everything you write here is saved automatically, and if you signed in with a cloud account it follows you onto any device.</p><h3 class=\"ty-h3\">Where things live</h3><ul><li><b>The Desk</b>: your writing home; sprints, streaks, and word counts fill in as you write.</li><li><b>Books</b>: long-form writing with styles, tables, images, and autosave.</li><li><b>Read Through</b>: read your chapters in order, like a reader would.</li><li><b>My Characters / My Places</b> (in the sidebar): quick reference notes about your world. Add more sections with the + next to \"The Canon\".</li><li><b>Canvases, Timeline, Mind Maps, Sheets, Tasks</b>: everything else a book brain needs.</li></ul><h3 class=\"ty-h3\">Three good first steps</h3><ol><li>Open <b>Chapter One</b> in Books and start writing over it.</li><li>Add your first character note from <b>Add Lore</b>.</li><li>Press <b>Ctrl or Cmd + K</b> and search anything you have written; it is all indexed.</li></ol><p>Back up anytime from the sidebar: <b>Back up my work</b> gives you one file with everything, restorable on any device.</p>"
       },
       {
         id: "tpl-doc-ch1",
         title: "Chapter One",
         folder: "tpl-folder-book",
-        html: "<h1 class=\"ty-h1\">Chapter One</h1><p>This is the first chapter of your first story. Replace this text with your opening scene; the Library keeps it filed as Chapter 1 of \"My First Story\".</p><p>A few things worth trying while you write:</p><ul><li>Type <b>/</b> for a Notion-style menu of headings, lists, tables, and images.</li><li>Names you have used before autocomplete with <b>Tab</b>.</li><li>The assistant (the button at the top right) recognises your characters as you type.</li></ul>"
+        html: "<h1 class=\"ty-h1\">Chapter One</h1><p>This is the first chapter of your first book. Replace this text with your opening scene; it is filed under \"My First Book\".</p><p>A few things worth trying while you write:</p><ul><li>Type <b>/</b> for a menu of headings, lists, tables, and images.</li><li>Names you have used before autocomplete with <b>Tab</b>.</li><li>The assistant (top right) recognises your characters as you type.</li></ul>"
       }
     ],
 
@@ -51,18 +51,6 @@ window.CODEX_TEMPLATE = {
       { id: "tpl-task-1", text: "Rename this workspace to your project's name (Workspaces button, top left)", done: false, created: 3 },
       { id: "tpl-task-2", text: "Write over Chapter One with your real opening scene", done: false, created: 2 },
       { id: "tpl-task-3", text: "Add a note for your main character in My Characters", done: false, created: 1 }
-    ],
-
-    stories: [
-      {
-        id: "tpl-story-1",
-        title: "My First Story",
-        desc: "A starter story so you can see how the Library works: chapters are just documents, kept in order. Add chapters, drag in a cover, tag it, and hit Read.",
-        cover: "",
-        tags: ["starter", "example"],
-        status: "draft",
-        chapters: ["tpl-doc-ch1"]
-      }
     ]
 
   }

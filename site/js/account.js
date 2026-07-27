@@ -41,10 +41,21 @@ const GUEST = { id: "guest", name: "Guest", guest: true };
    Read directly from localStorage so identity and namespacing work
    at parse time, before cloud.js has loaded. A signed-in cloud
    account takes precedence over any device-only session. */
-const CLOUD_SESSION_KEY = "codex.cloudSession";
+/* The Supabase client (cloud.js) persists its session in localStorage
+   under "codex.auth". Read it directly so identity and namespacing are
+   known at parse time, before the client library has even loaded. */
+const CLOUD_SESSION_KEY = "codex.auth";
 function cloudSession() {
-  if (!window.CODEX_CLOUD) return null;
-  try { return JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY) || "null"); } catch (e) { return null; }
+  if (!window.CODEX_CLOUD || !(window.CODEX_CLOUD.url && (window.CODEX_CLOUD.key || window.CODEX_CLOUD.anonKey))) return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(CLOUD_SESSION_KEY) || "null");
+    const s = raw && raw.currentSession ? raw.currentSession : raw;   // both storage shapes
+    if (!s || !s.user || !s.user.id) return null;
+    return {
+      user: { id: s.user.id, email: s.user.email },
+      name: (s.user.user_metadata && (s.user.user_metadata.display_name || s.user.user_metadata.name)) || (s.user.email || "").split("@")[0],
+    };
+  } catch (e) { return null; }
 }
 function cloudNsOf(cs) { return "sb" + ((cs.user && cs.user.id) || "").replace(/-/g, ""); }
 
@@ -54,36 +65,50 @@ function cloudNsOf(cs) { return "sb" + ((cs.user && cs.user.id) || "").replace(/
    else reads storage, and adopt them as the cloud session: clicking the
    email lands the user on the site already signed in. The user id and
    email live inside the token itself, so no network round-trip is needed. */
+let arrivingFromEmail = false;
 (function captureAuthRedirect() {
   if (!window.CODEX_CLOUD) return;
   const h = location.hash || "";
   if (!/access_token=|error_description=/.test(h)) return;
   const p = new URLSearchParams(h.replace(/^#\/?/, ""));
-  const cleanHash = () => history.replaceState(null, "", location.pathname + location.search + "#/");
   const errDesc = p.get("error_description");
   if (errDesc && !p.get("access_token")) {
     // e.g. an expired confirmation link; surface it on the gate
     try { sessionStorage.setItem("codex.gateNotice", errDesc.replace(/\+/g, " ")); } catch (e) {}
-    cleanHash();
+    history.replaceState(null, "", location.pathname + location.search + "#/");
     return;
   }
-  try {
-    const at = p.get("access_token"), rt = p.get("refresh_token");
-    if (!at || !rt) return;
-    let payload = at.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    payload += "=".repeat((4 - payload.length % 4) % 4);
-    const body = JSON.parse(atob(payload));
-    localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify({
-      access_token: at, refresh_token: rt,
-      expires_at: Date.now() + (Number(p.get("expires_in")) || 3600) * 1000,
-      user: { id: body.sub, email: body.email },
-      name: (body.user_metadata && body.user_metadata.name) || (body.email || "").split("@")[0],
-    }));
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.setItem("codex.hasSignedInBefore", "1");
-    cleanHash();
-  } catch (e) { /* malformed fragment: fall through to the normal gate */ }
+  // tokens present: the Supabase client parses and stores them once it
+  // loads; hold a small cover instead of the gate, then reload signed in
+  arrivingFromEmail = true;
 })();
+function holdForEmailSignIn() {
+  const app = document.getElementById("app");
+  if (app) app.style.display = "none";
+  const cover = document.createElement("div");
+  cover.id = "gate";
+  cover.className = "gate";
+  cover.innerHTML = `<div class="gate-split" style="grid-template-columns:1fr;text-align:center">
+    <div class="gate-promo"><div class="gate-brand" style="justify-content:center">Beep Beep Organizer</div>
+    <h1>Signing you in&hellip;</h1><p class="gate-note" style="max-width:none">One moment; confirming your email.</p></div></div>`;
+  document.body.appendChild(cover);
+  let waited = 0;
+  const iv = setInterval(() => {
+    waited += 300;
+    if (cloudSession()) {
+      clearInterval(iv);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.setItem("codex.hasSignedInBefore", "1");
+      history.replaceState(null, "", location.pathname + location.search + "#/");
+      location.reload();
+    } else if (waited > 8000) {
+      clearInterval(iv);
+      try { sessionStorage.setItem("codex.gateNotice", "That link couldn't be used; sign in with your email and password instead"); } catch (e) {}
+      history.replaceState(null, "", location.pathname + location.search + "#/");
+      location.reload();
+    }
+  }, 300);
+}
 
 function current() {
   const cs = cloudSession();
@@ -171,8 +196,10 @@ function signInGuest() {
 }
 function signOut() {
   localStorage.removeItem(SESSION_KEY);
-  localStorage.removeItem(CLOUD_SESSION_KEY);
-  location.reload();
+  const finish = () => { localStorage.removeItem(CLOUD_SESSION_KEY); location.reload(); };
+  if (cloudSession() && window.CodexCloud && CodexCloud.signOut) {
+    Promise.resolve(CodexCloud.signOut()).then(finish, finish);
+  } else finish();
 }
 
 function storeKeyFor(accountNs, base) { return accountNs ? base + "@" + accountNs : base; }
@@ -191,6 +218,10 @@ function seedSpaceFor(n, ownerName) {
   ];
   localStorage.setItem(storeKeyFor(n, "codex.workspaces"), JSON.stringify(list));
   localStorage.setItem(storeKeyFor(n, "codex.activeWorkspace"), wsId);
+  // the Desk greets by this name; start it as the sign-up name (editable later)
+  if (ownerName && ownerName !== "Guest" && !localStorage.getItem(storeKeyFor(n, "codex.settings"))) {
+    localStorage.setItem(storeKeyFor(n, "codex.settings"), JSON.stringify({ writerName: ownerName }));
+  }
 }
 function seedNewAccountSpace(acc) {
   seedSpaceFor(acc.id === "guest" ? "guest" : acc.id, acc.name || "My");
@@ -224,8 +255,9 @@ async function ensureTemplate() {
 /* ============================================================
    THE GATE; the front door you see before the app
    ============================================================ */
+const cloudConfigured = () => !!(window.CODEX_CLOUD && window.CODEX_CLOUD.url && (window.CODEX_CLOUD.key || window.CODEX_CLOUD.anonKey));
 function gateHtml() {
-  const cloud = !!window.CODEX_CLOUD;
+  const cloud = cloudConfigured();
   const accs = accounts();
   const accChips = accs.map(a => `
     <button class="gate-acc" data-acc="${a.id}">
@@ -249,6 +281,7 @@ function gateHtml() {
         <input id="gateCloudEmail" type="email" placeholder="Email" autocomplete="email">
         <input id="gateCloudPass" type="password" placeholder="Password" autocomplete="current-password">
         <button class="btn gate-go" id="gateCloudSignIn">Sign in</button>
+        <button class="gate-guest" id="gateForgot" style="margin-top:8px">Forgot your password?</button>
         <div class="gate-err" id="gateErrIn"></div>
         ${localAccBlock}
       </div>` : `
@@ -348,7 +381,7 @@ function showGate() {
   if ($("#gateCloudSignIn")) {
     const doCloudIn = async () => {
       const btn = $("#gateCloudSignIn");
-      btn.disabled = true; $("#gateErrIn").textContent = "";
+      btn.disabled = true; $("#gateErrIn").textContent = "Signing in\u2026";
       try {
         await CodexCloud.signIn($("#gateCloudEmail").value.trim(), $("#gateCloudPass").value);
         markSignedIn();
@@ -356,15 +389,21 @@ function showGate() {
     };
     $("#gateCloudSignIn").onclick = doCloudIn;
     ["#gateCloudEmail", "#gateCloudPass"].forEach(sel => { $(sel).onkeydown = e => { if (e.key === "Enter") doCloudIn(); }; });
+    if ($("#gateForgot")) $("#gateForgot").onclick = async () => {
+      const email = ($("#gateCloudEmail").value || "").trim() || prompt("Your account's email address:") || "";
+      if (!email.trim()) return;
+      try { await CodexCloud.resetPassword(email.trim()); $("#gateErrIn").innerHTML = `<span class="gate-ok">Password reset email sent to ${esc(email.trim())}.</span>`; }
+      catch (e) { $("#gateErrIn").textContent = e.message; }
+    };
   }
   if ($("#gateCloudCreate")) {
     const doCloudUp = async () => {
       const btn = $("#gateCloudCreate");
-      btn.disabled = true; $("#gateErrUp").textContent = "";
+      btn.disabled = true; $("#gateErrUp").textContent = "Creating your account\u2026";
       try {
-        const r = await CodexCloud.signUp($("#gateName").value, $("#gateEmail").value.trim(), $("#gateNewPass").value);
-        if (r.needsConfirm) {
-          $("#gateErrUp").innerHTML = `<span class="gate-ok">Almost there: a confirmation link is on its way to your email. Click it, then come back and sign in.</span>`;
+        const r = await CodexCloud.signUp($("#gateEmail").value.trim(), $("#gateNewPass").value, $("#gateName").value.trim());
+        if (r && r.needsConfirmation) {
+          $("#gateErrUp").innerHTML = `<span class="gate-ok">Almost there: a confirmation link is on its way to your email. Click it and you'll land here signed in.</span>`;
           btn.disabled = false;
         } else markSignedIn();
       } catch (e) { $("#gateErrUp").textContent = e.message; btn.disabled = false; }
@@ -401,7 +440,7 @@ function showGate() {
   if ($("#gateSignIn")) $("#gateSignIn").onclick = doSignIn;
   if ($("#gatePass")) $("#gatePass").onkeydown = e => { if (e.key === "Enter") doSignIn(); };
 
-  if (!window.CODEX_CLOUD) {
+  if (!cloudConfigured()) {
     const doCreate = async () => {
       try {
         await createAccount($("#gateName").value, $("#gateEmail").value, $("#gateNewPass").value);
@@ -442,27 +481,45 @@ function mountChip() {
   holder.querySelector("#acctOut").onclick = signOut;
   const syncBtn = holder.querySelector("#acctSyncNow");
   if (syncBtn) syncBtn.onclick = (e) => { e.stopPropagation(); window.CodexCloud && CodexCloud.syncNow(); };
-  if (a.cloud && window.CodexCloud) {
-    const LABELS = { synced: "Synced to your account", syncing: "Syncing…", offline: "Offline; will sync when you're back",
-      setup: "Cloud database not set up yet (see Settings)", error: "Sync problem (see Settings)", idle: "Waiting to sync", off: "" };
-    CodexCloud.onStatus(st => {
+  const syncBtn2 = holder.querySelector("#acctSyncNow");
+  if (syncBtn2) syncBtn2.onclick = (e) => { e.stopPropagation(); window.CodexCloud && CodexCloud.sync && CodexCloud.sync({}); };
+  if (a.cloud && window.CodexCloud && CodexCloud.state) {
+    const apply = (st) => {
       const dot = holder.querySelector("#syncDot"), label = holder.querySelector("#syncLabel");
-      if (dot) dot.className = "sync-dot sync-" + st.state;
-      if (dot) dot.title = LABELS[st.state] || "";
-      if (label) label.textContent = (LABELS[st.state] || "") + (st.detail && st.state === "error" ? ": " + st.detail : "");
-    });
+      const cls = st.syncing ? "syncing" : st.lastError ? "error" : st.signedIn ? "synced" : "offline";
+      const text = st.syncing ? "Syncing\u2026"
+        : st.lastError ? "Sync problem: " + st.lastError
+        : st.signedIn ? "Synced to your account" + (st.pending ? " (" + st.pending + " waiting)" : "")
+        : "Signed out";
+      if (dot) { dot.className = "sync-dot sync-" + cls; dot.title = text; }
+      if (label) label.textContent = text;
+    };
+    apply(CodexCloud.state());
+    CodexCloud.onChange(apply);
   }
 }
 
 /* ---------- boot ---------- */
 function boot() {
+  if (arrivingFromEmail && !cloudSession()) { holdForEmailSignIn(); return; }
   if (!current()) showGate();
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else boot();
 
+async function ensureCloudSpace() {
+  const cs = cloudSession();
+  if (!cs) return;
+  if (localStorage.getItem(storeKey("codex.workspaces"))) return;
+  let adopted = 0;
+  try {
+    if (window.CodexCloud && CodexCloud.adoptRemoteWorkspaces) adopted = await CodexCloud.adoptRemoteWorkspaces();
+  } catch (e) { /* offline or tables missing: fall through to the template */ }
+  if (!adopted) seedSpaceFor(ns(), cs.name || "My");
+}
+
 window.CodexAccount = {
-  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, mountChip, seedSpaceFor,
+  current, accounts, ns, storeKey, dbName, signOut, ensureTemplate, ensureCloudSpace, mountChip, seedSpaceFor,
   isSignedIn: () => !!current(),
 };
 })();

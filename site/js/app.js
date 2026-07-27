@@ -39,26 +39,32 @@ const IC = {
   cards:  '<rect x="4" y="6" width="10" height="12" rx="1.4" transform="rotate(-8 9 12)"/><rect x="6" y="4" width="10" height="12" rx="1.4"/>',
   timeline:'<path d="M3.5 10h13"/><circle cx="6" cy="10" r="1.6"/><circle cx="10.5" cy="10" r="1.6"/><circle cx="15" cy="10" r="1.6"/><path d="M6 10V5.5M15 10v4.5"/>',
   draw:   '<path d="M4.5 15.5l1-4L13.5 3.5a1.6 1.6 0 0 1 2.2 2.2L7.7 13.7l-4 1z"/><path d="M11.5 5.5l3 3"/>',
-  library:'<path d="M4 16.5V4.8c0-.7.5-1.2 1.2-1.2h1.6v13H5.2c-.7 0-1.2-.4-1.2-.1z"/><path d="M7.5 3.6h2.2v12.9H7.5z"/><path d="M11.3 4.3l2.1-.6 3.2 12.4-2.1.6z"/>',
+  help:   '<circle cx="10" cy="10" r="6.6"/><path d="M8.2 8a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4"/><path d="M10 13.6h.01"/>',
+  read:   '<path d="M10 5.6C8.4 4.4 6 4.2 3.6 4.6v10.2c2.4-.4 4.8-.2 6.4 1 1.6-1.2 4-1.4 6.4-1V4.6c-2.4-.4-4.8-.2-6.4 1z"/><path d="M10 5.6v11"/>',
+  clock:  '<circle cx="10" cy="10" r="6.6"/><path d="M10 6.4V10l2.6 1.6"/>',
+  book:   '<path d="M4.5 4h7a2 2 0 0 1 2 2v10H6.5a2 2 0 0 0-2 2z"/><path d="M13.5 6a2 2 0 0 1 2-2v12"/>',
+  people: '<circle cx="7.6" cy="8" r="2.6"/><path d="M3.4 16c0-2.3 1.9-4.2 4.2-4.2s4.2 1.9 4.2 4.2"/><circle cx="14" cy="8.6" r="2"/><path d="M13 12c2 0 3.6 1.6 3.6 3.6"/>',
 };
 function svg(name) {
   return `<svg class="ic-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[name] || ""}</svg>`;
 }
 
-/* ---------- category colours (markers are coloured dots, not emoji) ---------- */
+/* ---------- category colours (markers are coloured dots, not emoji)
+   Muted, dusty hues chosen to sit inside the rose/antique palette; bright
+   primaries fight the page and stop reading as a quiet index. ---------- */
 const CAT = {
-  "Characters":         "#7c5cff",
-  "Noble Houses":       "#b8893b",
-  "Maps & Locations":   "#3f8f6b",
-  "Religion & Faith":   "#c2603f",
-  "Magic System":       "#5c8fff",
-  "Timeline & History": "#9a6bd0",
-  "Culture & Fashion":  "#d0699a",
-  "Books & Stories":    "#6b8f3f",
-  "Reference & Lexicon":"#6a655c",
-  "Canon & Continuity": "#3f6f8f",
-  "My Notes":           "#4d8f7b",
+  "Characters":         "#b8788f",
+  "Noble Houses":       "#c9a15c",
+  "Maps & Locations":   "#6f8f7a",
+  "Religion & Faith":   "#c07a5e",
+  "Magic System":       "#8189ab",
+  "Timeline & History": "#9c7a9e",
+  "Culture & Fashion":  "#d19aac",
+  "Books & Stories":    "#8d9270",
+  "Reference & Lexicon":"#9a8b86",
+  "Canon & Continuity": "#7b8b9b",
+  "My Notes":           "#7fa093",
 };
 const catColor = c => CAT[c] || "var(--accent)";
 const catDot = c => `<span class="cdot" style="background:${catColor(c)}"></span>`;
@@ -98,13 +104,23 @@ function buildIndexes() {
   }
 }
 
-/* ---------- state (keys namespaced per account via account.js) ---------- */
-const acctKey = (base) => window.CodexAccount ? CodexAccount.storeKey(base) : base;
+/* ---------- state ---------- */
 const store = {
-  recent: JSON.parse(localStorage.getItem(acctKey("codex.recent")) || "[]"),
+  // Guarded: this runs while the module is still evaluating, so a
+  // corrupt or truncated value here would stop app.js loading at all
+  // and leave the shell stuck on "Opening…" with an empty sidebar.
+  recent: (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("codex.recent") || "[]");
+      if (Array.isArray(v)) return v.filter(x => typeof x === "string");
+    } catch (e) {}
+    // rewrite the bad value now, so it cannot trip anything else up later
+    try { localStorage.setItem("codex.recent", "[]"); } catch (e) {}
+    return [];
+  })(),
   pushRecent(id) {
     this.recent = [id, ...this.recent.filter(x => x !== id)].slice(0, 8);
-    localStorage.setItem(acctKey("codex.recent"), JSON.stringify(this.recent));
+    try { localStorage.setItem("codex.recent", JSON.stringify(this.recent)); } catch (e) {}
   }
 };
 
@@ -128,12 +144,30 @@ function noteToEntry(n) {
   const text = n.text || "";
   return {
     id: n.id, title: n.title || "Untitled note", text,
-    summary: text.replace(/\s+/g, " ").slice(0, 180),
+    // a brief written at import time wins over the raw first line
+    summary: n.brief || text.replace(/\s+/g, " ").slice(0, 180),
+    brief: n.brief || "",
     category: n.category || "My Notes", type: "note",
     wordcount: text.split(/\s+/).filter(Boolean).length,
     images: n.images || [], links: n.links || [], source: null, _user: true,
+    // false when "Let the assistant read it" was switched off at import
+    aiRead: n.aiRead === false ? false : true,
+    // filed for its names alone: contributes to the Name Index and
+    // cross-linking, but is not a browsable entry
+    namesOnly: !!n.namesOnly,
   };
 }
+/* A short brief written once at import: the most descriptive sentences
+   from the top of the text, not a truncation of its first line. */
+function briefOf(text) {
+  const sents = sentencesOf(text || "").filter(s => s.length > 40 && s.length < 300);
+  if (!sents.length) return "";
+  const scored = sents.slice(0, 25).map((s, i) => ({
+    s: s.trim(), score: (DESCRIPTIVE.test(s) ? 1.5 : 0) - i * 0.03,
+  })).sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map(x => x.s).join(" ");
+}
+
 function rebuildEntries() {
   const hidden = window.CodexExtra ? CodexExtra.hidden : new Set();
   // only the workspace(s) flagged hasCanon=true ship with the pre-extracted
@@ -143,20 +177,30 @@ function rebuildEntries() {
   const base = hasCanon ? ORIG_ENTRIES : [];
   const baseEntities = hasCanon ? ORIG_ENTITIES : [];
   const noteEntries = notesCache.map(noteToEntry);
-  DB.entries = base.filter(e => !hidden.has(e.id)).concat(noteEntries.filter(e => !hidden.has(e.id)));
+  const visibleNotes = noteEntries.filter(e => !hidden.has(e.id) && !e.namesOnly);
+  DB.entries = base.filter(e => !hidden.has(e.id)).concat(visibleNotes);
   DB.entities = baseEntities.slice();
-  noteEntries.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  visibleNotes.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  // names-only imports never become entries, but their names still count
+  noteEntries.filter(e => e.namesOnly && !hidden.has(e.id)).forEach(e => {
+    entitiesIn(e.text).forEach(n => { if (!DB.entities.includes(n)) DB.entities.push(n); });
+  });
   const excludedNames = window.CodexExtra ? CodexExtra.excludedNames : new Set();
   if (excludedNames.size) DB.entities = DB.entities.filter(n => !excludedNames.has(n));
   DB.stats.entries = DB.entries.length;
   DB.stats.entities = DB.entities.length;
   DB.stats.images = hasCanon ? (window.WORLD_DB && window.WORLD_DB.stats && window.WORLD_DB.stats.images) || 0 : 0;
 }
-async function addNote(title, text, images, category) {
+async function addNote(title, text, images, category, opts) {
+  opts = opts || {};
   const note = {
     id: "note-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     title: title || "Untitled note", text: text || "", images: images || [], category: category || "My Notes",
+    created: Date.now(), updated: Date.now(),
   };
+  if (opts.summarize) note.brief = briefOf(note.text);
+  if (opts.aiRead === false) note.aiRead = false;
+  if (opts.namesOnly) note.namesOnly = true;
   await CodexStore.put("notes", note);
   notesCache.unshift(note);
   refresh();
@@ -180,22 +224,39 @@ async function deleteNote(id) {
    ============================================================ */
 function buildNav() {
   const nav = $("#nav");
-  const cats = categoriesList()
-    .filter(c => !(window.CodexExtra && CodexExtra.hiddenCats.has(c.name)))
-    .map(c => {
-      const canRemove = c.name !== "My Notes"; // the catch-all bucket stays pinned
-      const title = c.custom ? "Delete this section" : "Hide this section from the sidebar";
-      return `<div class="nav-item ${c.custom ? "nav-custom" : ""}" data-route="#/browse/${encodeURIComponent(c.name)}">
+  const cats = categoriesList().map(c =>
+    `<div class="nav-item" data-route="#/browse/${encodeURIComponent(c.name)}">
        <span class="dot" style="background:${catColor(c.name)}"></span>
        <span>${esc(c.name)}</span><span class="count">${c.count}</span>
-       ${canRemove ? `<button class="nav-del" data-delcat="${esc(c.name)}" data-custom="${c.custom ? "1" : "0"}" title="${title}">✕</button>` : ""}
-     </div>`;
-    }).join("");
+     </div>`).join("");
+  // Projects = the folders feature; Pinned = recently-opened entries
+  const folders = (window.CodexFolders && CodexFolders._cache) || [];
+  const projects = folders.map(f => {
+    const n = DB.entries.filter(e => e.folder === f.id).length;
+    return `<div class="nav-item" data-route="#/docs/${f.id}">
+       <span class="dot" style="background:var(--blush2)"></span>
+       <span>${esc(f.name)}</span><span class="count">${n || ""}</span></div>`;
+  }).join("") || `<div class="nav-item mini faint" style="cursor:default">No projects yet</div>`;
+  const pinned = store.recent.map(id => byId[id]).filter(Boolean).slice(0, 5).map(e =>
+    `<div class="nav-item mini" data-route="#/entry/${e.id}">
+       <span style="width:13px;text-align:center;font-size:9px;color:var(--gold)">✧</span>
+       <span style="flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(e.title)}</span>
+     </div>`).join("") || `<div class="nav-item mini faint" style="cursor:default">Nothing opened yet</div>`;
+
+  const wsName = window.CodexWorkspaces ? CodexWorkspaces.current().name : "Workspace";
+  const wsMeta = `${DB.entries.length} entries · ${DB.entities.length} names`;
+
+  // The Community Space is a place, not a page: publishing, readers and
+  // comments have nothing to do with the filing cabinet, and mixing them
+  // into one sidebar made both harder to read. In that mode the whole
+  // left rail changes, with one way back out at the top.
+  if (inSpace()) { buildSpaceNav(nav); return; }
+
   nav.innerHTML = `
-    <div class="nav-section">
-      <div class="nav-item" data-route="#/">${svg("home")}<span>Home</span></div>
-      <div class="nav-item" data-route="#/maps">${svg("atlas")}<span>Atlas &amp; Galleries</span></div>
-      <div class="nav-item" data-route="#/index">${svg("index")}<span>Name Index</span></div>
+    <div class="ws-card">
+      <div class="legend">Workspace</div>
+      <div class="name">${esc(wsName)}</div>
+      <div class="meta">${esc(wsMeta)}</div>
     </div>
     <div class="nav-section">
       <div class="nav-title-row"><div class="nav-title">The Canon</div>
@@ -203,24 +264,41 @@ function buildNav() {
       ${cats}
     </div>
     <div class="nav-section">
-      <div class="nav-title">Your Workspace</div>
-      <div class="nav-item" data-route="#/library">${svg("library")}<span>Library &amp; Stories</span></div>
-      <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Documents</span></div>
+      <div class="nav-title-row"><div class="nav-title">Workroom</div></div>
+      <div class="nav-item" data-route="#/">${svg("home")}<span>The Desk</span></div>
+      <div class="nav-item" data-route="#/docs">${svg("doc")}<span>Books</span></div>
+      <div class="nav-item" data-route="#/read">${svg("read")}<span>Read Through</span></div>
       <div class="nav-item" data-route="#/slides">${svg("slides")}<span>Slide Decks</span></div>
-      <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases &amp; Mood Boards</span></div>
+      <div class="nav-item" data-route="#/canvases">${svg("canvas")}<span>Canvases</span></div>
       <div class="nav-item" data-route="#/mindmaps">${svg("mindmap")}<span>Mind Maps</span></div>
       <div class="nav-item" data-route="#/sheets">${svg("sheet")}<span>Sheets</span></div>
       <div class="nav-item" data-route="#/study">${svg("cards")}<span>Flashcards &amp; Quiz</span></div>
       <div class="nav-item" data-route="#/timeline">${svg("timeline")}<span>Timeline</span></div>
-      <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Task Manager</span></div>
-      <div class="nav-item" data-route="#/import">${svg("import")}<span>Import &amp; Add Lore</span></div>
-      <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity Feed</span></div>
+      <div class="nav-item" data-route="#/maps">${svg("atlas")}<span>Atlas</span></div>
+      <div class="nav-item" data-route="#/index">${svg("index")}<span>Name Index</span></div>
+      <div class="nav-item" data-route="#/tasks">${svg("check")}<span>Tasks</span></div>
+      <div class="nav-item" data-route="#/import">${svg("import")}<span>Add Lore</span></div>
+      <div class="nav-item" data-route="#/feed">${svg("feed")}<span>Activity</span></div>
+      <div class="nav-item" data-route="#/help">${svg("help")}<span>Help</span></div>
     </div>
     <div class="nav-section">
-      <div class="nav-title">Data</div>
+      <div class="nav-title-row"><div class="nav-title">Projects</div>
+        <button class="nav-plus" id="navAddFolder" title="New project">+</button></div>
+      ${projects}
+    </div>
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Pinned</div></div>
+      ${pinned}
+    </div>
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Data</div></div>
       <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
       <div class="nav-item mini" id="navExport">${svg("backup")}<span>Back up my work</span></div>
       <div class="nav-item mini" id="navImport">${svg("restore")}<span>Restore backup</span></div>
+    </div>
+    <div class="nav-section">
+      <button class="nav-cta" id="navNewNote">+ New note</button>
+      <div class="ornament" style="margin-top:20px">✦✧✦</div>
     </div>`;
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
@@ -232,43 +310,28 @@ function buildNav() {
     if (!name || !name.trim()) return;
     await CodexExtra.addCat(name.trim());
     buildNav();
-    toast("Section added; file notes into it from Import & Add Lore");
+    toast("Section added; file notes into it from Add Lore");
   };
-  $$("#nav .nav-del[data-delcat]").forEach(btn => btn.onclick = (ev) => {
-    ev.stopPropagation(); ev.preventDefault();
-    if (btn.dataset.custom === "1") deleteCustomSection(btn.dataset.delcat);
-    else hideBuiltinSection(btn.dataset.delcat);
-  });
+  $("#navAddFolder").onclick = async (ev) => {
+    ev.stopPropagation();
+    const name = prompt("Name this project:");
+    if (!name || !name.trim()) return;
+    await CodexStore.put("folders", { id: "f" + Date.now().toString(36), name: name.trim() });
+    if (window.CodexFolders) await CodexFolders.ensureCache(true);
+    buildNav();
+    toast(`Project “${name.trim()}” created`);
+  };
+  $("#navNewNote").onclick = async () => {
+    const note = await addNote("", "", [], "My Notes");
+    location.hash = "#/entry/" + note.id;
+  };
   markActive();
-}
-/* hide a built-in Canon section (Characters, Noble Houses, etc.) from the sidebar.
-   Unlike a custom section, a built-in one isn't a deletable object; it's sourced
-   from the imported canon; so "delete" here means delist from nav/browse, never
-   touching the entries themselves. Fully reversible from Settings. */
-async function hideBuiltinSection(name, onDone) {
-  if (!confirm(`Hide the section "${name}"?\n\nIts entries stay exactly as they are; searchable, linkable, still in your canon; they just won't show in this sidebar list. Restore it anytime from Settings.`)) return;
-  await CodexExtra.hideCat(name);
-  refresh();
-  toast(`"${name}" hidden from the sidebar; restore it from Settings anytime`);
-  if (onDone) onDone();
-}
-/* delete a user-added Canon section; its notes move to "My Notes" (never destroyed) */
-async function deleteCustomSection(name, onDone) {
-  const cat = (window.CodexExtra ? CodexExtra.cats : []).find(c => c.name === name);
-  if (!cat) return;
-  const inHere = notesCache.filter(n => n.category === name);
-  const msg = inHere.length
-    ? `Delete the section "${name}"?\n\n${inHere.length} note${inHere.length === 1 ? "" : "s"} filed here will move to "My Notes"; nothing is deleted.`
-    : `Delete the empty section "${name}"?`;
-  if (!confirm(msg)) return;
-  for (const n of inHere) { n.category = "My Notes"; await CodexStore.put("notes", n); }  // rehome, don't destroy
-  await CodexExtra.delCat(cat.id);
-  refresh();
-  toast(inHere.length ? `Deleted; ${inHere.length} note${inHere.length === 1 ? "" : "s"} moved to My Notes` : `Section "${name}" deleted`);
-  if (onDone) onDone();
 }
 function markActive() {
   const h = location.hash || "#/";
+  if (isNarrow()) collapseSidebar(true);
+  window.CodexSound && CodexSound.onPage();
+  if (!h.startsWith("#/doc/")) setAssistantContext(null);
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.classList.toggle("active", el.dataset.route === h ||
       (el.dataset.route !== "#/" && h.startsWith(el.dataset.route))));
@@ -413,9 +476,10 @@ function subjectsOf(entry) {
   entry.title.split(/\s+/).forEach(w => { if (entitySet.has(w)) subs.add(w); });
   return Array.from(subs);
 }
-function mentionsOf(name, excludeId) {
+function mentionsOf(name, excludeId, forAssistant) {
   const n = name.toLowerCase();
-  return DB.entries.filter(e => e.id !== excludeId && (e.type === "pdf" || e.type === "note") && e._hay.includes(n));
+  return DB.entries.filter(e => e.id !== excludeId && (e.type === "pdf" || e.type === "note") &&
+    e._hay.includes(n) && (!forAssistant || readableByAI(e)));
 }
 
 /* ============================================================
@@ -437,7 +501,7 @@ function viewHome() {
     <div class="hero">
       <div class="page-kicker">Your worldbuilding organizer</div>
       <h1>Everything you've built, calm and findable.</h1>
-      <p>One quiet home for every character, house, map, and myth in <em>${esc(window.CodexWorkspaces ? CodexWorkspaces.current().name : "World Without God")}</em>.
+      <p>One quiet home for every character, house, map, and myth in <em>World Without God</em>.
          Search across it all, follow names wherever they lead, and write new lore right inside it.</p>
       <div class="hero-search">
         <input id="heroSearch" placeholder="Search a name, place, house, or idea…">
@@ -450,9 +514,7 @@ function viewHome() {
         <div><b>${catList.length}</b> collections</div>
       </div>
     </div>
-    <div id="homeLibStrip"></div>
     <div class="cat-grid">${cards}</div>`;
-  if (window.CodexLibrary) CodexLibrary.homeStrip($("#homeLibStrip"));
   const hs = $("#heroSearch");
   hs.onkeydown = e => { if (e.key === "Enter" && hs.value.trim()) location.hash = "#/search/" + encodeURIComponent(hs.value.trim()); };
   hs.addEventListener("input", () => { if (hs.value.trim().length >= 2) openSearch(hs.value.trim()); });
@@ -461,13 +523,20 @@ function viewHome() {
 let browseSelectMode = false, browseSelected = new Set();
 function viewBrowse(cat) {
   browseSelectMode = false; browseSelected = new Set();
-  renderBrowse(cat);
+  renderBrowse(canonicalCat(cat));
+}
+/* A hand-typed or older bookmark may differ only in case ("#/browse/characters"),
+   which would otherwise render a real collection as empty. Match the stored
+   spelling when one exists and keep the argument as-is when it doesn't. */
+function canonicalCat(cat) {
+  if (!cat) return cat;
+  const want = cat.toLowerCase();
+  const hit = DB.entries.find(e => e.category && e.category.toLowerCase() === want);
+  return hit ? hit.category : cat;
 }
 function renderBrowse(cat) {
   const items = DB.entries.filter(e => e.category === cat).sort((a, b) => a.title.localeCompare(b.title));
-  const isCustomSection = customCats().includes(cat);
-  const isBuiltinSection = CANON_ORDER.includes(cat);
-  const isNotesLike = cat === "My Notes" || isCustomSection;
+  const isNotesLike = cat === "My Notes" || customCats().includes(cat);
   const cards = items.map(e => entryCardSelectable(e)).join("") ||
     `<div class="empty-state">Nothing here yet.${isNotesLike ? " Add one below, or from Import &amp; Add Lore." : ""}</div>`;
   view.innerHTML = `<div class="wrap wide">
@@ -477,8 +546,6 @@ function renderBrowse(cat) {
       <div class="browse-actions">
         ${isNotesLike ? `<button class="btn sm" id="quickAddNote">New note</button>` : ""}
         ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${browseSelectMode ? "Cancel" : "Select"}</button>` : ""}
-        ${isCustomSection ? `<button class="btn ghost sm" id="deleteSection" style="color:var(--danger)">Delete section</button>` : ""}
-        ${isBuiltinSection ? `<button class="btn ghost sm" id="hideSection" style="color:var(--danger)">Hide section</button>` : ""}
       </div>
     </div>
     <p class="muted">${items.length} ${items.length === 1 ? "entry" : "entries"}</p>
@@ -491,8 +558,6 @@ function renderBrowse(cat) {
   </div>`;
 
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { browseSelectMode = !browseSelectMode; if (!browseSelectMode) browseSelected.clear(); renderBrowse(cat); };
-  if ($("#deleteSection")) $("#deleteSection").onclick = () => deleteCustomSection(cat, () => { location.hash = "#/"; });
-  if ($("#hideSection")) $("#hideSection").onclick = () => hideBuiltinSection(cat, () => { location.hash = "#/"; });
   if ($("#quickAddNote")) $("#quickAddNote").onclick = async () => {
     const note = await addNote("", "", [], cat === "My Notes" ? "My Notes" : cat);
     location.hash = "#/entry/" + note.id;
@@ -540,11 +605,94 @@ function entryCard(e) {
   </a>`;
 }
 
+/* ---------- writing a note ----------
+   A note you just made had nowhere to type: the entry page is a reading
+   view, and nothing on it edited the title or the body. So a brand new
+   note opened as a blank page with a Delete button and no way in.
+   Notes you wrote now have an editor, and an empty one opens straight
+   into it; there is nothing to read yet. */
+let entryEditing = null;
+
+function noteEditor(e) {
+  const cats = categoriesList();
+  return `<div class="note-edit">
+    <div class="page-kicker">${e.title && e.text ? "Editing" : "A new note"}</div>
+    <input class="note-edit-title" id="neTitle" value="${esc(e.title === "Untitled note" ? "" : e.title)}"
+      placeholder="Give it a title" maxlength="200">
+    <textarea class="note-edit-body" id="neBody" rows="18"
+      placeholder="Write whatever this is. Any name you use more than once becomes a cross reference automatically.">${esc(e.text || "")}</textarea>
+    <div class="note-edit-row">
+      <label class="ne-field"><span>Section</span>
+        <select class="folder-select" id="neCat">
+          ${cats.map(c => `<option value="${esc(c.name)}" ${e.category === c.name ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        </select></label>
+      <label class="ne-field grow"><span>Links, one per line</span>
+        <textarea class="note-edit-links" id="neLinks" rows="2"
+          placeholder="https://…">${esc((e.links || []).join("\n"))}</textarea></label>
+    </div>
+    <div class="note-edit-acts">
+      <button class="btn" id="neSave">Save note</button>
+      <button class="btn ghost" id="neCancel">Cancel</button>
+      <span class="ne-count" id="neCount"></span>
+    </div>
+    <p class="faint" style="margin:10px 0 0">Saved to this browser as you confirm.
+      Nothing is uploaded.</p>
+  </div>`;
+}
+
+function bindNoteEditor(e) {
+  const title = $("#neTitle"), body = $("#neBody"), count = $("#neCount");
+  const tally = () => {
+    const n = (body.value || "").trim().split(/\s+/).filter(Boolean).length;
+    count.textContent = n ? n.toLocaleString() + (n === 1 ? " word" : " words") : "";
+  };
+  body.oninput = tally; tally();
+  (title.value ? body : title).focus();
+
+  // Ctrl/Cmd+S and Ctrl/Cmd+Enter both save, because both are muscle memory
+  const maybeSave = ev => {
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "s" || ev.key === "Enter")) { ev.preventDefault(); save(); }
+  };
+  title.onkeydown = body.onkeydown = maybeSave;
+
+  const save = async () => {
+    const t = title.value.trim(), b = body.value;
+    if (!t && !b.trim()) { toast("Give it a title or something to say"); return; }
+    await updateNote(e.id, {
+      title: t || "Untitled note",
+      text: b,
+      category: $("#neCat").value,
+      links: $("#neLinks").value.split("\n").map(s => s.trim()).filter(Boolean).slice(0, 20),
+      updated: Date.now(),
+      wordcount: b.trim() ? b.trim().split(/\s+/).filter(Boolean).length : 0,
+    });
+    entryEditing = null;
+    toast("Note saved");
+    viewEntry(e.id);
+  };
+  $("#neSave").onclick = save;
+  $("#neCancel").onclick = () => {
+    entryEditing = null;
+    // an untouched blank note has nothing worth keeping a page for
+    if (!e.text && (!e.title || e.title === "Untitled note")) { location.hash = "#/browse/" + encodeURIComponent(e.category); return; }
+    viewEntry(e.id);
+  };
+}
+
 function viewEntry(id) {
   const e = byId[id];
   if (!e) { view.innerHTML = `<div class="wrap"><p>Entry not found.</p></div>`; return; }
   store.pushRecent(id);
   if (e.type === "gallery") return viewGallery(e);
+
+  // your own note, empty or explicitly being edited, gets the editor
+  const blank = e._user && !String(e.text || "").trim() && (!e.title || e.title === "Untitled note");
+  if (e._user && (entryEditing === id || blank)) {
+    entryEditing = id;
+    view.innerHTML = `<div class="wrap">${noteEditor(e)}</div>`;
+    bindNoteEditor(e);
+    return;
+  }
 
   const body = renderBody(e);
   const seen = new Set(); let backs = [];
@@ -567,27 +715,79 @@ function viewEntry(id) {
     ${categoriesList().map(c => `<option value="${esc(c.name)}" ${e.category === c.name ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
   </select>` : "";
 
-  view.innerHTML = `<div class="wrap">
-    <div class="reading">
-      <div class="entry-head"><div class="page-kicker" style="margin:0">${catDot(e.category)} ${esc(e.category)}</div>${catSelector}</div>
-      <h1>${esc(e.title)}</h1>
-      <div class="entry-actions">
-        <button class="btn sm" id="askAssistant">${svg("spark")} Ask the assistant about this</button>
-        ${pdfLink}${fileLink}
-        <button class="btn ghost sm" id="copyText">Copy text</button>
-        <button class="btn ghost sm" id="readAloud">${svg("speaker")} Read aloud</button>
-        <button class="btn ghost sm" id="delEntry">Delete</button>
+  const facts = factsOf(e, 8);
+  const flags = entryFlags(e);
+  const banner = (e._user && e.banner) || null;
+  view.innerHTML = `<div class="entry-page">
+    <div class="entry-banner${banner ? " has" : ""}" id="entryBanner">
+      ${banner ? `<img src="${esc(banner)}" alt="">` : `<span class="eb-hint">Drop a banner image</span>`}
+      <input type="file" id="entryBannerFile" accept="image/*" hidden>
+    </div>
+    <div class="entry-top">
+      <div>
+        <div class="page-kicker">${catDot(e.category)} ${esc(e.category)}</div>
+        <h1 class="display entry-title">${esc(e.title)}</h1>
       </div>
-      ${body}
-      ${linksHtml}
-      ${relImgs}
-      ${backHtml}
+      <div class="entry-when">${e.wordcount ? e.wordcount.toLocaleString() + " words" : ""}${
+        backs.length ? ` · ${backs.length} cross-reference${backs.length === 1 ? "" : "s"}` : ""}</div>
+    </div>
+    <div class="entry-actions">
+      ${e._user ? `<button class="btn sm" id="editEntry">Edit this note</button>` : ""}
+      <button class="btn ${e._user ? "ghost " : ""}sm" id="askAssistant">✦ Ask about this</button>
+      ${pdfLink}${fileLink}
+      <button class="btn ghost sm" id="copyText">Copy text</button>
+      <button class="btn ghost sm" id="readAloud">Read aloud</button>
+      ${catSelector}
+      <button class="btn ghost sm" id="delEntry">Delete</button>
+    </div>
+
+    <div class="entry-grid">
+      <div class="entry-main reading">
+        ${body}
+        ${linksHtml}
+        ${(e.images || []).length ? `<div class="rule-head mt"><span class="k">Plates</span><span class="hr"></span>
+          <span class="meta">${e.images.length}</span></div>${relImgs}` : relImgs}
+      </div>
+      <aside class="entry-side">
+        ${facts.length ? `<div class="gold-card">
+          <div class="gold-card-head">✦ At a glance ✦</div>
+          ${facts.map(f => `<div class="glance-row"><span class="gk">${esc(f.k)}</span>
+            <span class="gv">${crossLink(esc(f.v))}</span></div>`).join("")}
+        </div>` : ""}
+
+        ${flags.length ? `<div class="flag-card">
+          <div class="rule-head"><span class="k">Continuity flags · ${flags.length}</span><span class="hr"></span></div>
+          ${flags.map(f => `<div class="flag-row"><span class="fw">${esc(f.what)}</span>
+            <span class="fwhere">${esc(f.where)}</span></div>`).join("")}
+          <button class="a-chip" id="flagCheck">Check this entry</button>
+        </div>` : ""}
+
+        <div class="margin-card">
+          <div class="rule-head"><span class="k">Your margin notes</span><span class="hr"></span>
+            <button class="a-chip" id="addMargin">+ Note</button></div>
+          <div id="marginList"></div>
+          <p class="faint margin-foot">Notes stay out of the entry itself, and out of exports.</p>
+        </div>
+
+        ${backs.length ? `<div>
+          <div class="rule-head"><span class="k">Mentioned in</span><span class="hr"></span>
+            <span class="meta">${backs.length}</span></div>
+          ${backs.slice(0, 12).map(b => `<a class="back-row" href="#/entry/${b.id}">
+            <span class="br-glyph">✧</span>
+            <span class="br-body">${esc(b.title)}<span class="br-where">${esc(b.category)}</span></span></a>`).join("")}
+        </div>` : ""}
+      </aside>
     </div>
   </div>`;
 
   $$(".xref", view).forEach(x => x.onclick = () => location.hash = "#/subject/" + encodeURIComponent(x.dataset.subject));
   bindGallery();
+  bindBanner(e);
+  renderMargins(e.id);
+  $("#addMargin").onclick = () => addMargin(e.id);
+  if ($("#flagCheck")) $("#flagCheck").onclick = () => { openAssistant(); askAssistant("check consistency for " + e.title); };
   $("#askAssistant").onclick = () => { openAssistant(); assistantLookup(e.title); };
+  if ($("#editEntry")) $("#editEntry").onclick = () => { entryEditing = e.id; viewEntry(e.id); };
   $("#copyText").onclick = () => { navigator.clipboard.writeText(e.text); toast("Copied to clipboard"); };
   $("#readAloud").onclick = () => { window.CodexSpeech ? CodexSpeech.read(e.text || e.title) : toast("Speech not supported here"); };
   $("#delEntry").onclick = async () => {
@@ -626,18 +826,117 @@ function viewSubject(name) {
 }
 
 /* ---------- galleries / atlas ---------- */
-function galleryHtml(images) {
-  return `<div class="gallery">` + images.map(p =>
+function galleryHtml(images, variant) {
+  return `<div class="gallery${variant ? " " + variant : ""}">` + images.map(p =>
     `<figure data-full="${imgSrc(p)}">
        <img loading="lazy" src="${imgSrc(p)}" alt="${esc((p.split('/').pop() || '').slice(0, 60))}">
        <figcaption>${esc(p.split('/').pop() || "image")}</figcaption>
      </figure>`).join("") + `</div>`;
 }
+/* A banner belongs to an entry you wrote; the shipped canon is read-only
+   so there is nowhere to keep one. */
+function bindBanner(e) {
+  const box = $("#entryBanner"), input = $("#entryBannerFile");
+  if (!box) return;
+  if (!e._user) { box.remove(); return; }
+  const take = async (file) => {
+    if (!file) return;
+    try {
+      const url = await window.CodexImg.fileToScaledDataURL(file, 1600, 0.82);
+      await updateNote(e.id, { banner: url });
+      toast("Banner set");
+      viewEntry(e.id);
+    } catch (err) { toast("Couldn't read that image"); }
+  };
+  box.onclick = () => input.click();
+  input.onchange = () => take(input.files[0]);
+  box.ondragover = ev => { ev.preventDefault(); box.classList.add("over"); };
+  box.ondragleave = () => box.classList.remove("over");
+  box.ondrop = ev => { ev.preventDefault(); box.classList.remove("over"); take(ev.dataTransfer.files[0]); };
+}
+
+/* ---------- continuity flags on an entry ----------
+   Cheap, specific checks that can be stated plainly. Anything vaguer
+   than this belongs to the assistant's full consistency pass, which
+   the button beside the list opens. */
+function entryFlags(e) {
+  const out = [];
+  const text = e.text || "";
+
+  // Collect every "Key: value" line, then decide whether this entry is
+  // about one subject or is a compendium. A roster of fifty characters
+  // legitimately repeats Born and Died fifty times; calling that a
+  // contradiction would bury the real ones in noise.
+  const byKey = {};
+  text.split("\n").forEach(line => {
+    if (!FACT_LINE.test(line)) return;
+    const i = line.indexOf(":");
+    const k = line.slice(0, i).trim().toLowerCase(), v = line.slice(i + 1).trim();
+    if (!v) return;
+    (byKey[k] = byKey[k] || []).push(v);
+  });
+  const isCompendium = Object.keys(byKey).some(k => byKey[k].length > 2);
+  if (!isCompendium) {
+    Object.keys(byKey).forEach(k => {
+      const vals = Array.from(new Set(byKey[k]));
+      if (vals.length > 1) out.push({ what: `Two values given for "${k}"`, where: vals.slice(0, 2).join(" / ") });
+    });
+  }
+  // a year written both BR and AR for the same event line
+  const eras = text.match(/\b\d{1,4}\s?(BR|AR)\b/gi) || [];
+  const byYear = {};
+  eras.forEach(tok => {
+    const y = tok.match(/\d+/)[0], era = /AR/i.test(tok) ? "AR" : "BR";
+    if (byYear[y] && byYear[y] !== era) out.push({ what: `Year ${y} appears as both eras`, where: "BR and AR" });
+    else byYear[y] = era;
+  });
+  return out.slice(0, 4);
+}
+
+/* ---------- margin notes ----------
+   Kept in their own store so they never enter the entry text, search
+   index, exports, or anything the assistant reads. */
+async function loadMargins(entryId) {
+  if (!window.CodexStore) return [];
+  try {
+    return (await CodexStore.all("margins")).filter(m => m.entryId === entryId).sort((a, b) => a.at - b.at);
+  } catch (err) { return []; }
+}
+async function renderMargins(entryId) {
+  const el = $("#marginList");
+  if (!el) return;
+  const list = await loadMargins(entryId);
+  el.innerHTML = list.length ? list.map((m, i) => `<div class="margin-row${m.done ? " done" : ""}">
+    <div class="mr-top"><span class="mr-n">${i + 1}</span><span class="mr-text">${esc(m.text)}</span></div>
+    <div class="mr-foot"><span class="mr-when">${new Date(m.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+      <span class="hr"></span>
+      <button class="a-chip" data-mdone="${esc(m.id)}">${m.done ? "Reopen" : "Resolve"}</button>
+      <button class="a-chip" data-mdel="${esc(m.id)}">Remove</button></div>
+  </div>`).join("") : `<p class="faint" style="font-size:13px">Nothing noted yet.</p>`;
+  $$("[data-mdone]", el).forEach(b => b.onclick = async () => {
+    const m = await CodexStore.get("margins", b.dataset.mdone);
+    if (m) { m.done = !m.done; await CodexStore.put("margins", m); renderMargins(entryId); }
+  });
+  $$("[data-mdel]", el).forEach(b => b.onclick = async () => {
+    await CodexStore.del("margins", b.dataset.mdel);
+    renderMargins(entryId);
+  });
+}
+async function addMargin(entryId) {
+  const text = prompt("A note to yourself about this entry:");
+  if (!text || !text.trim()) return;
+  await CodexStore.put("margins", {
+    id: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    entryId, text: text.trim(), at: Date.now(), done: false,
+  });
+  renderMargins(entryId);
+}
+
 function viewGallery(e) {
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${catDot(e.category)} Gallery</div>
     <h1>${esc(e.title)}</h1><p class="muted">${e.images.length} images</p>
-    ${galleryHtml(e.images)}
+    ${galleryHtml(e.images, "atlas")}
   </div>`;
   bindGallery();
 }
@@ -646,10 +945,17 @@ function viewMaps() {
   mapsSelectMode = false; mapsSelected = new Set();
   renderMaps();
 }
+const ATLAS_FILTERS = ["Everything", "Galleries", "Maps", "Flags & sigils"];
+let atlasFilter = "Everything";
+
 function renderMaps() {
   const galleries = DB.entries.filter(e => e.type === "gallery");
   const mapDocs = DB.entries.filter(e => e.category === "Maps & Locations" && e.type === "pdf");
-  const items = galleries.concat(mapDocs);
+  let items = galleries.concat(mapDocs);
+  // filters read the plate's own words, so they stay right as the atlas grows
+  if (atlasFilter === "Galleries") items = items.filter(e => e.type === "gallery");
+  else if (atlasFilter === "Maps") items = items.filter(e => /\bmap\b|\batlas\b|\bregion\b/i.test(e.title));
+  else if (atlasFilter === "Flags & sigils") items = items.filter(e => /\bflag|sigil|banner|crest|arms\b/i.test(e.title + " " + (e.summary || "")));
   const cards = items.map(e => {
     if (!mapsSelectMode) {
       return e.type === "gallery"
@@ -665,22 +971,25 @@ function renderMaps() {
     </div>`;
   }).join("");
 
+  const plates = items.reduce((n, e) => n + (e.type === "gallery" ? e.images.length : 1), 0);
   view.innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">${svg("atlas")} Atlas</div>
-    <div class="browse-head">
-      <h1>Atlas &amp; Galleries</h1>
-      <div class="browse-actions">
-        ${items.length ? `<button class="btn ghost sm" id="toggleSelect">${mapsSelectMode ? "Cancel" : "Select"}</button>` : ""}
-      </div>
+    <div class="page-kicker">Maps, flags &amp; visual reference · ${plates} plate${plates === 1 ? "" : "s"}</div>
+    <h1 class="display">The Atlas</h1>
+    <div class="atlas-bar">
+      ${ATLAS_FILTERS.map(f => `<button class="a-chip${atlasFilter === f ? " on" : ""}" data-afilter="${esc(f)}">${esc(f)}</button>`).join("")}
+      <span class="hr"></span>
+      ${items.length ? `<button class="a-chip" id="toggleSelect">${mapsSelectMode ? "Cancel" : "Select"}</button>` : ""}
+      <button class="a-chip" id="atlasAdd">+ Add plates</button>
     </div>
-    <p class="muted">Maps, flags, and visual reference plates.</p>
     ${mapsSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${items.length && mapsSelected.size === items.length ? "checked" : ""}> Select all</label>
       <span class="faint" id="selCount">${mapsSelected.size} selected</span>
       <button class="btn danger sm" id="deleteSelected" ${mapsSelected.size ? "" : "disabled"}>Delete selected</button>
     </div>` : ""}
-    <div class="list-grid">${cards || `<div class="empty-state">Nothing here yet.</div>`}</div>
+    <div class="list-grid">${cards || `<div class="empty-state">Nothing here yet. Drop maps and plates in from Add lore.</div>`}</div>
   </div>`;
+  $$("[data-afilter]", view).forEach(b => b.onclick = () => { atlasFilter = b.dataset.afilter; renderMaps(); });
+  $("#atlasAdd").onclick = () => location.hash = "#/import";
   bindGallery();
 
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { mapsSelectMode = !mapsSelectMode; if (!mapsSelectMode) mapsSelected.clear(); renderMaps(); };
@@ -770,48 +1079,100 @@ function viewImport() {
   // "My Notes", and any custom sections you've made with the + button
   const allCats = categoriesList().map(c => c.name);
   const custom = customCats();
-  view.innerHTML = `<div class="wrap">
-    <div class="page-kicker">${svg("import")} Import &amp; Add Lore</div>
-    <h1>Add to your canon</h1>
-    <p class="muted">Drop in <b>PDFs</b> (text and page images both come in, like Notion), <b>Word documents</b>
-      (.docx), text or Markdown files, or add images directly. Everything is indexed straight away; searchable,
-      cross-linked, and readable by the assistant. It's stored privately in this browser (back it up from the sidebar).</p>
+  const recent = notesCache.slice(0, 5);
+  view.innerHTML = `<div class="wrap wide add-lore">
+    <div class="page-kicker">Import PDF · Word · Markdown · paste · dictate</div>
+    <h1 class="display">Add lore</h1>
 
     <div class="dropzone" id="dropzone">
       <div class="dz-inner">
-        <div class="dz-title">Drag files here, or click to choose</div>
-        <div class="dz-sub">PDF · Word (.docx) · Text &amp; Markdown · Images · a backup <b>.json</b> restores everything</div>
+        <div class="ornament">✦ ✧ ✦</div>
+        <div class="dz-title">Drop files here</div>
+        <div class="dz-sub">PDFs come in with both their text and page images · .docx · .txt · .md · images
+          · a backup <b>.json</b> restores everything</div>
+        <div class="dz-actions">
+          <button class="btn sm" id="chooseFiles">Choose files</button>
+          <button class="btn ghost sm" id="dictateLore">✧ Dictate instead</button>
+        </div>
       </div>
       <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
     </div>
     <div class="import-progress" id="importProgress" hidden></div>
 
-    <h3 style="font-family:var(--serif);margin-top:34px">Or write / paste it in</h3>
-    <input class="import-title" id="pasteTitle" placeholder="Title (e.g. a character, place, or note)">
-    <textarea class="import-body" id="pasteBody" placeholder="Paste or type the lore here…"></textarea>
-    <div class="import-row">
-      <select class="folder-select" id="pasteCat" title="Which section this gets filed under">
-        ${allCats.map(c => `<option value="${esc(c)}" ${c === "My Notes" ? "selected" : ""}>${esc(c)}</option>`).join("")}
-      </select>
-      <button class="btn" id="addPaste">Add to my canon</button>
+    <div class="lore-grid">
+      <div>
+        <div class="rule-head"><span class="k">Or paste writing</span><span class="hr"></span></div>
+        <input class="import-title" id="pasteTitle" placeholder="Give it a title; a character, a place, a note">
+        <textarea class="import-body" id="pasteBody" placeholder="Paste a chapter, a note, a scrap of dialogue. It is indexed the moment you save it; searchable, cross-linked, and readable by the assistant."></textarea>
+      </div>
+      <div class="lore-side">
+        <div class="rule-head"><span class="k">File it under</span><span class="hr"></span></div>
+        <select class="folder-select" id="pasteCat" title="Which section this gets filed under">
+          ${allCats.map(c => `<option value="${esc(c)}" ${c === "My Notes" ? "selected" : ""}>${esc(c)}</option>`).join("")}
+        </select>
+        <div class="rule-head mt"><span class="k">On import</span><span class="hr"></span></div>
+        <label class="lore-opt"><input type="checkbox" id="optSummarize" checked>
+          <span>Write a brief<em>Three telling sentences, kept at the top of the entry.</em></span></label>
+        <label class="lore-opt"><input type="checkbox" id="optAiRead" checked>
+          <span>Let the assistant read it<em>Off keeps it out of answers. It stays searchable either way.</em></span></label>
+        <label class="lore-opt"><input type="checkbox" id="optNamesOnly">
+          <span>Names only<em>Harvest the names for the Name Index and cross-linking, without adding a
+            browsable entry. Good for a cast list or a glossary dump.</em></span></label>
+        <button class="btn" id="addPaste" style="width:100%;margin-top:14px">Save &amp; index</button>
+        ${custom.length ? "" : `<p class="faint" style="margin-top:10px;font-size:12px">Want a section of your own?
+          Use the <b>+</b> beside "The Canon" in the sidebar; it appears in this list too.</p>`}
+      </div>
     </div>
-    ${custom.length ? "" : `<p class="faint" style="margin-top:8px;font-size:12px">Want a section of your own (not one of the built-in ones)?
-      Click the <b>+</b> next to "The Canon" in the sidebar to create one; it'll show up in this list too.</p>`}
 
     <div id="importLog" class="import-log"></div>
+
+    ${recent.length ? `<div class="rule-head mt"><span class="k">Recent imports</span><span class="hr"></span>
+      <span class="meta">${notesCache.length} added in this workspace</span></div>
+      <div class="recent-imports">${recent.map(n => {
+        const words = (n.text || "").split(/\s+/).filter(Boolean).length;
+        return `<a class="ri-row" href="#/entry/${encodeURIComponent(n.id)}">
+          <span class="ri-kind">${esc(n.category || "My Notes")}</span>
+          <span class="ri-name">${esc(n.title || "Untitled")}</span>
+          <span class="ri-meta">${words.toLocaleString()} words${n.brief ? " · brief written" : ""}${n.aiRead === false ? " · assistant off" : ""}</span>
+          <span class="ri-open">Open</span></a>`;
+      }).join("")}</div>` : ""}
   </div>`;
 
   const dz = $("#dropzone"), fi = $("#fileInput");
-  dz.onclick = () => fi.click();
+  const openPicker = e => { e && e.stopPropagation(); fi.click(); };
+  dz.onclick = openPicker;
+  $("#chooseFiles").onclick = openPicker;
   dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
   dz.ondragleave = () => dz.classList.remove("over");
   dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); handleFiles(e.dataTransfer.files); };
   fi.onchange = () => handleFiles(fi.files);
 
+  $("#dictateLore").onclick = e => {
+    e.stopPropagation();
+    if (!window.CodexSpeech || !CodexSpeech.dictate) return toast("Dictation isn't supported in this browser");
+    const btn = $("#dictateLore"), body = $("#pasteBody");
+    btn.classList.add("active");
+    body.focus();
+    CodexSpeech.dictate(
+      text => { body.value = (body.value + " " + text).trim(); },
+      () => btn.classList.remove("active"));
+  };
+
   $("#addPaste").onclick = async () => {
     const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim(), c = $("#pasteCat").value;
     if (!b) { toast("Nothing to add yet"); return; }
-    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c);
+    const namesOnly = $("#optNamesOnly").checked;
+    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c,
+      { summarize: !namesOnly && $("#optSummarize").checked,
+        aiRead: namesOnly ? false : $("#optAiRead").checked,
+        namesOnly });
+    if (namesOnly) {
+      const found = Array.from(entitiesIn(b)).length;
+      logImport(`Harvested names from <b>${esc(note.title)}</b>; ${found} recognised, no entry filed.`, c);
+      $("#pasteTitle").value = ""; $("#pasteBody").value = "";
+      refresh();
+      return;
+    }
     logImport(`Added <b>${esc(note.title)}</b> to <b>${esc(c)}</b>.`, c);
     $("#pasteTitle").value = ""; $("#pasteBody").value = "";
     location.hash = "#/entry/" + note.id;
@@ -912,7 +1273,7 @@ function viewSearchPage(q) {
   const body = Object.keys(groups).map(cat => `
     <div class="sr-group">${catDot(cat)} ${esc(cat)}</div>
     <div class="list-grid">${groups[cat].map(e => `<a class="entry-card" href="#/entry/${e.id}" style="min-height:auto">
-      <h3>${esc(e.title)}</h3><p>${e.type === "gallery" ? e.images.length + " images" : "…" + snippet(e.text, q.split(/\s+/)[0], 200) + "…"}</p>
+      <h3>${esc(e.title)}</h3><p>${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, q.split(/\s+/)[0], 200)}</p>
       <div class="meta">${catDot(e.category)} ${esc(e.category)}</div></a>`).join("")}</div>`).join("");
   view.innerHTML = `<div class="wrap wide">
     <div class="page-kicker">${svg("search")} Search</div>
@@ -964,14 +1325,29 @@ function topEntitiesAcross(entries, terms, limit) {
   }));
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, limit);
 }
-function matchNamedSubject(q) {
+/* "Let the assistant read it", switched off at import, has to hold on
+   every path into an entry; not just full-text search. These helpers
+   take forAssistant so the same lookups can stay complete for the
+   pages you browse while staying closed to the assistant. */
+function readableByAI(e) { return e.aiRead !== false; }
+/* the one pool every assistant answer is built from */
+function aiEntries() { return DB.entries.filter(readableByAI); }
+function aiBlockedTitles() {
+  const s = new Set();
+  DB.entries.forEach(e => { if (e.aiRead === false) s.add(e.title.toLowerCase()); });
+  return s;
+}
+
+function matchNamedSubject(q, forAssistant) {
   const ql = q.trim().toLowerCase();
-  const entry = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === ql);
+  const pool = forAssistant ? DB.entries.filter(readableByAI) : DB.entries;
+  const entry = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === ql);
   if (entry) return entry.title;
-  const ent = DB.entities.find(n => n.toLowerCase() === ql);
+  const blocked = forAssistant ? aiBlockedTitles() : null;
+  const ent = DB.entities.find(n => n.toLowerCase() === ql && !(blocked && blocked.has(n.toLowerCase())));
   if (ent) return ent;
   // "House X" convenience
-  const h = DB.entries.find(e => e.title.toLowerCase() === "house " + ql);
+  const h = pool.find(e => e.title.toLowerCase() === "house " + ql);
   if (h) return h.title;
   return null;
 }
@@ -982,32 +1358,26 @@ function matchNamedSubject(q) {
 function snippet(text, q, len = 160) {
   const t = (text || "").replace(/\s+/g, " ");
   const i = t.toLowerCase().indexOf((q || "").toLowerCase());
-  if (i < 0) return esc(t.slice(0, len));
-  const start = Math.max(0, i - len / 3 | 0);
-  const seg = t.slice(start, start + len);
+  if (i < 0) return esc(trimToWords(t.slice(0, len), false, len < t.length));
+  let start = Math.max(0, i - len / 3 | 0);
+  const seg = trimToWords(t.slice(start, start + len), start > 0, start + len < t.length);
   return esc(seg).replace(new RegExp("(" + (q || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "ig"), "<mark>$1</mark>");
 }
-/* filler/question words to ignore when deciding whether an entry "matches" a
-   query; without this, a natural question like "who is Zephyrine" silently
-   required the literal words "who" and "is" to also appear in the target
-   document, so an imported document that only ever mentions a name in
-   passing (never given its own dedicated entry) would never be found by
-   anything but typing that exact bare name. */
-const SEARCH_STOPWORDS = new Set([
-  "a","an","the","is","are","was","were","be","been","being","who","whom","whose","what","which",
-  "when","where","why","how","does","do","did","done","doing","tell","me","about","of","in","on",
-  "at","to","for","and","or","this","that","these","those","my","your","our","their","his","her",
-  "its","it","i","you","he","she","they","we","find","search","look","looking","exist","exists",
-  "existed","character","characters","person","someone","anyone","named","name","called","mentioned",
-  "mention","story","canon","world","please","can","could","would","should",
-]);
-function searchAll(q) {
+/* Slicing a string at a character offset lands mid-word and reads as a
+   typo, so snap both ends to whitespace and mark where text was cut. */
+function trimToWords(seg, cutHead, cutTail) {
+  if (cutHead) { const s = seg.indexOf(" "); if (s > -1 && s < 24) seg = seg.slice(s + 1); }
+  if (cutTail) { const e = seg.lastIndexOf(" "); if (e > seg.length - 24) seg = seg.slice(0, e); }
+  return (cutHead ? "…" : "") + seg.trim() + (cutTail ? "…" : "");
+}
+/* Search reaches everything; the assistant only reads what you let it.
+   Passing forAssistant=true honours the "Let the assistant read it"
+   switch set when the entry was imported. */
+function searchAll(q, forAssistant) {
   q = q.trim().toLowerCase(); if (!q) return [];
-  const rawTerms = q.split(/\s+/);
-  let terms = rawTerms.filter(t => !SEARCH_STOPWORDS.has(t));
-  if (!terms.length) terms = rawTerms; // don't turn an all-stopword query into a match-everything search
-  const res = [];
-  for (const e of DB.entries) {
+  const terms = q.split(/\s+/); const res = [];
+  const pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
+  for (const e of pool) {
     const hay = e._hay, title = e.title.toLowerCase(); let score = 0;
     for (const t of terms) {
       if (!hay.includes(t)) { score = -1; break; }
@@ -1023,23 +1393,38 @@ function searchAll(q) {
 let searchSel = 0, searchList = [];
 function renderSearch(q) {
   const box = $("#searchResults");
-  if (!q.trim()) { box.innerHTML = `<div class="sr-empty">Start typing to search your whole canon.</div>`; return; }
+  if (!q.trim()) {
+    box.innerHTML = `<div class="sr-empty">Start typing. Every entry, note, document and caption is searched at once.</div>`;
+    searchList = []; return;
+  }
   const results = searchAll(q);
-  if (!results.length) { box.innerHTML = `<div class="sr-empty">No matches for “${esc(q)}”.</div>`; return; }
-  const overview = queryOverviewHtml(q, results);
-  const groups = {};
-  results.forEach(e => (groups[e.category] = groups[e.category] || []).push(e));
-  let html = overview ? `<div class="sr-overview">${overview}
-    <a class="sr-fulllink" href="#/search/${encodeURIComponent(q)}">Open full results →</a></div>` : "", flat = [];
-  Object.keys(groups).forEach(cat => {
-    html += `<div class="sr-group">${catDot(cat)} ${esc(cat)}</div>`;
-    groups[cat].forEach(e => {
-      const idx = flat.length; flat.push(e);
-      html += `<a class="sr-item" data-i="${idx}" href="#/entry/${e.id}">
-        <div><span class="t">${esc(e.title)}</span></div>
-        <div class="s">${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, q.split(/\s+/)[0], 150)}</div>
-      </a>`;
-    });
+  if (!results.length) {
+    box.innerHTML = `<div class="sr-empty">Nothing in the canon mentions “${esc(q)}” yet.
+      It will appear here the moment you write it.</div>`;
+    searchList = []; return;
+  }
+
+  /* The Brief sits above the results: what your own passages say about
+     this, assembled before you have to open anything. */
+  const brief = briefTextFor(q, results);
+  let html = brief ? `<div class="sr-brief">
+      <div class="sr-brief-k">✦ Brief</div>
+      <p>${brief}</p>
+      <a class="sr-fulllink" href="#/search/${encodeURIComponent(q)}">Open full results →</a>
+    </div>` : "";
+
+  const flat = [];
+  const term = q.trim().split(/\s+/)[0];
+  results.forEach(e => {
+    const idx = flat.length; flat.push(e);
+    const matches = countMatches(e, q);
+    html += `<a class="sr-item" data-i="${idx}" href="#/entry/${e.id}">
+      <span class="sr-kind">${esc(e.category)}</span>
+      <span class="sr-body">
+        <span class="sr-title">${esc(e.title)}</span>
+        <span class="sr-snip">${e.type === "gallery" ? e.images.length + " images" : snippet(e.text, term, 150)}</span>
+        <span class="sr-matches">${matches} mention${matches === 1 ? "" : "s"}${e.aiRead === false ? " · assistant off" : ""}</span>
+      </span></a>`;
   });
   searchList = flat; searchSel = 0;
   box.innerHTML = html;
@@ -1050,8 +1435,47 @@ function renderSearch(q) {
   bindSummaryChips(box);
   hiSearch();
 }
+
+/* how many times the query actually appears in an entry */
+function countMatches(e, q) {
+  const hay = e._hay || "";
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return 0;
+  return Math.max(...terms.map(t => hay.split(t).length - 1));
+}
+
+/* Plain sentences for the Brief band. Reuses the summary machinery but
+   returns text, since the band has its own frame. */
+function briefTextFor(q, results) {
+  const named = matchNamedSubject(q);
+  if (named) {
+    const sents = topicSummary(named, 3);        // returns sentences, not a string
+    if (sents.length) return esc(sents.join(" "));
+  }
+  const terms = q.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  const cands = [];
+  results.slice(0, 8).forEach((e, ei) => {
+    sentencesOf(e.text).forEach((s, idx) => {
+      const sl = s.toLowerCase();
+      const hit = terms.filter(t => sl.includes(t)).length;
+      if (hit && s.length > 30 && s.length < 320) {
+        cands.push({ s: s.trim(), score: hit * 2 - ei * 0.2 - idx * 0.01 + (DESCRIPTIVE.test(s) ? 0.5 : 0) });
+      }
+    });
+  });
+  cands.sort((a, b) => b.score - a.score);
+  const out = [], seen = new Set();
+  for (const c of cands) {
+    const k = c.s.slice(0, 44).toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(c.s);
+    if (out.length >= 3) break;
+  }
+  return out.length ? esc(out.join(" ")) : "";
+}
 function hiSearch() { $$(".sr-item").forEach((it, i) => it.classList.toggle("sel", i === searchSel)); }
 function openSearch(prefill) {
+  window.CodexHelp && CodexHelp.markMilestone("searched");
   $("#searchOverlay").hidden = false;
   const inp = $("#searchInput");
   if (prefill != null) inp.value = prefill;
@@ -1063,13 +1487,14 @@ function closeSearch() { $("#searchOverlay").hidden = true; }
 /* ============================================================
    ASSISTANT; local canon retrieval + summaries + Q&A
    ============================================================ */
-function bestEntryFor(name) {
+function bestEntryFor(name, forAssistant) {
   const n = name.toLowerCase();
-  let exact = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === n);
+  const pool = forAssistant ? DB.entries.filter(readableByAI) : DB.entries;
+  let exact = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === n);
   if (exact) return exact;
-  let houses = DB.entries.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === "house " + n);
+  let houses = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === "house " + n);
   if (houses) return houses;
-  const hits = mentionsOf(name, null);
+  const hits = mentionsOf(name, null, forAssistant);
   if (!hits.length) return null;
   const metaPenalty = e => (e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") ? 1 : 0;
   hits.sort((a, b) => metaPenalty(a) - metaPenalty(b) || (b._hay.split(n).length) - (a._hay.split(n).length));
@@ -1078,7 +1503,7 @@ function bestEntryFor(name) {
 
 /* rich blurb: a natural-reading answer (not a raw source quote), + facts + related + sources */
 function blurbCard(name) {
-  const e = bestEntryFor(name);
+  const e = bestEntryFor(name, true);
   if (!e) return `<div class="blurb"><div class="bt">${esc(name)}</div>
     <div class="bs faint">No canon entry yet; this name isn't in your lore.</div></div>`;
   const sents = topicSummary(name, 3);
@@ -1094,7 +1519,7 @@ function blurbCard(name) {
     summary = lede + " " + summary;
   }
   const rel = relatedNames(name, 6);
-  const others = mentionsOf(name, e.id).length;
+  const others = mentionsOf(name, e.id, true).length;
   return `<div class="blurb">
     <div class="bt">${catDot(e.category)} ${esc(name)}</div>
     <div class="bc">${esc(e.category)}</div>
@@ -1118,7 +1543,7 @@ function firstSentenceWith(text, name) {
 
 /* answer a free-text question by synthesizing across passages */
 function assistantAnswer(q) {
-  const results = searchAll(q);
+  const results = searchAll(q, true);
   if (!results.length) return `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.</div>`;
   const overview = queryOverviewHtml(q, results);
   const sources = results.slice(0, 6).map(e =>
@@ -1127,494 +1552,8 @@ function assistantAnswer(q) {
     <div class="ans-sources"><div class="ans-label">Drawn from</div>${sources}</div>`;
 }
 
-/* ============================================================
-   AI; bring-your-own-key, grounded in your own canon. Three providers
-   are supported (Google Gemini, DeepSeek, Groq); each keeps its own key
-   and model choice in localStorage so switching providers never loses
-   another one's saved key. Keys live ONLY in this browser: never
-   uploaded, never in a backup. Answers fire on Enter (not per
-   keystroke) so a key is never spammed. With no key, everything
-   falls back to the local synthesis above.
-   ============================================================ */
-const AI_DEAD_MODELS = new Set(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]);
-/* every non-Gemini provider is OpenAI-compatible and follows the same
-   localStorage-key-per-provider pattern; add a new one here plus one
-   entry in AI_OPENAI_COMPAT_URLS and it's wired everywhere automatically */
-const AI_PROVIDERS = {
-  gemini:   { label: "Gemini" },
-  deepseek: { label: "DeepSeek", keyStore: "codex.deepseekKey", modelStore: "codex.deepseekModel", defaultModel: "deepseek-v4-flash" },
-  groq:     { label: "Groq", keyStore: "codex.groqKey", modelStore: "codex.groqModel", defaultModel: "llama-3.3-70b-versatile" },
-  xai:      { label: "Grok (xAI)", keyStore: "codex.xaiKey", modelStore: "codex.xaiModel", defaultModel: "grok-4" },
-};
-const AI = {
-  get provider() { return localStorage.getItem("codex.aiProvider") || "gemini"; },
-  get key() {
-    const p = AI_PROVIDERS[this.provider];
-    return p && p.keyStore ? (localStorage.getItem(p.keyStore) || "") : (localStorage.getItem("codex.aiKey") || "");
-  },
-  get model() {
-    const p = AI_PROVIDERS[this.provider];
-    if (p && p.modelStore) return localStorage.getItem(p.modelStore) || p.defaultModel;
-    const m = localStorage.getItem("codex.aiModel");
-    // remap models that Google has retired for new accounts to the always-current alias
-    return (!m || AI_DEAD_MODELS.has(m)) ? "gemini-flash-latest" : m;
-  },
-  get on()    { return !!this.key; },
-  get label() { return (AI_PROVIDERS[this.provider] || {}).label || "AI"; },
-  instr()     { try { return (window.CodexExtra && CodexExtra.settings && CodexExtra.settings.aiInstr) || ""; } catch (e) { return ""; } },
-};
-
-/* pull the most relevant passages from the active workspace's canon */
-function gatherContext(query, maxEntries) {
-  const seen = new Set(), picked = [];
-  const named = matchNamedSubject(query) || partialEntity(query);
-  if (named) {
-    const lore = bestEntryFor(named);
-    if (lore) { seen.add(lore.id); picked.push(lore); }
-    mentionsOf(named, lore ? lore.id : null).forEach(m => { if (!seen.has(m.id)) { seen.add(m.id); picked.push(m); } });
-  }
-  searchAll(query).forEach(e => { if (!seen.has(e.id)) { seen.add(e.id); picked.push(e); } });
-  const usable = picked.filter(e => e.type === "pdf" || e.type === "note").slice(0, maxEntries);
-  let context = ""; const budget = 16000;
-  for (const e of usable) {
-    const chunk = `### ${e.title}; ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 1800)}\n\n`;
-    if (context.length + chunk.length > budget) break;
-    context += chunk;
-  }
-  return { results: usable, context };
-}
-
-/* tiny, safe markdown renderer for streamed answers (escapes first) */
-function renderMarkdownLite(t) {
-  const e2 = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  const inline = s => e2(s)
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*(?!\*)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>");
-  let html = "", inList = false;
-  for (const raw of (t || "").split("\n")) {
-    const line = raw.replace(/\s+$/, "");
-    if (/^#{1,6}\s+/.test(line))     { if (inList) { html += "</ul>"; inList = false; } html += `<h4 class="ai-h">${inline(line.replace(/^#{1,6}\s+/, ""))}</h4>`; continue; }
-    if (/^\s*[-*+]\s+/.test(line))   { if (!inList) { html += "<ul class='ai-ul'>"; inList = true; } html += `<li>${inline(line.replace(/^\s*[-*+]\s+/, ""))}</li>`; continue; }
-    if (/^\s*\d+[.)]\s+/.test(line)) { if (!inList) { html += "<ul class='ai-ul'>"; inList = true; } html += `<li>${inline(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>`; continue; }
-    if (!line.trim())                { if (inList) { html += "</ul>"; inList = false; } continue; }
-    if (inList) { html += "</ul>"; inList = false; }
-    html += `<p>${inline(line)}</p>`;
-  }
-  if (inList) html += "</ul>";
-  return html;
-}
-
-/* stream a completion from the connected provider directly from the browser (BYO key).
-   Gemini and DeepSeek use different request shapes and SSE event shapes, so this
-   dispatches to one of two small per-provider parsers that both feed the same
-   onDelta(fullTextSoFar) callback and resolve to the final full text. */
-const AI_OPENAI_COMPAT_URLS = {
-  deepseek: "https://api.deepseek.com/chat/completions",
-  groq: "https://api.groq.com/openai/v1/chat/completions",
-  xai: "https://api.x.ai/v1/chat/completions",
-};
-async function callAIStream(system, userContent, onDelta, opts) {
-  opts = opts || {};
-  const url = AI_OPENAI_COMPAT_URLS[AI.provider];
-  return url
-    ? callOpenAICompatStream(url, system, userContent, onDelta, opts)
-    : callGeminiStream(system, userContent, onDelta, opts);
-}
-async function callGeminiStream(system, userContent, onDelta, opts) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(AI.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(AI.key)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: userContent }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: opts.maxTokens || 2048 },
-    }),
-  });
-  if (!res.ok || !res.body) {
-    let msg = `HTTP ${res.status}`;
-    try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch (e) {}
-    throw new Error(msg);
-  }
-  const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = "", full = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      let ev; try { ev = JSON.parse(data); } catch (e) { continue; }
-      if (ev.error) throw new Error(ev.error.message || "stream error");
-      const parts = ev.candidates && ev.candidates[0] && ev.candidates[0].content && ev.candidates[0].content.parts;
-      if (parts) { for (const p of parts) if (p.text) full += p.text; onDelta(full); }
-    }
-  }
-  return full;
-}
-/* DeepSeek and Groq both speak the same OpenAI-compatible chat completions
-   shape: POST /chat/completions with a Bearer key, SSE lines shaped like
-   {"choices":[{"delta":{"content":"..."}}]}, terminated by a literal
-   "data: [DONE]" line rather than a JSON payload; only the base URL and
-   model differ per provider. */
-async function callOpenAICompatStream(url, system, userContent, onDelta, opts) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", "authorization": `Bearer ${AI.key}` },
-    body: JSON.stringify({
-      model: AI.model,
-      messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
-      stream: true,
-      temperature: 0.4,
-      max_tokens: opts.maxTokens || 2048,
-    }),
-  });
-  if (!res.ok || !res.body) {
-    let msg = `HTTP ${res.status}`;
-    // error.message covers DeepSeek/Groq's {error:{message}} shape; xAI instead
-    // sends {error:"a plain string"}; check both instead of assuming one
-    try { const e = await res.json(); msg = (e.error && e.error.message) || e.error || msg; } catch (e) {}
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-  }
-  const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = "", full = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      let ev; try { ev = JSON.parse(data); } catch (e) { continue; }
-      if (ev.error) throw new Error(ev.error.message || "stream error");
-      const delta = ev.choices && ev.choices[0] && ev.choices[0].delta && ev.choices[0].delta.content;
-      if (delta) { full += delta; onDelta(full); }
-    }
-  }
-  return full;
-}
-
-/* Google's "-pro" Gemini models return this exact shape when the connected
-   key has no billing enabled; a permanent block on that model, not a
-   transient rate limit, so the fix is switching models, not waiting. */
-function aiIsProQuotaError(err) {
-  const msg = (err && err.message) || String(err || "");
-  return AI.provider === "gemini" && /free_tier/i.test(msg) && /limit:\s*0/i.test(msg);
-}
-/* DeepSeek is pay-as-you-go, not free; an empty key balance returns this
-   exact message, and it won't clear up by waiting or retrying either. */
-function aiIsDeepSeekBalanceError(err) {
-  const msg = (err && err.message) || String(err || "");
-  return AI.provider === "deepseek" && /insufficient balance/i.test(msg);
-}
-/* Groq's free tier is generous but not infinite; a burst of requests can
-   still hit a per-minute rate limit. This is transient, unlike the Gemini
-   Pro / DeepSeek balance cases, so the message says "wait" not "switch". */
-function aiIsGroqRateLimit(err) {
-  const msg = (err && err.message) || String(err || "");
-  return AI.provider === "groq" && /rate.?limit/i.test(msg);
-}
-/* xAI teams start with zero credits/licenses until you add a payment method;
-   this exact message comes back as a clean, identifiable permission error. */
-function aiIsXaiNoCredits(err) {
-  const msg = (err && err.message) || String(err || "");
-  return AI.provider === "xai" && /credits|licenses|permission-denied/i.test(msg);
-}
-function aiErrorHtml(err) {
-  if (aiIsProQuotaError(err)) {
-    return `⚠️ <b>${esc(AI.model)}</b> has no free-tier quota; "Pro" Gemini models require billing enabled on your Google account; this won't clear up by waiting.
-      <button class="btn sm" id="aiSwitchFlashBtn" style="margin-left:8px">Switch to Flash &amp; retry</button>`;
-  }
-  if (aiIsDeepSeekBalanceError(err)) {
-    return `⚠️ Your DeepSeek key has no balance; DeepSeek is pay-as-you-go, not free. Add funds at <a href="https://platform.deepseek.com/usage" target="_blank" rel="noopener">platform.deepseek.com</a>, then ask again.`;
-  }
-  if (aiIsGroqRateLimit(err)) {
-    return `⚠️ Groq's free tier hit its per-minute rate limit; this clears up on its own after a short wait, then try again.`;
-  }
-  if (aiIsXaiNoCredits(err)) {
-    return `⚠️ Your xAI team has no credits yet; Grok is pay-as-you-go, not free. Add a payment method at <a href="https://console.x.ai" target="_blank" rel="noopener">console.x.ai</a>, then ask again.`;
-  }
-  return `⚠️ ${esc(AI.label)} couldn't answer: <b>${esc((err && err.message) || String(err))}</b><br><span class="faint">Check your key in <b>Settings → Assistant</b>.</span>`;
-}
-function aiWireRetry(retry) {
-  const btn = document.getElementById("aiSwitchFlashBtn");
-  if (!btn) return;
-  btn.onclick = () => { localStorage.setItem("codex.aiModel", "gemini-flash-latest"); toast("Switched to Gemini Flash; retrying…"); retry(); };
-}
-
-async function aiAnswer(query, deep) {
-  const body = $("#assistantBody");
-  const { results, context } = gatherContext(query, deep ? 14 : 10);
-  const sys =
-    "You are the Canon Assistant for a personal worldbuilding project. Answer using ONLY the canon excerpts the user provides; their own notes and lore. " +
-    "Never invent names, houses, events, or facts the excerpts don't support; if the answer isn't there, say so plainly and suggest what to search for. " +
-    "Use the world's own terms and spellings. Write in clear, direct prose; no throat-clearing, no \"based on the excerpts\". " +
-    (deep ? "This is a deep-research request: be thorough and well organised, with short markdown headings (## Overview, ## Key facts, ## Relationships, ## Timeline if any, ## Open questions)."
-          : "Keep it as long as the question needs and no longer. Light markdown (short headings, bold, bullet lists) is welcome.") +
-    (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
-  const user = context
-    ? (deep ? `Write a thorough research dossier on: ${query}\n\nCanon excerpts:\n${context}`
-            : `Question: ${query}\n\nCanon excerpts:\n${context}`)
-    : `Question: ${query}\n\n(There are no matching excerpts in the canon. Say so, and suggest what the author could search for or add.)`;
-  body.innerHTML = `<div class="ans-answer ai">
-      <div class="ans-a-label">${svg("spark")} ${deep ? "Deep research" : "Answer"} · ${AI.label}</div>
-      <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Reading your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
-    </div><div class="ans-sources" id="aiSources"></div>`;
-  const streamEl = $("#aiStream");
-  try {
-    // Gemini's newer models spend a real, variable chunk of the token budget on internal
-    // "thinking" before writing anything; leave generous headroom so the visible answer
-    // never gets starved (measured 300-2000+ thinking tokens even on simple questions).
-    const full = await callAIStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: deep ? 5000 : 2600 });
-    streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back; try rephrasing.</p>`;
-    const src = results.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
-    $("#aiSources").innerHTML = src ? `<div class="ans-label">Grounded in your canon</div>${src}` : "";
-    bindAssistantLinks(body);
-  } catch (err) {
-    body.innerHTML = `<div class="assistant-hint" style="text-align:left">${aiErrorHtml(err)}<br>
-      <span class="faint">Here's a local result instead:</span></div>${assistantAnswer(query)}`;
-    aiWireRetry(() => aiAnswer(query, deep));
-    bindAssistantLinks(body);
-  }
-}
-
-/* "favourite house / coolest character" etc.; a genuine opinion question, not a lookup.
-   The strict fact-only prompt in aiAnswer() would refuse these ("no excerpt for that"), so
-   this uses a separate, permissive prompt that explicitly invites Gemini to pick a favourite
-   and say why, using real details from the category's own entries. */
-async function aiOpinion(query) {
-  const body = $("#assistantBody");
-  const kind = findKind(query);
-  const pool = (kind ? DB.entries.filter(e => e.category === kind.cat) : DB.entries)
-    .filter(e => (e.type === "pdf" || e.type === "note") && !isHidden(e));
-  if (!pool.length) { body.innerHTML = tryOpinion(query) || `<div class="assistant-hint">Nothing in your canon to pick a favourite from yet.</div>`; bindAssistantLinks(body); return; }
-  const sample = pool.slice(0, 16);
-  let context = "";
-  for (const e of sample) { const chunk = `### ${e.title}; ${e.category}\n${(e.text || "").replace(/\s+/g, " ").trim().slice(0, 900)}\n\n`; if (context.length + chunk.length > 14000) break; context += chunk; }
-  // The excerpts above are truncated to the first ~900 chars per source;
-  // fine when a category is one-entry-per-item, but Characters especially
-  // can be just a handful of huge documents (one over 200,000 chars), so
-  // most named people never appear in that truncated head at all. Scan the
-  // FULL untruncated text of the whole pool for recognized names so the
-  // model has a real roster to choose from, not just whoever is mentioned
-  // first; this is what was causing "no character entries to pick from"
-  // even when specific characters were clearly described elsewhere.
-  const nameCounts = {};
-  pool.forEach(e => entitiesIn(e.text).forEach(n => { nameCounts[n] = (nameCounts[n] || 0) + 1; }));
-  const candidateNames = Object.keys(nameCounts).sort((a, b) => nameCounts[b] - nameCounts[a]).slice(0, 40);
-  const namesLine = candidateNames.length
-    ? `\n\nNames that actually appear across these ${kind ? kind.label : "canon"} sources; pick from here if the excerpts above don't cover enough on their own: ${candidateNames.join(", ")}.`
-    : "";
-  // match the actual direction of the question; a hardcoded "pick a favourite" prompt
-  // fighting a "who's your LEAST favourite" question produced confused, hedging answers
-  const least = OPINION_NEGATIVE.test(query);
-  const pickWord = least ? "least favourite (the one that appeals to you least)" : "favourite";
-  const sys =
-    "The author is asking for YOUR personal opinion about something in their OWN fictional world; not a factual lookup. This is playful and " +
-    `subjective, not a request that needs textual proof. Pick one genuine ${pickWord} from the excerpts provided, and explain why in 2-4 warm, ` +
-    `first-person sentences ('My ${least ? "least favourite is" : "favourite is..."}', ${least ? "" : "'I love...', "}) using specific, concrete details drawn from the excerpts. ` +
-    "Never invent details that aren't in the excerpts, but DO have and state a preference; do not say you can't have favourites, and do not " +
-    "say there's no excerpt for that; a subjective pick grounded in real details from the excerpts is exactly what's being asked for. " +
-    "Pick one SPECIFIC named person/place/thing, never a document or source title; if a names list is provided separately from the excerpts, " +
-    "that's exactly the roster to pick a specific name from, even if the excerpts above don't happen to cover them in detail." +
-    (AI.instr() ? "\n\nThe author's standing instructions (follow them): " + AI.instr() : "");
-  const user = `The author asked: "${query}"\n\nPick a genuine ${pickWord} from these and say why:\n\n${context}${namesLine}`;
-  body.innerHTML = `<div class="ans-answer ai">
-      <div class="ans-a-label">${svg("spark")} My take · ${AI.label}</div>
-      <div class="ans-a-text ai-stream" id="aiStream"><div class="ai-thinking">Weighing your canon<span class="ai-dots"><i></i><i></i><i></i></span></div></div>
-    </div><div class="ans-sources" id="aiSources"></div>`;
-  const streamEl = $("#aiStream");
-  try {
-    const full = await callAIStream(sys, user, text => { streamEl.innerHTML = renderMarkdownLite(text) + `<span class="ai-cursor">▍</span>`; }, { maxTokens: 2200 });
-    streamEl.innerHTML = renderMarkdownLite(full) || `<p class="faint">No answer came back; try asking again.</p>`;
-    const src = sample.slice(0, 6).map(e => `<a class="ans-source" href="#/entry/${e.id}">${catDot(e.category)} ${esc(e.title)}</a>`).join("");
-    $("#aiSources").innerHTML = src ? `<div class="ans-label">Considered from</div>${src}` : "";
-    bindAssistantLinks(body);
-  } catch (err) {
-    body.innerHTML = `<div class="assistant-hint" style="text-align:left">${aiErrorHtml(err)}<br>
-      <span class="faint">Here's a local pick instead:</span></div>${tryOpinion(query) || ""}`;
-    aiWireRetry(() => aiOpinion(query));
-    bindAssistantLinks(body);
-  }
-}
-/* Groq's and xAI's exact current model lineups shift over time (same lesson
-   learned the hard way with Gemini's model names earlier); rather than
-   hardcode a guess, fetch the account's actual available models live once a
-   key is entered, so Settings always offers real, currently-working choices. */
-const AI_MODELS_LIST_URLS = {
-  groq: "https://api.groq.com/openai/v1/models",
-  xai: "https://api.x.ai/v1/models",
-};
-async function fetchOpenAICompatModels(provider, key) {
-  const url = AI_MODELS_LIST_URLS[provider];
-  const res = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
-  if (!res.ok) { let msg = `HTTP ${res.status}`; try { const e = await res.json(); msg = (e.error && e.error.message) || e.error || msg; } catch (e) {} throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg)); }
-  const data = await res.json();
-  return (data.data || []).map(m => m.id).sort();
-}
-
-window.CodexAI = {
-  answer: aiAnswer,
-  get on() { return AI.on; },
-  get model() { return AI.model; },
-  get label() { return AI.label; },
-  // one-shot completion (collects the stream); used by flashcards & slide generation
-  complete: (system, user, opts) => callAIStream(system, user, () => {}, opts),
-  context: gatherContext,
-  errorHtml: aiErrorHtml,
-  wireRetry: aiWireRetry,
-  fetchModels: fetchOpenAICompatModels,
-};
-
-/* ============================================================
-   SLASH COMMANDS + hotbar; type "/" in the assistant to see them.
-   /ask and /research use Gemini when connected (else local).
-   ============================================================ */
-const ASSIST_CMDS = [
-  { key: "find",     aliases: ["f"],     hint: "Find every mention of a name or term",   ex: "/find Solis" },
-  { key: "ask",      aliases: ["a"],     hint: "Ask a question; a short, direct answer", ex: "/ask who rules Solis?" },
-  { key: "research", aliases: ["r"],     hint: "Deep dive; a full dossier on a subject", ex: "/research Solis" },
-  { key: "summary",  aliases: ["s"],     hint: "A quick summary of a name or topic",      ex: "/summary House Vane" },
-  { key: "list",     aliases: ["l"],     hint: "List everything in a collection",         ex: "/list characters" },
-  { key: "help",     aliases: ["h", "?"], hint: "List everything I can do",                ex: "/help" },
-];
-const CMD_NEEDS_ARG = new Set(["find", "ask", "research", "summary", "list"]);
-function findCmd(name) { name = (name || "").toLowerCase(); return ASSIST_CMDS.find(c => c.key === name || c.aliases.includes(name)) || null; }
-
-let cmdSel = 0, cmdVisible = [];
-let assistLookupTimer = null; // debounce timer for the free local-preview on keystroke
-function renderCmdMenu(partial) {
-  const menu = $("#assistCmdMenu"); if (!menu) return;
-  const q = (partial || "").toLowerCase();
-  cmdVisible = ASSIST_CMDS.filter(c => !q || c.key.startsWith(q) || c.aliases.some(a => a.startsWith(q)) || (q.length >= 2 && c.hint.toLowerCase().includes(q)));
-  if (!cmdVisible.length) cmdVisible = ASSIST_CMDS.slice();
-  if (cmdSel >= cmdVisible.length) cmdSel = 0;
-  menu.innerHTML = `<div class="cmd-menu-hint">Commands · ↑↓ choose · Tab to pick</div>` +
-    cmdVisible.map((c, i) => `<div class="cmd-item ${i === cmdSel ? "sel" : ""}" data-i="${i}">
-      <span class="cmd-key">/${esc(c.key)}</span><span class="cmd-hint">${esc(c.hint)}</span></div>`).join("");
-  menu.hidden = false;
-  $$(".cmd-item", menu).forEach(el => {
-    el.onmouseenter = () => { cmdSel = +el.dataset.i; hiCmd(); };
-    el.onclick = () => pickCmd(cmdVisible[+el.dataset.i]);
-  });
-}
-function hiCmd() { $$("#assistCmdMenu .cmd-item").forEach((el, i) => el.classList.toggle("sel", i === cmdSel)); }
-function hideCmdMenu() { const m = $("#assistCmdMenu"); if (m) { m.hidden = true; m.innerHTML = ""; } cmdSel = 0; cmdVisible = []; }
-function pickCmd(c) {
-  if (!c) return;
-  const inp = $("#assistantInput");
-  inp.value = CMD_NEEDS_ARG.has(c.key) ? "/" + c.key + " " : "/" + c.key;
-  hideCmdMenu(); inp.focus();
-  if (CMD_NEEDS_ARG.has(c.key)) {
-    $("#assistantBody").innerHTML = `<div class="assistant-hint">${esc(c.hint)}.<br><span class="faint">e.g. <b>${esc(c.ex)}</b>; then press Enter.</span></div>`;
-  } else execAssist(inp.value);
-}
-function onAssistMenu(val) {
-  if (val.startsWith("/")) { const tok = val.match(/^\/(\S*)$/); if (tok) renderCmdMenu(tok[1]); else hideCmdMenu(); }
-  else hideCmdMenu();
-}
-function execAssist(val) {
-  // Cancel the pending free local-preview debounce (see the "input" listener in init()).
-  // Without this, that ~160ms timer can fire AFTER a real dispatch has already started;
-  // e.g. an in-flight AI stream; and silently overwrite it with a stale local render.
-  clearTimeout(assistLookupTimer);
-  val = (val || "").trim();
-  const inp = $("#assistantInput");
-  if (val.startsWith("/")) {
-    const full = val.match(/^\/(\S+)\s+([\s\S]+)$/);
-    if (full) { const c = findCmd(full[1]); if (inp) inp.value = ""; if (c) { runAssistCommand(c.key, full[2].trim()); return; }
-      $("#assistantBody").innerHTML = `<div class="assistant-hint">No command <b>/${esc(full[1])}</b>. Type <b>/</b> to see the list, or <b>/help</b>.</div>`; return; }
-    const bare = val.match(/^\/(\S+)\s*$/);
-    if (bare) { const c = findCmd(bare[1]); if (c && !CMD_NEEDS_ARG.has(c.key)) { if (inp) inp.value = ""; runAssistCommand(c.key, ""); return; } }
-    return; // still typing a command; the hotbar is guiding, don't clear what they're composing
-  }
-  // a real question/lookup is about to be dispatched; clear the box now (like any chat
-  // send box) so the NEXT keystroke starts a fresh question instead of appending to this
-  // one. Previously nothing ever cleared the input, so a second question typed without
-  // manually selecting-all first got silently concatenated onto the first; which is why
-  // the assistant looked like it kept "answering the previous question".
-  if (inp) inp.value = "";
-  // not a command; try the deterministic local tools first (these should never
-  // go to the AI even when connected: consistency checks, doc summaries, etc.)
-  const body = $("#assistantBody");
-  const sum = trySummarizeDoc(val); if (sum) { assistantHistory.push(val); body.innerHTML = sum; bindAssistantLinks(body); return; }
-  const con = tryConsistency(val); if (con) { assistantHistory.push(val); body.innerHTML = con; bindAssistantLinks(body); return; }
-  const cmd = tryCommand(val); if (cmd) { assistantHistory.push(val); body.innerHTML = cmd; bindAssistantLinks(body); return; }
-  // an opinion/preference question ("favourite house", "coolest character") gets a
-  // dedicated, permissive prompt; the strict fact-grounded prompt below would refuse it
-  if (OPINION_TRIGGER.test(val)) {
-    assistantHistory.push(val);
-    if (AI.on) aiOpinion(val); else { body.innerHTML = tryOpinion(val) || assistantAnswer(val); bindAssistantLinks(body); }
-    return;
-  }
-  // otherwise: Gemini when connected, else the local lookup
-  if (AI.on) { assistantHistory.push(val); aiAnswer(val, false); }
-  else assistantLookup(val);
-}
-function onAssistKeydown(e) {
-  const menu = $("#assistCmdMenu");
-  if (menu && !menu.hidden && cmdVisible.length) {
-    if (e.key === "ArrowDown") { e.preventDefault(); cmdSel = Math.min(cmdSel + 1, cmdVisible.length - 1); hiCmd(); return; }
-    if (e.key === "ArrowUp")   { e.preventDefault(); cmdSel = Math.max(cmdSel - 1, 0); hiCmd(); return; }
-    if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); pickCmd(cmdVisible[cmdSel]); return; }
-    if (e.key === "Escape")    { e.preventDefault(); hideCmdMenu(); return; }
-  }
-  if (e.key === "Enter") { e.preventDefault(); const v = e.target.value.trim(); if (v) execAssist(v); }
-}
-function runAssistCommand(key, arg) {
-  const body = $("#assistantBody");
-  if (key === "help") { body.innerHTML = cmdHelpHtml(); bindCmdHelp(body); return; }
-  if (CMD_NEEDS_ARG.has(key) && !arg) {
-    body.innerHTML = `<div class="assistant-hint">Add something after <b>/${esc(key)}</b>; e.g. <b>${esc(findCmd(key).ex)}</b>.</div>`;
-    return;
-  }
-  if (key === "ask") {
-    if (OPINION_TRIGGER.test(arg)) { AI.on ? aiOpinion(arg) : (body.innerHTML = tryOpinion(arg) || assistantAnswer(arg), bindAssistantLinks(body)); return; }
-    AI.on ? aiAnswer(arg, false) : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return;
-  }
-  if (key === "research") { AI.on ? aiAnswer(arg, true)  : (body.innerHTML = assistantAnswer(arg), bindAssistantLinks(body)); return; }
-  if (key === "summary")  { const s = matchNamedSubject(arg) || partialEntity(arg) || arg; body.innerHTML = blurbCard(s); bindAssistantLinks(body); return; }
-  if (key === "find")     { body.innerHTML = cmdFind(arg); bindAssistantLinks(body); return; }
-  if (key === "list")     { body.innerHTML = tryCommand("list all " + arg) || assistantAnswer(arg); bindAssistantLinks(body); return; }
-}
-function cmdFind(term) {
-  const hits = searchAll(term);
-  if (!hits.length) return `<div class="assistant-hint">No mentions of “${esc(term)}” in your canon yet.</div>`;
-  const list = hits.slice(0, 16).map(e => `<a class="assist-mention" href="#/entry/${e.id}">
-      <span class="am-t">${catDot(e.category)} ${esc(e.title)}</span>
-      <span class="am-s">${e.type === "gallery" ? (e.images.length + " images") : snippet(e.text, term.split(/\s+/)[0] || term, 150)}</span></a>`).join("");
-  const more = hits.length > 16 ? `<a class="btn ghost sm" href="#/search/${encodeURIComponent(term)}" style="margin-top:10px">See all ${hits.length} results →</a>` : "";
-  return `<div class="ans-answer"><div class="ans-a-label">${svg("search")} Found “${esc(term)}”</div>
-    <p class="ans-a-text" style="font-size:14px">${hits.length} ${hits.length === 1 ? "entry mentions" : "entries mention"} this.</p></div>
-    <div class="assist-section-title">Where it appears</div>${list}${more}`;
-}
-function cmdHelpHtml() {
-  return `<div class="assist-section-title">What I can do; type <b>/</b> anytime</div>
-    <div class="cmd-help-list">${ASSIST_CMDS.map(c => `<div class="cmd-help-row" data-ex="${esc(CMD_NEEDS_ARG.has(c.key) ? "/" + c.key + " " : "/" + c.key)}">
-      <div class="chr-key">/${esc(c.key)}${c.aliases.length ? ` <span class="faint" style="font-weight:400">or /${esc(c.aliases[0])}</span>` : ""}</div>
-      <div class="chr-hint">${esc(c.hint)}</div>
-      <div class="chr-ex">${esc(c.ex)}</div>
-    </div>`).join("")}</div>
-    <div class="ai-idle-note">${AI.on ? `✦ ${AI.label} is connected; /ask and /research write real answers.` : "Connect Gemini or DeepSeek in Settings so /ask and /research can reason for you."}</div>`;
-}
-function bindCmdHelp(root) {
-  $$(".cmd-help-row", root).forEach(el => el.onclick = () => {
-    const inp = $("#assistantInput"); inp.value = el.dataset.ex; inp.focus(); onAssistMenu(inp.value);
-    if (!/\s$/.test(inp.value)) execAssist(inp.value);
-  });
-}
-
-/* ---------- assistant recent-lookup history (per account) ---------- */
-const assistantHistory = {
-  get key() { return acctKey("codex.assistant.history"); },
+/* ---------- assistant recent-lookup history ---------- */
+const assistantHistory = { key: "codex.assistant.history",
   list() { try { return JSON.parse(localStorage.getItem(this.key) || "[]"); } catch (e) { return []; } },
   push(q) {
     const h = this.list().filter(x => x.toLowerCase() !== q.toLowerCase());
@@ -1652,7 +1591,7 @@ function tryCommand(q) {
   // strip trailing filler that isn't actually a topic; "how many houses ARE THERE", "characters DO I HAVE"
   after = after.replace(/\s*(are there|is there|do i have|does it have|exist|are in my canon|do you have|are in the canon|are there\?)\s*$/i, "").trim();
   const filterTerm = after;
-  let pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
+  let pool = aiEntries().filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (filterTerm) pool = pool.filter(e => e._hay.includes(filterTerm.toLowerCase()));
   pool = pool.sort((a, b) => a.title.localeCompare(b.title));
   const label = filterTerm ? `${kind.cat} in "${filterTerm}"` : kind.cat;
@@ -1662,56 +1601,22 @@ function tryCommand(q) {
 }
 
 /* ---------- opinion mode: "what's your favourite character" ---------- */
-const OPINION_TRIGGER = /\b(favou?rite|best|worst|least|coolest|most interesting|most powerful|most important|top)\b/i;
-const OPINION_NEGATIVE = /\b(least|worst|less)\b/i;
+const OPINION_TRIGGER = /\b(favou?rite|best|coolest|most interesting|most powerful|most important|top)\b/i;
 function tryOpinion(q) {
   if (!OPINION_TRIGGER.test(q)) return null;
   const kind = findKind(q);
   if (!kind) return null;
-  const pool = DB.entries.filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
+  const pool = aiEntries().filter(e => e.category === kind.cat && (e.type === "pdf" || e.type === "note"));
   if (!pool.length) return `<div class="assistant-hint">I don't have any ${esc(kind.label)} entries to pick from yet.</div>`;
-  const least = OPINION_NEGATIVE.test(q);
-  // Some categories are one-entry-per-item (66 separate Noble Houses, each
-  // its own entry) but others; Characters especially; are just a handful
-  // of huge source documents that each mention MANY individual names.
-  // Picking "the top entry" in that case surfaces a DOCUMENT TITLE
-  // ("Historical Figures") as if it were a person's name. When the pool
-  // doesn't look granular, scan the full (untruncated) text of every entry
-  // for recognized names instead, and pick one of those.
-  if (pool.length < 8) {
-    const nameCounts = {};
-    pool.forEach(e => entitiesIn(e.text).forEach(n => { nameCounts[n] = (nameCounts[n] || 0) + 1; }));
-    const names = Object.keys(nameCounts).sort((a, b) => least ? nameCounts[a] - nameCounts[b] : nameCounts[b] - nameCounts[a]);
-    if (names.length) {
-      const name = names[0];
-      const home = bestEntryFor(name) || pool[0];
-      const sents = topicSummary(name, 2);
-      const label = least ? "My pick for least central; going by who's least mentioned" : "My pick, going by who's most woven through your canon";
-      const reason = least
-        ? `Reasoning: <b>${esc(name)}</b> barely turns up across your ${esc(kind.label)} sources; the lightest footprint of anyone named there.`
-        : `Reasoning: <b>${esc(name)}</b> turns up ${nameCounts[name]} time${nameCounts[name] === 1 ? "" : "s"} across your ${esc(kind.label)} sources; more than anyone else mentioned there.`;
-      return `<div class="ans-label">${label}</div>
-        <div class="blurb">
-          <div class="bt">${catDot(home.category)} ${esc(name)}</div>
-          <div class="bs">${esc(sents.join(" ")) || ""}</div>
-          <div class="bl">${reason}</div>
-          <div style="margin-top:8px"><a class="btn sm" href="#/entry/${home.id}">Open source</a></div>
-        </div>`;
-    }
-  }
-  const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id).length + (e.wordcount || 0) / 200 }));
-  scored.sort((a, b) => least ? a.score - b.score : b.score - a.score);
+  const scored = pool.map(e => ({ e, score: mentionsOf(e.title, e.id, true).length + (e.wordcount || 0) / 200 }));
+  scored.sort((a, b) => b.score - a.score);
   const pick = scored[0].e;
   const sents = topicSummary(pick.title, 2);
-  const label = least ? "My pick for least central; going by what's least woven through your canon" : "My pick, going by what's most woven through your canon";
-  const reason = least
-    ? `Reasoning: <b>${esc(pick.title)}</b> barely turns up elsewhere in your canon; the lightest footprint of your ${esc(kind.label)} entries, for whatever that's worth.`
-    : `Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries; more cross-referenced than the rest of your ${esc(kind.label)} entries, which usually means it's load-bearing for the story.`;
-  return `<div class="ans-label">${label}</div>
+  return `<div class="ans-label">My pick, going by what's most woven through your canon</div>
     <div class="blurb">
       <div class="bt">${catDot(pick.category)} ${esc(pick.title)}</div>
       <div class="bs">${esc(sents.join(" ")) || esc(pick.summary || "")}</div>
-      <div class="bl">${reason}</div>
+      <div class="bl">Reasoning: <b>${esc(pick.title)}</b> turns up across ${scored[0].score >= 1 ? Math.round(scored[0].score) : "several"} other entries; more cross-referenced than the rest of your ${esc(kind.label)} entries, which usually means it's load-bearing for the story.</div>
       <div style="margin-top:8px"><a class="btn sm" href="#/entry/${pick.id}">Open entry</a></div>
     </div>`;
 }
@@ -1727,10 +1632,10 @@ function tryConsistency(q) {
   // happens to name-drop it in passing, which would compare apples to oranges
   const sl = subject.toLowerCase();
   const pool = subject
-    ? DB.entries.filter(e => (e.type === "pdf" || e.type === "note") &&
+    ? aiEntries().filter(e => (e.type === "pdf" || e.type === "note") &&
         (e.title.toLowerCase().includes(sl) ||
          ((e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") && e._hay.includes(sl))))
-    : DB.entries.filter(e => e.type === "pdf" || e.type === "note");
+    : aiEntries().filter(e => e.type === "pdf" || e.type === "note");
   const uniq = Array.from(new Set(pool)).filter(e => e && (e.type === "pdf" || e.type === "note")).slice(0, 40);
   if (!uniq.length) return `<div class="assistant-hint">I couldn't find anything to check${subject ? ` for "${esc(subject)}"` : ""}.</div>`;
   // gather every entry's own declared facts, grouped by fact key
@@ -1779,27 +1684,48 @@ function trySummarizeDoc(q) {
     </div>`;
 }
 
-function assistantLookup(q) {
+/* Works out an answer and hands back the pieces the rail needs to
+   frame it: the answer body, the entries it leaned on, a plain-English
+   grounding note, and follow-ups that are actually answerable.
+   Called with structured=false it keeps the old behaviour of writing
+   straight into the panel, which the in-document scanner still uses. */
+function assistantLookup(q, structured) {
   const body = $("#assistantBody");
   q = (q || "").trim();
-  if (!q) { assistantIdle(); return; }
+  if (!q) { if (!structured) assistantIdle(); return null; }
   assistantHistory.push(q);
-  const sum = trySummarizeDoc(q); if (sum) { body.innerHTML = sum; bindAssistantLinks(body); return; }
-  const con = tryConsistency(q); if (con) { body.innerHTML = con; bindAssistantLinks(body); return; }
-  const cmd = tryCommand(q); if (cmd) { body.innerHTML = cmd; bindAssistantLinks(body); return; }
-  const op = tryOpinion(q); if (op) { body.innerHTML = op; bindAssistantLinks(body); return; }
-  const named = matchNamedSubject(q) || partialEntity(q);
-  if (named) { body.innerHTML = blurbCard(named); bindAssistantLinks(body); return; }
-  // multi-word / question → synthesize an answer
-  if (q.split(/\s+/).length >= 2) { body.innerHTML = assistantAnswer(q); bindAssistantLinks(body); return; }
-  // single unknown word → try a search
-  const results = searchAll(q);
-  if (results.length) { body.innerHTML = assistantAnswer(q); bindAssistantLinks(body); return; }
-  body.innerHTML = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
+
+  let html = null;
+  // reports first: they are explicit commands, so they should win over a
+  // name that happens to look similar
+  const rep = tryReport(q); if (rep) html = rep;
+  if (!html) { const sum = trySummarizeDoc(q); if (sum) html = sum; }
+  if (!html) { const con = tryConsistency(q); if (con) html = con; }
+  if (!html) { const cmd = tryCommand(q); if (cmd) html = cmd; }
+  if (!html) { const op = tryOpinion(q); if (op) html = op; }
+  if (!html) {
+    const named = matchNamedSubject(q, true) || partialEntity(q, true);
+    if (named) html = blurbCard(named);
+  }
+  if (!html && q.split(/\s+/).length >= 2) html = assistantAnswer(q);
+  if (!html && searchAll(q, true).length) html = assistantAnswer(q);
+  if (!html) {
+    html = `<div class="assistant-hint">Nothing in your canon matches “${esc(q)}” yet.<br>Try a character, house, place, or a question.</div>`;
+  }
+
+  if (!structured) { body.innerHTML = html; bindAssistantLinks(body); return null; }
+
+  const hits = searchAll(q, true);
+  const sources = hits.slice(0, rail.length === "brief" ? 3 : 6);
+  const grounded = hits.length
+    ? `Grounded in ${hits.length} of your own ${hits.length === 1 ? "entry" : "entries"} · nothing invented`
+    : `No matching entries · nothing invented`;
+  return { html, sources, grounded, follows: followUpsFor(q, hits) };
 }
-function partialEntity(q) {
+function partialEntity(q, forAssistant) {
   const ql = q.toLowerCase();
-  const m = DB.entities.find(n => n.toLowerCase().includes(ql));
+  const blocked = forAssistant ? aiBlockedTitles() : null;
+  const m = DB.entities.find(n => n.toLowerCase().includes(ql) && !(blocked && blocked.has(n.toLowerCase())));
   return m || null;
 }
 const QUICK_ACTIONS = [
@@ -1809,28 +1735,287 @@ const QUICK_ACTIONS = [
   { label: "Check consistency", q: "check consistency" },
   { label: "Summarize this document", q: "summarize this document" },
 ];
+
+/* The slash commands the rail advertises. Each maps onto a phrasing
+   the parser above already understands, so the menu is a shortcut to
+   real behaviour rather than a second, parallel language. */
+const COMMANDS = [
+  { cmd: "/consistency", what: "Flag facts that disagree across entries", q: "check consistency" },
+  { cmd: "/summarize", what: "Brief on this entry or open document", q: "summarize this document" },
+  { cmd: "/who", what: "Everyone who appears in a subject", q: "who appears in ", open: true },
+  { cmd: "/list", what: "Live list; characters in a place, houses, dates", q: "list all ", open: true },
+  { cmd: "/namecheck", what: "Is this name already used?", q: "namecheck ", open: true },
+  { cmd: "/whereis", what: "Every entry that mentions a name", q: "whereis ", open: true },
+  { cmd: "/describe", what: "A blurb on any name in your canon", q: "describe ", open: true },
+  { cmd: "/orphans", what: "Entries nothing else refers to", q: "orphans" },
+  { cmd: "/unused", what: "Names indexed but used only once", q: "unused names" },
+  { cmd: "/longest", what: "Your biggest entries, by words", q: "longest entries" },
+  { cmd: "/recent", what: "What you touched most recently", q: "recent entries" },
+  { cmd: "/wordcount", what: "Words per collection, and the total", q: "wordcount" },
+];
+
+/* ---------- reports computed here, from your own entries ----------
+   Every one of these is arithmetic over what you have already written,
+   which is why they work with no key, no account and no network. They
+   are the questions a writer asks about the shape of a canon rather than
+   its contents: what is dangling, what did I only use once, where has
+   the weight gone. */
+const REPORT_TRIGGER = /^\s*(whereis|where is|describe|orphans?|unused names?|unused|longest( entries)?|recent( entries)?|wordcount|word count)\b/i;
+
+function tryReport(q) {
+  const m = REPORT_TRIGGER.exec(q);
+  if (!m) return null;
+  const head = m[1].toLowerCase().replace(/\s+/g, " ");
+  const arg = q.slice(m.index + m[0].length).replace(/^[\s:,-]+/, "").replace(/[?.!]+$/, "").trim();
+  const pool = aiEntries().filter(e => !e.namesOnly);
+
+  const chips = list => `<div class="recog">${list.map(e =>
+    `<a class="chip" href="#/entry/${e.id}">${esc(e.title)}</a>`).join("")}</div>`;
+  const rows = list => list.map(r => `<div class="glance-row"><span class="gk">${esc(r.k)}</span>
+    <span class="gv">${esc(r.v)}</span></div>`).join("");
+
+  if (head === "whereis" || head === "where is") {
+    if (!arg) return `<div class="assistant-hint">Give me a name: <b>/whereis Enyokia</b>.</div>`;
+    const hits = mentionsOf(arg, null, true);
+    if (!hits.length) return `<div class="assistant-hint">Nothing mentions “${esc(arg)}” yet.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">“${esc(arg)}” appears in ${hits.length}
+      ${hits.length === 1 ? "entry" : "entries"}</div>${chips(hits.slice(0, 40))}`;
+  }
+
+  if (head === "describe") {
+    if (!arg) return `<div class="assistant-hint">Give me a name: <b>/describe House Solis</b>.</div>`;
+    const named = matchNamedSubject(arg, true) || partialEntity(arg, true);
+    return named ? blurbCard(named)
+      : `<div class="assistant-hint">“${esc(arg)}” isn't a name I've indexed yet.</div>`;
+  }
+
+  if (head === "orphans" || head === "orphan") {
+    // nothing in the canon refers to these by title
+    const lonely = pool.filter(e => mentionsOf(e.title, e.id, true).length === 0);
+    if (!lonely.length) return `<div class="assistant-hint">Every entry is referred to somewhere else. Tidy canon.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">${lonely.length}
+      ${lonely.length === 1 ? "entry is" : "entries are"} never mentioned anywhere else</div>
+      ${chips(lonely.slice(0, 40))}
+      <div class="a-ground">Not a fault; a note can stand alone. It is where loose threads tend to hide.</div>`;
+  }
+
+  if (head === "unused" || head === "unused name" || head === "unused names") {
+    const once = DB.entities.filter(n => mentionsOf(n, null, true).length <= 1);
+    if (!once.length) return `<div class="assistant-hint">Every indexed name turns up more than once.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">${once.length}
+      ${once.length === 1 ? "name appears" : "names appear"} in only one place</div>
+      <div class="recog">${once.slice(0, 60).map(n =>
+        `<a class="chip" href="#/subject/${encodeURIComponent(n)}">${esc(n)}</a>`).join("")}</div>
+      <div class="a-ground">Either they are waiting for their scene, or they were a passing mention.</div>`;
+  }
+
+  if (head === "longest" || head === "longest entries") {
+    const top = pool.slice().sort((a, b) => (b.wordcount || 0) - (a.wordcount || 0)).slice(0, 12);
+    if (!top.length) return `<div class="assistant-hint">Nothing written yet.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">Your longest entries</div>
+      ${rows(top.map(e => ({ k: e.title, v: (e.wordcount || 0).toLocaleString() + " words" })))}`;
+  }
+
+  if (head === "recent" || head === "recent entries") {
+    const ids = (window.Codex && Codex.recentIds()) || [];
+    const seen = ids.map(id => byId[id]).filter(Boolean);
+    if (!seen.length) return `<div class="assistant-hint">Nothing opened yet this session.</div>`;
+    return `<div class="ans-label" style="margin-bottom:6px">What you opened most recently</div>${chips(seen)}`;
+  }
+
+  if (head === "wordcount" || head === "word count") {
+    const per = {};
+    pool.forEach(e => { per[e.category] = (per[e.category] || 0) + (e.wordcount || 0); });
+    const total = Object.keys(per).reduce((n, k) => n + per[k], 0);
+    if (!total) return `<div class="assistant-hint">Nothing written yet.</div>`;
+    const sorted = Object.keys(per).sort((a, b) => per[b] - per[a]);
+    return `<div class="ans-label" style="margin-bottom:6px">${total.toLocaleString()} words across
+      ${pool.length} entries</div>
+      ${rows(sorted.map(c => ({ k: c, v: per[c].toLocaleString() + " words" })))}`;
+  }
+  return null;
+}
+
+/* ---------- the rail's own state ---------- */
+const rail = { scope: "canon", length: "brief", turns: 0 };
+
 function assistantIdle() {
   const hist = assistantHistory.list();
-  const histHtml = hist.length ? `<div style="margin-top:14px">
-    <div class="sc-rel-label">Recent</div>
-    <div class="recog">${hist.map(h => `<span class="chip" data-recent="${esc(h)}">${esc(h)}</span>`).join("")}</div>
-  </div>` : "";
-  $("#assistantBody").innerHTML = `<div class="assistant-hint">
-    ${svg("spark")} I read only what <b>you've</b> written.<br><br>
-    Look up any name for an instant summary, ask a question in plain words, give me a task
-    ("list all characters in Aicruae"), ask my opinion ("favourite house"), check your canon for
-    contradictions, summarize the document you're writing, or open a Document and I'll recognise
-    names as you type.</div>
-    <div style="margin-top:14px">
-      <div class="sc-rel-label">Quick actions</div>
-      <div class="recog">${QUICK_ACTIONS.map(a => `<span class="chip" data-quick="${esc(a.q)}">${esc(a.label)}</span>`).join("")}</div>
-    </div>${histHtml}
-    <div class="ai-idle-note">${AI.on
-      ? `✦ <b>${esc(AI.label)} is connected.</b> Type a question and press <b>Enter</b> for a written, reasoned answer; grounded in your canon.`
-      : `Want real AI answers? <span class="ai-connect-link" id="aiConnectLink">Connect Gemini or DeepSeek</span> in Settings; then press <b>Enter</b> on any question.`}</div>`;
-  $$('[data-recent]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.recent; assistantLookup(c.dataset.recent); });
-  $$('[data-quick]', $("#assistantBody")).forEach(c => c.onclick = () => { $("#assistantInput").value = c.dataset.quick; assistantLookup(c.dataset.quick); });
-  const cl = $("#aiConnectLink"); if (cl) cl.onclick = () => { location.hash = "#/settings"; };
+  $("#assistantBody").innerHTML = `
+    <div class="assistant-hint">
+      I answer from your own entries and nothing else. Look up a name, ask a question in plain
+      words, give me a task, or type <b>/</b> for commands.
+    </div>
+    <div class="a-sect">
+      <div class="a-sect-k">Try one</div>
+      <div class="a-chiprow">${QUICK_ACTIONS.map(a =>
+        `<button class="follow-chip" data-quick="${esc(a.q)}">${esc(a.label)}</button>`).join("")}</div>
+    </div>
+    ${hist.length ? `<div class="a-sect">
+      <div class="a-sect-k">Recent lookups</div>
+      <div class="recent-list">${hist.map(h =>
+        `<button class="recent-row" data-recent="${esc(h)}"><span class="rr-glyph">✧</span>${esc(h)}</button>`).join("")}</div>
+    </div>` : ""}
+    ${luckyLedgerHtml()}`;
+  bindAssistantChips($("#assistantBody"));
+}
+
+/* Lucky's ledger, shown at the foot of the rail. Every number is a
+   real count; the mood line is his voice, not a claim. */
+function luckyLedgerHtml() {
+  if (!window.CodexLucky) return "";
+  const p = CodexLucky.persona();
+  return `<div class="lucky-ledger" data-skin="${esc(CodexLucky.skin())}">
+    <div class="ll-head">
+      <span class="k">${esc(CodexLucky.name())}'s journal</span>
+      <span class="hr"></span>
+      <span class="ll-mood">${esc(p.mood)}</span>
+    </div>
+    <div class="ll-grid">${CodexLucky.ledger().map(l =>
+      `<div><div class="ll-n">${l.n}</div><div class="ll-lab">${esc(l.label)}</div></div>`).join("")}</div>
+    <div class="ll-line">${esc(p.moodLine)}</div>
+  </div>`;
+}
+
+function bindAssistantChips(root) {
+  $$("[data-quick]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.quick));
+  $$("[data-recent]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.recent));
+  $$("[data-follow]", root).forEach(c => c.onclick = () => askAssistant(c.dataset.follow));
+}
+
+/* ---------- one question, one answer, appended as a turn ---------- */
+function askAssistant(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  const input = $("#assistantInput");
+  if (input) input.value = "";
+  hideCommands();
+  const body = $("#assistantBody");
+  if (!rail.turns) body.innerHTML = "";
+  rail.turns++;
+
+  const answer = assistantLookup(q, true);
+  const turn = document.createElement("div");
+  turn.className = "a-turn";
+  turn.innerHTML = `
+    <div class="a-you">${esc(q)}</div>
+    <div class="a-them">
+      ${answer.html}
+      ${answer.sources.length ? `<div class="a-cites">${answer.sources.map((s, i) =>
+        `<a class="a-cite" href="#/entry/${encodeURIComponent(s.id)}">
+          <span class="ac-n">${i + 1}</span>
+          <span class="ac-body"><span class="ac-title">${esc(s.title)}</span>
+          <span class="ac-quote">${snippet(s._hay || s.body || "", q, 110) || esc(s.category)}</span></span></a>`).join("")}</div>` : ""}
+      <div class="a-actions">
+        <button class="a-act" data-act="copy">Copy</button>
+        <button class="a-act" data-act="insert">Insert into document</button>
+        <button class="a-act" data-act="read">Read aloud</button>
+      </div>
+      <div class="a-ground">${answer.grounded}</div>
+    </div>
+    ${answer.follows.length ? `<div class="a-follows">
+      <div class="a-sect-k">Ask next</div>
+      ${answer.follows.map(f => `<button class="follow-chip wide" data-follow="${esc(f)}">${esc(f)}</button>`).join("")}
+    </div>` : ""}`;
+  body.appendChild(turn);
+  bindAssistantLinks(turn);
+  bindAssistantChips(turn);
+  bindAnswerActions(turn);
+  turn.scrollIntoView({ block: "start", behavior: "smooth" });
+
+  // With a model connected, the on-device answer above is shown at once
+  // and then reasoned over: same retrieval, same citations, better prose.
+  // The local answer is never thrown away, so a failure downgrades
+  // instead of breaking.
+  if (window.CodexAI && CodexAI.on()) enrichWithModel(turn, q, answer);
+}
+
+/* ---------- the model pass ---------- */
+async function enrichWithModel(turn, q, local) {
+  const them = turn.querySelector(".a-them");
+  if (!them) return;
+  const pending = document.createElement("div");
+  pending.className = "a-model pending";
+  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
+    <span class="am-who">${esc(CodexAI.label())}</span>
+    <span class="am-state">reading your entries…</span></div>`;
+  them.insertBefore(pending, them.querySelector(".a-actions"));
+
+  const r = await CodexAI.ask(q, local.sources || []);
+  if (!turn.isConnected) return;                  // thread was cleared mid-flight
+
+  if (!r.ok) {
+    pending.className = "a-model failed";
+    pending.innerHTML = `<div class="am-head"><span class="am-glyph">✧</span>
+      <span class="am-who">${esc(CodexAI.label())} could not answer</span></div>
+      <div class="am-why">${esc(r.why)} The answer above was worked out on this device instead.</div>`;
+    return;
+  }
+  pending.className = "a-model";
+  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
+    <span class="am-who">${esc(r.model || CodexAI.label())}</span>
+    <span class="am-state">from ${r.sent} of your entries</span></div>
+    <div class="am-text">${esc(r.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
+      .replace(/^/, "<p>").replace(/$/, "</p>")}</div>`;
+  // the local answer stays, folded away, so you can always compare
+  const localBlock = them.querySelector(".a-local-wrap");
+  if (!localBlock) {
+    const parts = Array.from(them.children).filter(el =>
+      !el.classList.contains("a-model") && !el.classList.contains("a-actions") &&
+      !el.classList.contains("a-cites") && !el.classList.contains("a-ground"));
+    if (parts.length) {
+      const wrap = document.createElement("details");
+      wrap.className = "a-local-wrap";
+      const sum = document.createElement("summary");
+      sum.textContent = "What this device found on its own";
+      wrap.appendChild(sum);
+      parts.forEach(p => wrap.appendChild(p));
+      them.insertBefore(wrap, pending);
+    }
+  }
+}
+
+function bindAnswerActions(turn) {
+  const text = () => (turn.querySelector(".a-them").innerText || "").trim();
+  $$("[data-act]", turn).forEach(b => b.onclick = () => {
+    const act = b.dataset.act;
+    if (act === "copy") {
+      navigator.clipboard ? navigator.clipboard.writeText(text()).then(() => toast("Answer copied")) : toast("Copying isn't available here");
+    } else if (act === "insert") {
+      const ed = document.getElementById("docEditor");
+      if (!ed) return toast("Open a document first, then insert.");
+      ed.focus();
+      document.execCommand("insertText", false, text());
+      toast("Inserted into your document");
+    } else if (act === "read") {
+      window.CodexSpeech ? CodexSpeech.read(text()) : toast("Read-aloud isn't available here");
+    }
+  });
+}
+
+/* Follow-ups have to be answerable, so they are built from what the
+   answer actually found rather than from a fixed list. Imported
+   entries can carry very long headline-ish titles, which make an
+   unreadable question; only a short, name-like subject is used. */
+function followUpsFor(q, sources) {
+  const out = [];
+  const subj = usableSubject(matchNamedSubject(q, true)) ||
+               // the first result whose title is short enough to read as a name
+               (sources.map(s => usableSubject(s.title)).filter(Boolean)[0] || null);
+  if (subj) {
+    out.push(`Who appears alongside ${subj}?`);
+    out.push(`Check consistency for ${subj}`);
+  }
+  if (!/consistency/i.test(q)) out.push("Check my canon for contradictions");
+  if (!/\bcharacters?\b/i.test(q)) out.push("List all characters");
+  if (!/\bhouses?\b/i.test(q)) out.push("List all noble houses");
+  if (document.getElementById("docEditor")) out.push("Summarize this document");
+  return out.slice(0, 3);
+}
+function usableSubject(s) {
+  s = (s || "").trim();
+  if (!s || s.length > 34 || s.split(/\s+/).length > 4) return null;
+  return s;
 }
 function assistantScan(text) {
   const found = [], seen = new Set();
@@ -1847,8 +2032,95 @@ function assistantScan(text) {
 function bindAssistantLinks(root) {
   $$(".chip[data-subject]", root).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject));
 }
-window.CodexAssistant = { scan: assistantScan, lookup: assistantLookup, open: openAssistant };
-function openAssistant() { $("#app").classList.add("assist-open"); $("#assistant").hidden = false; }
+
+/* ---------- the slash-command menu ---------- */
+function showCommands(typed) {
+  const menu = $("#assistantCommands");
+  const term = typed.slice(1).toLowerCase();
+  const hits = COMMANDS.filter(c => c.cmd.slice(1).startsWith(term));
+  if (!hits.length) return hideCommands();
+  menu.hidden = false;
+  menu.innerHTML = `<div class="ac-head">Commands</div>` + hits.map((c, i) =>
+    `<button class="ac-row${i === 0 ? " on" : ""}" data-cmd="${esc(c.cmd)}">
+      <span class="ac-cmd">${esc(c.cmd)}</span><span class="ac-what">${esc(c.what)}</span></button>`).join("");
+  $$("[data-cmd]", menu).forEach(b => b.onclick = () => pickCommand(b.dataset.cmd));
+}
+function hideCommands() { const m = $("#assistantCommands"); if (m) { m.hidden = true; m.innerHTML = ""; } }
+
+/* A command that needs a subject leaves the input primed and waiting
+   rather than firing a half-formed question. */
+function pickCommand(cmd) {
+  const c = COMMANDS.find(x => x.cmd === cmd);
+  if (!c) return;
+  hideCommands();
+  const input = $("#assistantInput");
+  if (c.open) { input.value = c.q; input.focus(); return; }
+  askAssistant(c.q);
+}
+
+/* Enter either completes a bare command or asks the question as typed. */
+function runAssistantInput(v) {
+  v = (v || "").trim();
+  if (!v) return;
+  if (v.startsWith("/")) {
+    const exact = COMMANDS.find(c => v === c.cmd);
+    if (exact) return pickCommand(exact.cmd);
+    const partial = COMMANDS.find(c => v.startsWith(c.cmd + " "));
+    if (partial) return askAssistant(partial.q.trim() + " " + v.slice(partial.cmd.length).trim());
+    const first = COMMANDS.find(c => c.cmd.startsWith(v));
+    if (first) return pickCommand(first.cmd);
+  }
+  askAssistant(v);
+}
+
+/* The context pill: what the assistant is looking at right now. */
+function setAssistantContext(label, href) {
+  const el = $("#assistantContext");
+  if (!el) return;
+  if (!label) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="ctx-glyph">❖</span>
+    <span class="ctx-text">Reading <a href="${href || "#"}">${esc(label)}</a></span>
+    <button class="ctx-x" title="Stop using this as context">✕</button>`;
+  el.querySelector(".ctx-x").onclick = () => setAssistantContext(null);
+}
+/* The chip is the app's claim about where answers come from, so it is
+   derived from the live setting rather than written once into the HTML. */
+function refreshModelChip() {
+  const chip = $("#assistantModel"), name = $("#assistantModelName");
+  if (!chip || !name) return;
+  const ai = window.CodexAI;
+  const live = ai && ai.on();
+  name.textContent = ai ? ai.label() : "On device";
+  chip.classList.toggle("live", !!live);
+  chip.title = live
+    ? "Your matching entries are sent to " + ai.state().providerLabel +
+      " to answer. You are billed by them. Change this in Settings, Assistant."
+    : "Answers are worked out in this browser from your own entries. Nothing is sent anywhere.";
+}
+
+window.CodexAssistant = { scan: assistantScan, lookup: assistantLookup, open: openAssistant,
+  ask: askAssistant, context: setAssistantContext, refreshModelChip };
+function openAssistant() {
+  $("#app").classList.add("assist-open");
+  $("#assistant").hidden = false;
+  refreshModelChip();
+  // the header portrait is Lucky's, so it has to follow his chosen coat
+  const face = $("#assistantFace");
+  if (face && window.CodexLucky) {
+    face.setAttribute("data-skin", CodexLucky.skin());
+    face.innerHTML = CodexLucky.face(30);
+    $("#assistantName").textContent = CodexLucky.name();
+  }
+  // the ledger counts pets and entries, both of which move while the
+  // rail is closed, so an untouched thread is re-rendered on open
+  if (!rail.turns) {
+    if (window.CodexLucky) CodexLucky.refreshFacts().then(assistantIdle);
+    else assistantIdle();
+  }
+  const input = $("#assistantInput");
+  if (input) setTimeout(() => input.focus(), 60);
+}
 function closeAssistant() { $("#app").classList.remove("assist-open"); $("#assistant").hidden = true; }
 
 /* ============================================================
@@ -1859,14 +2131,26 @@ async function backupAll() {
   if (window.CodexStore) data = await CodexStore.exportAll();
   else { data = { _codex: true, stores: {} }; }
   data._codex = true;
-  // include tiny localStorage prefs too
-  // include tiny localStorage prefs, but NEVER the private AI key
-  data.prefs = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("codex.") && k !== "codex.aiKey") data.prefs[k] = localStorage.getItem(k); }
+  /* Include the small localStorage prefs too; but NEVER a credential.
+     A backup is the one file that leaves this machine: it gets emailed to
+     yourself, dropped in cloud storage, kept for years. An API key inside
+     it is a live secret in all of those places, so the AI settings are
+     skipped outright rather than filtered field by field. */
+  const SECRET_KEYS = [window.CodexAI ? CodexAI.STORAGE_KEY : "codex.ai"];
+  data.prefs = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith("codex.")) continue;
+    if (SECRET_KEYS.indexOf(k) > -1) continue;
+    data.prefs[k] = localStorage.getItem(k);
+  }
+  data._skipped = "AI provider settings and API key are never included in a backup.";
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "world-without-god-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.download = "beep-beep-backup-" + new Date().toISOString().slice(0, 10) + ".json";
   a.click();
+  window.CodexHelp && CodexHelp.markMilestone("backup");
   toast("Backup downloaded");
 }
 function restoreAll() {
@@ -1892,28 +2176,132 @@ function restoreAll() {
   inp.click();
 }
 
-/* ---------- toast ---------- */
-let toastT;
+/* ---------- toast ----------
+   Bottom-right gold-framed panel with a ✦ glyph, ~5s auto-dismiss and a
+   manual ✕. Toasts stack rather than replacing one another, so a burst
+   (e.g. importing several files) doesn't swallow all but the last. */
 function toast(msg) {
-  let el = $("#toast");
-  if (!el) { el = document.createElement("div"); el.id = "toast";
-    el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:20px;font-size:13px;z-index:300;box-shadow:var(--shadow);transition:opacity .3s";
-    document.body.appendChild(el); }
-  el.textContent = msg; el.style.opacity = "1";
-  clearTimeout(toastT); toastT = setTimeout(() => el.style.opacity = "0", 1800);
+  let stack = $("#toastStack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "toastStack"; stack.className = "toast-stack";
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = `<span class="tglyph">✦</span><span class="tmsg"></span>
+    <button class="tx" title="Dismiss" aria-label="Dismiss">✕</button>`;
+  el.querySelector(".tmsg").textContent = msg;   // textContent: messages can carry user text
+  let done = false;
+  const dismiss = () => {
+    if (done) return; done = true;
+    clearTimeout(t);
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 260);
+  };
+  el.querySelector(".tx").onclick = dismiss;
+  const t = setTimeout(dismiss, 5000);
+  stack.appendChild(el);
+  // keep the stack from growing without bound in a long burst
+  while (stack.children.length > 4) stack.firstChild.remove();
 }
 window.toast = toast;
 
 /* ============================================================
    ROUTER
    ============================================================ */
+/* ============================================================
+   THE COMMUNITY SPACE
+   A separate place with its own home, its own sections, and one door
+   back to the workspace. Everything outward-facing lives here.
+   ============================================================ */
+const SPACE_ROUTES = ["space", "work", "community"];
+function inSpace(hash) {
+  const h = hash || location.hash || "#/";
+  const path = h.replace(/^#\//, "").split("/")[0];
+  return SPACE_ROUTES.indexOf(path) > -1;
+}
+function buildSpaceNav(nav) {
+  const here = (location.hash || "").replace(/^#\//, "").split("/")[0];
+  const item = (route, icon, label, match) =>
+    `<div class="nav-item${here === (match || route.replace(/^#\//, "").split("/")[0]) ? " active" : ""}"
+       data-route="${route}">${svg(icon)}<span>${label}</span></div>`;
+  const name = window.CodexWorkspaces ? CodexWorkspaces.current().name : "your workspace";
+
+  nav.innerHTML = `
+    <button class="space-back" id="spaceBack">
+      <span class="sb-arrow">←</span>
+      <span class="sb-text"><span class="sb-k">Return to</span>
+      <span class="sb-n">${esc(name)}</span></span>
+    </button>
+
+    <div class="ws-card space-card">
+      <div class="legend">You are in</div>
+      <div class="name">Community Space</div>
+      <div class="meta">Publishing &amp; readers</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">The Space</div></div>
+      ${item("#/space", "home", "Space home")}
+      ${item("#/work", "book", "My Works")}
+      ${item("#/community", "people", "Reading Room")}
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Your shelf</div></div>
+      <div class="nav-item" data-route="#/community/shelf">${svg("read")}<span>Saved to read</span></div>
+      <div class="nav-item" data-route="#/community/chat">${svg("people")}<span>Notes &amp; replies</span></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-title-row"><div class="nav-title">Account</div></div>
+      <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
+    </div>
+
+    <div class="nav-section">
+      <div class="ornament" style="margin-top:20px">✦✧✦</div>
+    </div>`;
+
+  $$("#nav .nav-item[data-route]").forEach(el =>
+    el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
+  const back = $("#spaceBack");
+  if (back) back.onclick = () => { location.hash = "#/"; };
+}
+
+/* Every navigation gets a number. Views that finish rendering
+   asynchronously; the Desk reads the day log, the editor reads a
+   document; must check they are still the page the user is on before
+   writing to #view. Without this, a slow view that has been navigated
+   away from lands anyway and paints over whatever replaced it: creating
+   a note dropped you on the Desk, because the Desk render started, the
+   note page drew synchronously, and then the Desk arrived late and won. */
+let routeGen = 0;
+function currentGen() { return routeGen; }
+function isStale(gen) { return gen !== routeGen; }
+
 function route() {
+  routeGen++;
   const h = location.hash || "#/";
+  // a reading link is somebody else's view of one work: no sidebar,
+  // no assistant, none of the workspace furniture
+  // Lucky's stage is a child of <body>, not of #app, so the reader-mode
+  // class has to be on both for him to be hidden from a reading link.
+  const reader = h.startsWith("#/shared/");
+  document.getElementById("app").classList.toggle("reader-mode", reader);
+  document.body.classList.toggle("reader-mode", reader);
+  // entering or leaving the Space swaps the whole left rail
+  const space = inSpace(h);
+  const app = document.getElementById("app");
+  if (space !== app.classList.contains("space-mode")) {
+    app.classList.toggle("space-mode", space);
+    buildNav();
+  }
   const parts = h.replace(/^#\//, "").split("/");
   const path = parts[0];
   const arg = decodeURIComponent(parts.slice(1).join("/") || "");
   view.scrollTop = 0;
-  if (h === "#/" || path === "") viewHome();
+  if (h === "#/" || path === "") viewDesk();
   else if (path === "browse") viewBrowse(arg);
   else if (path === "entry") viewEntry(parts[1]);
   else if (path === "subject") viewSubject(arg);
@@ -1921,9 +2309,6 @@ function route() {
   else if (path === "maps") viewMaps();
   else if (path === "index") viewIndex();
   else if (path === "import") viewImport();
-  else if (path === "library") window.CodexLibrary && CodexLibrary.list();
-  else if (path === "story") window.CodexLibrary && CodexLibrary.story(parts[1]);
-  else if (path === "read") window.CodexLibrary && CodexLibrary.read(parts[1], parts[2]);
   else if (path === "docs") window.CodexEditor && CodexEditor.list(parts[1] || null);
   else if (path === "doc") window.CodexEditor && CodexEditor.open(parts[1]);
   else if (path === "slides") window.CodexEditor && CodexEditor.deckList(parts[1] || null);
@@ -1936,12 +2321,22 @@ function route() {
   else if (path === "sheet") window.CodexSheets && CodexSheets.open(parts[1]);
   else if (path === "study") window.CodexStudy && CodexStudy.view();
   else if (path === "timeline") window.CodexTimeline && CodexTimeline.view();
+  else if (path === "help") window.CodexHelp && CodexHelp.view();
+  else if (path === "read") window.CodexPages && CodexPages.read(parts[1] || "");
+  else if (path === "space") window.CodexCommunity && CodexCommunity.spaceHome();
+  else if (path === "work") window.CodexPublish && CodexPublish.work(parts[1] || "");
+  else if (path === "community") window.CodexCommunity && CodexCommunity.view(parts[1] || "");
+  else if (path === "shared") window.CodexPublish && CodexPublish.shared(parts[1] || "");
+  else if (path === "history") window.CodexPages && CodexPages.history(parts[1] || "");
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
   else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
-  else viewHome();
+  else viewDesk();
   markActive();
 }
+/* The Desk is the home screen; viewHome is the pre-Desk fallback, kept so a
+   missing desk.js degrades to a working page rather than a blank one. */
+function viewDesk() { window.CodexDesk ? CodexDesk.view() : viewHome(); }
 
 /* ============================================================
    INIT
@@ -1953,20 +2348,56 @@ function collapseSidebar(force) {
   else app.classList.toggle("sidebar-collapsed");
 }
 
+/* Below 860px the sidebar is an overlay drawer, so leaving it open on a
+   narrow screen would bury the page behind it. Start it closed there, and
+   close it again whenever a nav link is followed. */
+function isNarrow() { return window.matchMedia("(max-width:860px)").matches; }
+
+/* Something failed during start-up. Say so where it can be seen and
+   copied, rather than leaving a blank page and no explanation. The
+   app carries on around it wherever it can. */
+const bootProblems = [];
+function bootTrouble(doing, err) {
+  const detail = (err && (err.stack || err.message)) || String(err);
+  bootProblems.push({ doing, detail });
+  try { console.error("Beep Beep Organizer; trouble " + doing + ":", err); } catch (e) {}
+  let bar = document.getElementById("bootTrouble");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "bootTrouble";
+    bar.className = "boot-trouble";
+    document.body.appendChild(bar);
+  }
+  const first = bootProblems[0];
+  bar.innerHTML = `
+    <div class="bt-body">
+      <strong>Something went wrong ${esc(first.doing)}.</strong>
+      Your writing is safe; this is a display problem, not a data one.
+      <code>${esc(String(first.detail).split("\n")[0].slice(0, 200))}</code>
+    </div>
+    <div class="bt-acts">
+      <button class="btn ghost sm" id="btCopy">Copy details</button>
+      <button class="btn ghost sm" id="btReload">Reload</button>
+      <button class="btn ghost sm" id="btHide">Dismiss</button>
+    </div>`;
+  bar.querySelector("#btCopy").onclick = () => {
+    const text = bootProblems.map(p => "While " + p.doing + ":\n" + p.detail).join("\n\n")
+      + "\n\nPage: " + location.href + "\nBrowser: " + navigator.userAgent;
+    navigator.clipboard ? navigator.clipboard.writeText(text).then(() => toast("Details copied; paste them to me"))
+      : window.prompt("Copy this:", text);
+  };
+  bar.querySelector("#btReload").onclick = () => location.reload();
+  bar.querySelector("#btHide").onclick = () => bar.remove();
+}
+
 async function init() {
-  // IndexedDB can in principle stall waiting on another open tab (a
-  // versionchange request blocks behind a stale connection that's slow to
-  // close); openDB()/Extra.ready() are written to always resolve, but never
-  // trust a storage layer to leave the user staring at "Opening..." forever.
-  // A hard timeout guarantees the UI unblocks either way; if storage was
-  // just slow rather than actually stuck, it finishes in the background and
-  // refresh() picks up the real data once it lands.
-  const storageInit = (async () => {
+  if (isNarrow()) collapseSidebar(true);
+  try {
     if (window.CodexStore) {
-      // a cloud account's first open on this device: pull the whole account
-      // down from the cloud before anything reads local storage
-      if (window.CodexCloud && CodexCloud.needsBootstrap()) {
-        try { await CodexCloud.bootstrapIfNeeded(); } catch (e) {}
+      // a cloud account's first open on this device: adopt its workspaces
+      // from the cloud (or seed the starter template) before anything reads
+      if (window.CodexAccount && CodexAccount.ensureCloudSpace) {
+        try { await CodexAccount.ensureCloudSpace(); } catch (e) {}
       }
       // if the last-active workspace isn't the default one, redirect storage
       // to that workspace's own isolated database before loading anything
@@ -1975,35 +2406,35 @@ async function init() {
       else await CodexStore.ready;
       // a brand-new account's first open: replicate the starter template
       // into their workspace before anything reads from it
-      if (window.CodexAccount) {
+      if (window.CodexAccount && CodexAccount.ensureTemplate) {
         const seeded = await CodexAccount.ensureTemplate();
-        if (seeded) toast("Welcome! Your starter workspace is ready; everything in it is yours to edit.");
+        if (seeded && window.toast) toast("Welcome! Your starter workspace is ready; everything in it is yours to edit.");
       }
       await loadNotes();
     }
     if (window.CodexExtra) await CodexExtra.ready();
-  })();
-  let timedOut = false;
-  try {
-    await Promise.race([
-      storageInit,
-      new Promise(resolve => setTimeout(() => { timedOut = true; resolve(); }, 6000)),
-    ]);
-  } catch (e) { /* non-fatal */ }
-  buildIndexes();
-  buildNav();
-  if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel();
+    // the sidebar's Projects section renders from this cache
+    if (window.CodexFolders) await CodexFolders.ensureCache(true);
+  } catch (e) { bootTrouble("loading your work", e); }
+
+  // Each of these is fenced off on its own. A fault in one must not
+  // leave the whole shell sitting on "Opening…" with an empty sidebar,
+  // which is exactly what used to happen.
+  try { buildIndexes(); } catch (e) { bootTrouble("indexing your canon", e); }
+  try { buildNav(); } catch (e) { bootTrouble("building the sidebar", e); }
+  try { if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel(); } catch (e) {}
+
+  // Cleared unconditionally: whatever else went wrong, the app is as
+  // ready as it is going to get and the person needs to see it.
   $("#app").classList.remove("loading");
-  route();
-  window.addEventListener("hashchange", route);
-  if (window.CodexCloud) CodexCloud.start();
-  if (timedOut) {
-    toast("Still finishing loading your data; if it doesn't appear shortly, close any other tabs of this site and refresh.");
-    storageInit.then(() => refresh()).catch(() => {});
-  }
+
+  try { route(); } catch (e) { bootTrouble("opening that page", e); }
+  window.addEventListener("hashchange", () => {
+    try { route(); } catch (e) { bootTrouble("opening that page", e); }
+  });
 
   if ($("#wsSwitchOpen")) $("#wsSwitchOpen").onclick = () => window.CodexWorkspaces && CodexWorkspaces.openSwitcher();
-  if (window.CodexAccount) CodexAccount.mountChip();
+  if (window.CodexAccount && CodexAccount.mountChip) { try { CodexAccount.mountChip(); } catch (e) {} }
 
   const savedTheme = localStorage.getItem("codex.theme");
   if (savedTheme) document.documentElement.dataset.theme = savedTheme;
@@ -2011,20 +2442,20 @@ async function init() {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     localStorage.setItem("codex.theme", t);
-    // A custom background/text colour is an inline override that hides the light/dark switch.
-    // Clear those overrides so the toggle always visibly works (custom accent is kept).
-    const ex = window.CodexExtra;
-    if (ex && ex.settings && (ex.settings.bg || ex.settings.inkColor)) {
-      ex.settings.bg = ""; ex.settings.inkColor = "";
-      localStorage.setItem(acctKey("codex.settings"), JSON.stringify(ex.settings));
-      if (window.CodexUI && CodexUI.applySettings) CodexUI.applySettings(ex.settings);
-      toast(`${t === "dark" ? "Dark" : "Light"} mode; custom background cleared (re-pick it in Settings if you want it)`);
-    } else {
-      toast(t === "dark" ? "Dark mode" : "Light mode");
-    }
+    // Colour tokens partly come from inline styles on :root, which outrank
+    // the stylesheet's theme block; so flipping the attribute alone left
+    // half the palette belonging to the theme we just left.
+    if (window.CodexSettings && CodexSettings.reapply) CodexSettings.reapply();
   };
 
   $("#sidebarToggle").onclick = () => collapseSidebar();
+  // crossing the 860px boundary changes the sidebar from a column into an
+  // overlay, so its open/closed default has to change with it
+  let wasNarrow = isNarrow();
+  window.addEventListener("resize", () => {
+    const now = isNarrow();
+    if (now !== wasNarrow) { wasNarrow = now; collapseSidebar(now); }
+  });
   if (innerWidth < 860) collapseSidebar(true);
 
   // export menu
@@ -2043,20 +2474,39 @@ async function init() {
 
   $("#assistantToggle").onclick = () => $("#assistant").hidden ? openAssistant() : closeAssistant();
   $("#assistantClose").onclick = closeAssistant;
+  $("#assistantNew").onclick = () => { rail.turns = 0; assistantIdle(); $("#assistantInput").focus(); };
+  $("#assistantHistory").onclick = () => { rail.turns = 0; assistantIdle(); };
+  $("#assistantScope").onclick = () => {
+    rail.scope = rail.scope === "canon" ? "everything" : "canon";
+    $("#assistantScope").textContent = (rail.scope === "canon" ? "Canon only" : "Canon + notes") + " ▾";
+    toast(rail.scope === "canon" ? "Reading canon entries only" : "Reading canon entries and your notes");
+  };
+  $("#assistantLength").onclick = () => {
+    rail.length = rail.length === "brief" ? "full" : "brief";
+    $("#assistantLength").textContent = (rail.length === "brief" ? "Brief" : "Full") + " ▾";
+  };
+  $("#assistantDictate").onclick = () => {
+    if (!window.CodexSpeech || !CodexSpeech.dictate) return toast("Dictation isn't supported in this browser");
+    const btn = $("#assistantDictate");
+    btn.classList.add("on");
+    CodexSpeech.dictate(
+      text => { const i = $("#assistantInput"); i.value = (i.value + " " + text).trim(); },
+      () => btn.classList.remove("on"));
+  };
   assistantIdle();
-  // keystrokes: show the "/" hotbar instantly, and preview local lookups; but never
-  // fire a command or an AI call on keystroke. Enter (or picking a command) runs it.
-  $("#assistantInput").addEventListener("input", e => {
-    const v = e.target.value;
-    onAssistMenu(v);
-    clearTimeout(assistLookupTimer);
-    if (v.startsWith("/")) return;                 // commands wait for Enter
-    assistLookupTimer = setTimeout(() => assistantLookup(v), 160); // free, instant local preview
+
+  const ai = $("#assistantInput");
+  ai.addEventListener("input", () => {
+    const v = ai.value;
+    if (v.startsWith("/")) showCommands(v); else hideCommands();
   });
-  $("#assistantInput").addEventListener("keydown", onAssistKeydown);
-  $("#assistantInput").addEventListener("blur", () => setTimeout(hideCmdMenu, 150));
+  ai.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); runAssistantInput(ai.value); }
+    if (e.key === "Escape") hideCommands();
+  });
 
   $("#searchOpen").onclick = () => openSearch("");
+  $("#searchEsc").onclick = closeSearch;
   const si = $("#searchInput"); let sT;
   si.addEventListener("input", () => { clearTimeout(sT); sT = setTimeout(() => renderSearch(si.value), 90); });
   si.addEventListener("keydown", e => {
@@ -2080,9 +2530,27 @@ async function init() {
 function scrollSel() { const el = $$(".sr-item")[searchSel]; if (el) el.scrollIntoView({ block: "nearest" }); }
 function isEditing(t) { return t && (t.isContentEditable || /input|textarea/i.test(t.tagName)); }
 
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+/* A last line of defence: if init itself dies, or a script that runs
+   after it throws, the shell must still come out of its loading state. */
+window.addEventListener("error", e => {
+  const app = $("#app");
+  if (app && app.classList.contains("loading")) {
+    app.classList.remove("loading");
+    bootTrouble("starting up", e.error || e.message);
+  }
+});
+function boot() {
+  init().catch(e => {
+    const app = $("#app");
+    if (app) app.classList.remove("loading");
+    bootTrouble("starting up", e);
+  });
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else init();
 
 async function reloadWorkspace() { await loadNotes(); refresh(); }
-window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, deleteCustomSection, hideBuiltinSection, CANON_ORDER };
+window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot,
+  recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll,
+  currentGen, isStale };
 })();

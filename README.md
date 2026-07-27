@@ -101,14 +101,11 @@ can open from any device:
   Images/links/videos/drawings can carry a **caption** describing what they are and
   how the assistant should use them. Any text you write on a canvas is picked up by
   search and the assistant, the same as a document.
-- **Library & Stories** (Wattpad/AO3-style); gather documents into **stories**
-  with ordered chapters, a **cover**, a blurb, **tags**, and a status
-  (Draft / Ongoing / Completed). Every story opens in a clean, bookish **reader**
-  with adjustable text size, reading themes (paper, sepia, dark, night), a
-  progress bar, and it **remembers exactly where you left off**; "Continue
-  reading" on the Home page and in the Library takes you straight back.
-  **Publish as webpage** exports the whole story as one self-contained HTML file
-  you can send to anyone or host anywhere; it reads well on phones and tablets.
+- **Books & Read Through** (Wattpad/AO3-style); write chapters in **Books**,
+  keep them in the order you choose, and read them like a reader would in
+  **Read Through**. Publishing and the **Community Space** let readers follow
+  along and leave comments, and share links give a read-only view to people
+  with no account at all.
 - **Projects (folders)**; file Documents, Decks, and Canvases under a project so
   several books/worlds stay untangled.
 - **Import & Add Lore**; drag in **PDFs** (both the text *and* the page images
@@ -218,7 +215,7 @@ local copy too, so the app opens instantly and works offline either way.
 
 ## Cloud accounts: real cross-device sync (Supabase)
 
-When `site/data/cloud-config.js` holds a Supabase project's URL and anon key,
+When `site/js/cloud-config.js` holds a Supabase project's URL and public key,
 the sign-in screen offers **cloud accounts**: email + password, and everything
 the user writes syncs to their account. Sign in on a laptop, an iPad, or a
 phone and the same workspaces, documents, and stories are there. It's
@@ -232,14 +229,14 @@ One-time setup for the project owner:
 1. Create a free project at supabase.com.
 2. Open the project's **SQL Editor**, paste the whole of
    [`supabase/schema.sql`](supabase/schema.sql), and click **Run**. This
-   creates the two tables and the row-level security rules that keep every
-   user's data private to them.
+   creates the tables and the row-level security rules that keep every
+   user's data private to them (see `supabase/README.md` for details).
 3. (Recommended) **Authentication > Sign In / Providers > Email**: turn off
    "Confirm email" so new users can start instantly. If you keep it on, set
    **Authentication > URL Configuration > Site URL** to the live site so the
    confirmation link lands somewhere sensible.
-4. Put the project URL and anon key in `site/data/cloud-config.js` (already
-   done for this repo). The anon key is public by design; the `service_role`
+4. Put the project URL and public key in `site/js/cloud-config.js` (already
+   done for this repo). That key is public by design; the `service_role`
    key must never ship in the site.
 
 Device-only accounts and guest mode keep working exactly as before; cloud is
