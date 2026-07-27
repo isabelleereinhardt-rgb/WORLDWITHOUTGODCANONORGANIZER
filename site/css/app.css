@@ -1741,3 +1741,29 @@ body.reader-mode .lucky-stage{display:none}
   border-radius:2px;padding:8px 10px;color:var(--ink);font-size:14.5px;font-family:inherit}
 .tl-era-grid input:focus{outline:none;border-color:var(--blush)}
 .tl-era-acts{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+
+/* project bar: rename / delete, and the destructive variant of a button */
+.folder-bar .fb-sep{width:1px;height:20px;background:var(--line);margin:0 4px;flex:none}
+.folder-chip.quiet{opacity:.72}
+.folder-chip.quiet:hover{opacity:1}
+.folder-chip.danger:hover,.btn.danger:hover{border-color:#d98a8a;color:#f0b6b6}
+.btn.ghost.danger{color:var(--dim)}
+
+/* ---- timeline: the era editor ---- */
+.era-rows{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.era-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.era-row input,.era-row select{background:var(--bg-sunken,rgba(0,0,0,.18));border:1px solid var(--line);
+  border-radius:2px;padding:7px 9px;color:var(--ink);font-size:14px;font-family:inherit}
+.era-row input:focus,.era-row select:focus{outline:none;border-color:var(--blush)}
+.era-row .er-abbr{width:84px;font-family:var(--serif);letter-spacing:.08em}
+.era-row .er-name{flex:1;min-width:170px}
+.era-row .er-used{font-family:var(--serif);font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.era-row .a-chip[disabled]{opacity:.3;cursor:default}
+.a-chip.danger:hover{border-color:#d98a8a;color:#f0b6b6}
+.era-span{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
+.era-span label{display:flex;flex-direction:column;gap:5px;font-family:var(--serif);font-size:9px;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+.era-span input{background:var(--bg-sunken,rgba(0,0,0,.18));border:1px solid var(--line);
+  border-radius:2px;padding:8px 10px;color:var(--ink);font-size:14.5px;width:130px;font-family:inherit}
+.era-span input:focus{outline:none;border-color:var(--blush)}

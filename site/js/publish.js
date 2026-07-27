@@ -98,8 +98,10 @@ async function viewWork(folderId) {
       </div>
       <div class="work-side">
         <a class="btn" href="#/read/${encodeURIComponent(folderId)}">Start reading</a>
+        <button class="btn ghost sm" id="workNewCh">New chapter</button>
         <button class="btn ghost sm" id="workEdit">Edit details</button>
         <button class="btn ghost sm" id="workShare">Share…</button>
+        <button class="btn ghost sm danger" id="workDelete">Delete this work</button>
         <div class="work-stat">${total.toLocaleString()} words · ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}${
           written < chapters.length ? ` · ${written} written` : ""}</div>
       </div>
@@ -122,7 +124,9 @@ async function viewWork(folderId) {
             <span class="wch-n">${i + 1}</span>
             <span class="wch-title">${esc(c.title || "Untitled")}</span>
             <span class="wch-meta">${w ? w.toLocaleString() + " words" : "empty"}</span></a>`;
-        }).join("") : `<div class="empty-state">No chapters yet. File a document into this project.</div>`}
+        }).join("") : `<div class="empty-state">No chapters yet.
+          <button class="btn sm" id="workNewCh2" style="margin-top:12px">Write the first chapter</button></div>`}
+        ${chapters.length ? `<button class="btn ghost sm" id="workNewCh3" style="margin-top:12px">Add another chapter</button>` : ""}
 
         <div class="rule-head mt"><span class="k">Comments</span><span class="hr"></span>
           <span class="meta">${comments.length}${st.signedIn ? "" : " · sign in to see"}</span></div>
@@ -141,9 +145,35 @@ async function viewWork(folderId) {
   $$("[data-work]").forEach(b => b.onclick = () => { location.hash = "#/work/" + encodeURIComponent(b.dataset.work); });
   $("#workEdit").onclick = () => editDetails(f);
   $("#workShare").onclick = () => makeShare(folderId, f.name);
+  // three entry points, one action: a chapter is a document already
+  // filed into this work, so you never have to go and file it yourself
+  ["#workNewCh", "#workNewCh2", "#workNewCh3"].forEach(sel => {
+    const b = $(sel); if (b) b.onclick = () => newChapter(f, chapters.length);
+  });
+  $("#workDelete").onclick = async () => {
+    if (!window.CodexFolders) return;
+    if (await CodexFolders.confirmRemove(folderId, f.name)) location.hash = "#/work";
+  };
   bindCover(f);
   renderComments(comments, st);
   renderShares(shares, st, folderId);
+}
+
+/* A chapter is not a separate kind of thing — it is a document filed
+   into this work. Making one from here does the filing for you and
+   drops you straight into it, which is what "add a chapter" should
+   mean; hunting for Documents and setting a project afterwards is the
+   step that made this confusing. */
+async function newChapter(f, existing) {
+  const title = prompt("Chapter title:", "Chapter " + (existing + 1));
+  if (title === null) return;
+  const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  await S().put("docs", {
+    id, title: (title.trim() || "Chapter " + (existing + 1)).slice(0, 200),
+    html: "", folder: f.id, updated: Date.now(),
+  });
+  toast("Chapter added to “" + f.name + "”");
+  location.hash = "#/doc/" + encodeURIComponent(id);
 }
 
 /* ---------- cover ---------- */
