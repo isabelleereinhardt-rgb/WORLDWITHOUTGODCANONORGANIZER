@@ -2071,3 +2071,18 @@ body.reader-mode .lucky-stage{display:none}
 .sync-dot.sync-offline{background:var(--ink-faint)}
 .sync-dot.sync-error{background:var(--danger)}
 @keyframes syncpulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ---------- BBO monogram; two mirrored B's (an open book) in a gilt ring ---------- */
+.bbo-mark{position:relative;display:inline-flex;align-items:center;justify-content:center;
+  border:1.5px solid #c9a15c;border-radius:50%;flex:none;box-sizing:border-box}
+.bbo-mark .bb{font-family:'Cormorant Garamond',Georgia,serif;font-weight:600;font-style:italic;
+  line-height:1;display:flex;align-items:center;color:#f6ccd5;transform:translateY(-4%)}
+.bbo-mark .bb i{font-style:italic;display:block}
+.bbo-mark .bb .flip{transform:scaleX(-1);margin-right:-0.055em}
+:root[data-theme="light"] .bbo-mark{border-color:#8a6526}
+:root[data-theme="light"] .bbo-mark .bb{color:#b0567a}
+.brand-mark.bbo-mark{width:30px;height:30px}
+.brand-mark.bbo-mark:before{content:none}
+.brand-mark.bbo-mark .bb{font-size:15px}
+.gate-bbo{width:36px;height:36px}
+.gate-bbo .bb{font-size:18px}

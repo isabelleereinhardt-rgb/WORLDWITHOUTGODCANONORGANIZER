@@ -18,6 +18,42 @@
 create extension if not exists "pgcrypto";
 
 -- ============================================================
+-- RESET; drop every existing policy on this app's tables, whatever
+-- it is called, plus the helper functions. Several generations of
+-- this schema have run against real projects, and a leftover policy
+-- from an older version (under a name this file doesn't know) can
+-- silently veto writes even after the current rules are applied.
+-- Everything dropped here is recreated below, so this is always safe.
+-- ============================================================
+do $$
+declare p record;
+begin
+  for p in
+    select policyname, tablename from pg_policies
+    where schemaname = 'public'
+      and tablename in ('profiles', 'workspaces', 'workspace_members', 'items', 'shares', 'comments')
+  loop
+    execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
+  end loop;
+exception when others then
+  raise notice 'policy reset skipped a step (%)', sqlerrm;
+end $$;
+
+do $$
+begin
+  execute 'drop function if exists public.is_member(uuid) cascade';
+  execute 'drop function if exists public.can_write(uuid) cascade';
+  execute 'drop function if exists public.is_owner(uuid) cascade';
+  execute 'drop function if exists public.handle_new_user() cascade';
+  execute 'drop function if exists public.add_owner_as_member() cascade';
+  execute 'drop function if exists public.touch_updated_at() cascade';
+  execute 'drop function if exists public.read_shared(text) cascade';
+  execute 'drop function if exists public.comment_via_share(text, text, text, text) cascade';
+exception when others then
+  raise notice 'function reset skipped a step (%)', sqlerrm;
+end $$;
+
+-- ============================================================
 -- PROFILES ; one row per account, created automatically on sign-up
 -- ============================================================
 create table if not exists public.profiles (

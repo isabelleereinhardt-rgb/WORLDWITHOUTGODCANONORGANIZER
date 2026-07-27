@@ -89,7 +89,7 @@ function holdForEmailSignIn() {
   cover.id = "gate";
   cover.className = "gate";
   cover.innerHTML = `<div class="gate-split" style="grid-template-columns:1fr;text-align:center">
-    <div class="gate-promo"><div class="gate-brand" style="justify-content:center">Beep Beep Organizer</div>
+    <div class="gate-promo"><div class="gate-brand" style="justify-content:center"><span class="bbo-mark gate-bbo"><span class="bb"><i class="flip">B</i><i>B</i></span></span> Beep Beep Organizer</div>
     <h1>Signing you in&hellip;</h1><p class="gate-note" style="max-width:none">One moment; confirming your email.</p></div></div>`;
   document.body.appendChild(cover);
   let waited = 0;
@@ -319,7 +319,7 @@ function gateHtml() {
   <div class="gate-split">
     <div class="gate-promo">
       <div class="gate-brand">
-        <svg viewBox="0 0 20 20" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M4 4.5C4 4 4.4 3.6 5 3.6h4V16H5c-.6 0-1 .4-1 1V4.5z"/><path d="M16 4.5C16 4 15.6 3.6 15 3.6h-4V16h4c.6 0 1 .4 1 1V4.5z"/></svg>
+        <span class="bbo-mark gate-bbo"><span class="bb"><i class="flip">B</i><i>B</i></span></span>
         <span>Beep Beep Organizer</span>
       </div>
       <h1>Every story you're building, in one calm place.</h1>
