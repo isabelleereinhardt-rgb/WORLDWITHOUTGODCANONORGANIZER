@@ -614,8 +614,8 @@ const Lucky = {
     const pace = this.pace();
     this.el.innerHTML = `
       <div class="lucky-walk" id="luckyWalk" title="Pet me, or ask me about your canon"
-           style="animation-duration:${pace}s">
-        ${pref("luckyTips") ? `<div class="lucky-tip" style="animation-duration:${pace}s">
+           style="--pace:${pace}s">
+        ${pref("luckyTips") ? `<div class="lucky-tip">
           <div class="k">${esc(this.name())} says</div>
           <div class="lucky-tip-text" id="luckyTipText">${esc(this.tip())}</div>
           <div class="lucky-tip-foot">
@@ -903,6 +903,37 @@ window.CodexLucky = {
 
 /* Lucky only appears once the app has settled, and only if he is
    switched on. Reduced-motion users get a still cat, handled in CSS. */
+/* If the device asks for reduced motion we honour it, which means Lucky
+   sits still — and someone who never knowingly chose that setting has no
+   way to tell a deliberate stillness from a broken cat. Ask once, plainly,
+   then never again whichever way they answer. */
+function offerMotionOnce() {
+  const s = settings();
+  if ((s.motion || "system") !== "system") return;         // already decided
+  if (localStorage.getItem("codex.motionAsked")) return;
+  let calm = false;
+  try { calm = window.matchMedia("(prefers-reduced-motion:reduce)").matches; } catch (e) {}
+  if (!calm) return;
+
+  const bar = document.createElement("div");
+  bar.className = "motion-offer";
+  bar.innerHTML = `<div class="mo-text">Your device asks for less movement, so ${esc(Lucky.name())}
+      is sitting still rather than strolling. Would you like him to walk?</div>
+    <div class="mo-acts">
+      <button class="btn sm" data-mo="full">Let him walk</button>
+      <button class="btn ghost sm" data-mo="calm">Keep him still</button>
+    </div>`;
+  document.body.appendChild(bar);
+  bar.querySelectorAll("[data-mo]").forEach(b => b.onclick = () => {
+    CodexExtra.settings.motion = b.dataset.mo;
+    save();
+    localStorage.setItem("codex.motionAsked", "1");
+    document.documentElement.dataset.motion = b.dataset.mo;
+    Lucky.render();
+    bar.remove();
+  });
+}
+
 function boot() {
   // Mount first, then fill in the numbers. Chaining the mount onto the
   // fact-gathering meant a slow or wedged storage read could leave the
@@ -910,6 +941,7 @@ function boot() {
   // aren't offered until the counts arrive.
   Lucky.mount();
   Lucky.refreshFacts().then(() => Lucky.render()).catch(() => {});
+  setTimeout(offerMotionOnce, 2200);
   // he curls up when a document opens and paces again when it closes
   window.addEventListener("hashchange", () => {
     const now = Lucky.sleeping();

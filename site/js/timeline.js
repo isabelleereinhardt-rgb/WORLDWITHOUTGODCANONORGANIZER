@@ -14,8 +14,45 @@ const view = () => $("#view");
 const uid = () => "tl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const S = () => window.CodexStore;
 
+/* ---------- what the two halves of the calendar are called ----------
+   "BR" and "AR" are this canon's, not everyone's: another project wants
+   BC/AD, or PC/AC, or Before the Flood and After. The era KEY stored on
+   every event stays "BR"/"AR" forever so nothing needs migrating — only
+   the labels are yours to set, and they are per workspace, because a
+   second project is a different world with a different calendar. */
+const ERA_DEFAULTS = {
+  beforeAbbr: "BR", afterAbbr: "AR",
+  beforeName: "Before Reconstruction", afterName: "After Reconstruction",
+  pivot: "Reconstruction",
+};
+function eraKey() {
+  const ws = window.CodexWorkspaces ? CodexWorkspaces.activeId() : "default";
+  return "codex.eras." + ws;
+}
+function eras() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(eraKey()) || "{}");
+    const out = Object.assign({}, ERA_DEFAULTS);
+    // take only non-empty strings, so a half-filled form can't blank a label
+    Object.keys(ERA_DEFAULTS).forEach(k => {
+      if (typeof raw[k] === "string" && raw[k].trim()) out[k] = raw[k].trim();
+    });
+    return out;
+  } catch (e) { return Object.assign({}, ERA_DEFAULTS); }
+}
+function saveEras(next) {
+  const clean = {};
+  Object.keys(ERA_DEFAULTS).forEach(k => {
+    const v = (next[k] || "").trim();
+    if (v && v !== ERA_DEFAULTS[k]) clean[k] = v.slice(0, 40);
+  });
+  if (Object.keys(clean).length) localStorage.setItem(eraKey(), JSON.stringify(clean));
+  else localStorage.removeItem(eraKey());
+}
+function abbr(era) { const e = eras(); return era === "BR" ? e.beforeAbbr : e.afterAbbr; }
+
 function sortKey(ev) { return ev.era === "BR" ? -ev.value : ev.value; }
-function fmtDate(ev) { return `${ev.value} ${ev.era}`; }
+function fmtDate(ev) { return `${ev.value} ${abbr(ev.era)}`; }
 /* map a raw 0–100 position into a safe visible band so points never sit
    flush against the edge (which was clipping high AR values out of view) */
 function safePct(raw) { return 4 + (raw / 100) * 92; }
@@ -27,6 +64,7 @@ async function view_() {
   render();
 }
 function render() {
+  const E = eras();
   const sorted = events.slice().sort((a, b) => sortKey(a) - sortKey(b));
   const min = sorted.length ? sortKey(sorted[0]) : -1, max = sorted.length ? sortKey(sorted[sorted.length - 1]) : 1;
   const span = Math.max(1, max - min);
@@ -35,10 +73,15 @@ function render() {
   const showZero = zeroRaw >= 0 && zeroRaw <= 100 && min < 0 && max > 0;
 
   view().innerHTML = `<div class="wrap wide">
-    <div class="page-kicker">Before &amp; After the Reconstruction · ${sorted.length} event${sorted.length === 1 ? "" : "s"}</div>
-    <h1 class="display">Timeline</h1>
-    <p class="muted">Add events as <b>BR</b> (Before Reconstruction) or <b>AR</b> (After Reconstruction) years —
+    <div class="page-kicker">${esc(E.beforeName)} &amp; ${esc(E.afterName)} · ${sorted.length} event${sorted.length === 1 ? "" : "s"}</div>
+    <div class="tl-head">
+      <h1 class="display">Timeline</h1>
+      <button class="btn ghost sm" id="tlEras">Rename the eras</button>
+    </div>
+    <p class="muted">Add events as <b>${esc(E.beforeAbbr)}</b> (${esc(E.beforeName)}) or
+      <b>${esc(E.afterAbbr)}</b> (${esc(E.afterName)}) years —
       they're placed and re-ordered on the line automatically. Click any point to open its notes.</p>
+    <div id="tlEraForm"></div>
 
     ${sorted.length ? `<div class="era-bands">${eraBands(sorted).map(b => `
       <div class="era-band"><div class="eb-name">${esc(b.name)}</div><div class="eb-span">${esc(b.span)}</div></div>`).join("")}</div>` : ""}
@@ -46,14 +89,14 @@ function render() {
     <div class="tl-add">
       <input id="tlLabel" placeholder="Event label — e.g. “Founding of House Solis”">
       <input id="tlValue" type="number" placeholder="Year" style="width:110px">
-      <select id="tlEra"><option value="BR" ${lastEra === "BR" ? "selected" : ""}>BR</option><option value="AR" ${lastEra === "AR" ? "selected" : ""}>AR</option></select>
+      <select id="tlEra"><option value="BR" ${lastEra === "BR" ? "selected" : ""}>${esc(E.beforeAbbr)}</option><option value="AR" ${lastEra === "AR" ? "selected" : ""}>${esc(E.afterAbbr)}</option></select>
       <button class="btn" id="tlAdd">Add to timeline</button>
     </div>
 
     ${sorted.length ? `
       <div class="tl-line-wrap">
         <div class="tl-line">
-          ${showZero ? `<div class="tl-zero" style="left:${safePct(zeroRaw)}%"><span>0 · Reconstruction</span></div>` : ""}
+          ${showZero ? `<div class="tl-zero" style="left:${safePct(zeroRaw)}%"><span>0 · ${esc(E.pivot)}</span></div>` : ""}
           ${sorted.map(ev => {
             const pct = safePct(span ? ((sortKey(ev) - min) / span) * 100 : 50);
             return `<div class="tl-point ${openId === ev.id ? "active" : ""}" style="left:${pct}%" data-id="${ev.id}" title="${esc(ev.label)}">
@@ -77,6 +120,7 @@ function render() {
       </div>` : `<div class="empty-state">No events yet. Add your first one above.</div>`}
   </div>`;
 
+  $("#tlEras").onclick = toggleEraForm;
   $("#tlAdd").onclick = addEvent;
   $("#tlLabel").onkeydown = e => { if (e.key === "Enter") addEvent(); };
   $("#tlEra").onchange = e => { lastEra = e.target.value; };
@@ -100,10 +144,50 @@ function eraBands(sorted) {
     const ys = list.map(e => Math.abs(sortKey(e)));
     return Math.min(...ys) + "–" + Math.max(...ys);
   };
-  if (br.length) bands.push({ name: "Before Reconstruction", span: range(br) + " BR · " + br.length + " event" + (br.length === 1 ? "" : "s") });
-  if (br.length && ar.length) bands.push({ name: "The Reconstruction", span: "Year 0" });
-  if (ar.length) bands.push({ name: "After Reconstruction", span: range(ar) + " AR · " + ar.length + " event" + (ar.length === 1 ? "" : "s") });
+  const E = eras();
+  if (br.length) bands.push({ name: E.beforeName, span: range(br) + " " + E.beforeAbbr + " · " + br.length + " event" + (br.length === 1 ? "" : "s") });
+  if (br.length && ar.length) bands.push({ name: E.pivot, span: "Year 0" });
+  if (ar.length) bands.push({ name: E.afterName, span: range(ar) + " " + E.afterAbbr + " · " + ar.length + " event" + (ar.length === 1 ? "" : "s") });
   return bands;
+}
+
+/* The era editor lives on the Timeline itself rather than in Settings:
+   it is the page where you notice the labels are wrong. */
+function toggleEraForm() {
+  const host = $("#tlEraForm");
+  if (!host) return;
+  if (host.innerHTML) { host.innerHTML = ""; return; }
+  const E = eras();
+  host.innerHTML = `<div class="tl-eras">
+    <div class="rule-head"><span class="k">What this world calls its eras</span><span class="hr"></span></div>
+    <p class="faint set-help">Only the names change. Every event keeps the year and the side of the
+      line you gave it, so nothing moves. These belong to this workspace alone.</p>
+    <div class="tl-era-grid">
+      <label>Earlier era, short<input id="eaBA" maxlength="40" value="${esc(E.beforeAbbr)}" placeholder="BR"></label>
+      <label>Earlier era, in full<input id="eaBN" maxlength="40" value="${esc(E.beforeName)}" placeholder="Before Reconstruction"></label>
+      <label>Later era, short<input id="eaAA" maxlength="40" value="${esc(E.afterAbbr)}" placeholder="AR"></label>
+      <label>Later era, in full<input id="eaAN" maxlength="40" value="${esc(E.afterName)}" placeholder="After Reconstruction"></label>
+      <label>The event they count from<input id="eaPV" maxlength="40" value="${esc(E.pivot)}" placeholder="Reconstruction"></label>
+    </div>
+    <div class="tl-era-acts">
+      <button class="btn sm" id="eaSave">Save these names</button>
+      <button class="btn ghost sm" id="eaReset">Back to ${esc(ERA_DEFAULTS.beforeAbbr)} / ${esc(ERA_DEFAULTS.afterAbbr)}</button>
+    </div>
+  </div>`;
+  $("#eaSave").onclick = () => {
+    saveEras({
+      beforeAbbr: $("#eaBA").value, beforeName: $("#eaBN").value,
+      afterAbbr: $("#eaAA").value, afterName: $("#eaAN").value,
+      pivot: $("#eaPV").value,
+    });
+    window.toast && toast("Eras renamed");
+    render();
+  };
+  $("#eaReset").onclick = () => {
+    localStorage.removeItem(eraKey());
+    window.toast && toast("Eras back to the defaults");
+    render();
+  };
 }
 
 function detailHtml(ev) {

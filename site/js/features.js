@@ -212,11 +212,41 @@ function applySettings(s) {
   root.setProperty("--dens", String(dens));
   document.documentElement.dataset.density = s.density || "comfortable";
   document.documentElement.dataset.ornament = s.ornament || "stars";
+  applyMotion(s.motion);
   root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
   root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
   document.body && (document.body.style.fontSize = (s.fontSize || 15) + "px");
   applyTypography(s.typography || defaultTypography());
 }
+
+/* Motion is a three-way choice, not the bare system flag. Plenty of people
+   switch animation off at the OS level for reasons that have nothing to do
+   with motion sensitivity — an old laptop, a work machine, a default they
+   never chose — and they should still be able to have a cat that walks.
+   "System" honours the OS; the other two override it in either direction. */
+const MOTIONS = [
+  ["full", "Full", "Lucky strolls, cards settle in, everything moves"],
+  ["system", "Follow my system", "Whatever your device asks for"],
+  ["calm", "Calm", "Nothing travels across the screen; he still blinks and breathes"],
+];
+function systemWantsCalm() {
+  try { return window.matchMedia("(prefers-reduced-motion:reduce)").matches; } catch (e) { return false; }
+}
+function motionMode(setting) {
+  const m = setting || "system";
+  if (m === "full") return "full";
+  if (m === "calm") return "calm";
+  return systemWantsCalm() ? "calm" : "full";
+}
+function applyMotion(setting) {
+  document.documentElement.dataset.motion = motionMode(setting);
+}
+/* if they are following the system and the system changes, follow it live */
+try {
+  window.matchMedia("(prefers-reduced-motion:reduce)").addEventListener("change", () => {
+    if (!Extra.settings || (Extra.settings.motion || "system") === "system") applyMotion("system");
+  });
+} catch (e) {}
 
 /* inject one <style> block covering every Title/Heading/Caption style, so
    the same look applies both in the document editor and in the rendered
@@ -318,6 +348,16 @@ function panelAppearance(el) {
     <div class="av-chips">${ORNAMENTS.map(([id, glyphs]) =>
       `<button class="av-chip orn${(s.ornament || "stars") === id ? " on" : ""}" data-ornament="${id}">${glyphs}</button>`).join("")}</div>
 
+    <div class="rule-head mt"><span class="k">Movement</span><span class="hr"></span></div>
+    <p class="faint set-help">Your device currently asks for
+      ${systemWantsCalm() ? "<strong>less</strong> movement" : "<strong>full</strong> movement"}.
+      Override it here if you disagree.</p>
+    <div class="pers-grid">${MOTIONS.map(([id, label, note]) =>
+      `<button class="pers-card${(s.motion || "system") === id ? " on" : ""}" data-motion="${id}">
+        <span class="pc-glyph">${id === "calm" ? "☾" : id === "full" ? "✦" : "✧"}</span>
+        <span><span class="pc-name">${esc(label)}</span><span class="pc-sample">${esc(note)}</span></span>
+      </button>`).join("")}</div>
+
     <div class="rule-head mt"><span class="k">Accent colour</span><span class="hr"></span></div>
     <p class="faint set-help">The whole site follows it; links, active nav, buttons.</p>
     <div class="swatch-row">
@@ -354,6 +394,15 @@ function panelAppearance(el) {
   });
   $$("[data-density]", el).forEach(b => b.onclick = () => { Extra.settings.density = b.dataset.density; saveSettings(); viewSettings("appearance"); });
   $$("[data-ornament]", el).forEach(b => b.onclick = () => { Extra.settings.ornament = b.dataset.ornament; saveSettings(); viewSettings("appearance"); });
+  $$("[data-motion]", el).forEach(b => b.onclick = () => {
+    Extra.settings.motion = b.dataset.motion;
+    saveSettings();
+    applyMotion(Extra.settings.motion);
+    // re-mount him so the walk restarts from the right rather than
+    // resuming mid-stride from wherever the old animation was paused
+    if (window.CodexLucky) CodexLucky.render();
+    viewSettings("appearance");
+  });
   $$(".swatch[data-accent]", el).forEach(b => b.onclick = () => { Extra.settings.accent = b.dataset.accent; $("#accentPicker").value = b.dataset.accent; saveSettings(); });
   $("#accentPicker", el).oninput = e => { Extra.settings.accent = e.target.value; saveSettings(); };
   $("#accentReset", el).onclick = () => { Extra.settings.accent = ""; saveSettings(); toast("Accent reset"); };
