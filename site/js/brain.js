@@ -58,6 +58,13 @@ function observe(resolvedQ, named) {
    it. */
 function resolve(q) {
   let out = String(q || "");
+  /* An instruction that carries the writer's own words must keep them.
+     "remember: Torad keeps its gates shut after dusk" is about Torad's
+     gates; substituting the last subject for "its" stored the sentence
+     as "Torad keeps House Patton's gates shut after dusk", a fact
+     nobody wrote, into a note that then reads as canon. Rewriting a
+     question is helpful; rewriting a statement is falsification. */
+  if (/^\s*(?:remember|learn|note\s+down|note|todo|to-?do)\b\s*[:,-]?/i.test(out)) return out;
   const about = out.match(/^\s*(?:what|and|how)\s+about\s+(.+?)\s*\??\s*$/i);
   if (about && state.lastQ && state.subject) {
     const re = new RegExp(reEsc(state.subject), "i");
@@ -1220,6 +1227,26 @@ function namesWithin(text) {
   }
   return out;
 }
+/* ---------- a denial is not a statement ----------
+   "Rhea never lived in Halden" was being read as "Rhea lives in
+   Halden": the pattern matched the verb and nothing looked at the word
+   in front of it. Reporting the exact opposite of what somebody wrote
+   is the worst thing this can do, so a negated verb yields nothing at
+   all. Saying less is recoverable; saying the reverse is not.
+
+   Only the words immediately before the verb count, and the search
+   stops at a comma, so "Rhea, who was not born here, lived in Torvin"
+   keeps the second half. Patterns that carry their own negation, like
+   "does not like", start AT the negator and so are never caught by it. */
+const NEGATOR = /\b(?:not|never|no|nor|isn'?t|wasn'?t|aren'?t|weren'?t|didn'?t|doesn'?t|don'?t|hasn'?t|haven'?t|hadn'?t|cannot|can'?t|won'?t|without|rarely|seldom)\b/i;
+function negatedBefore(piece, at) {
+  let head = piece.slice(0, at);
+  const cut = Math.max(head.lastIndexOf(","), head.lastIndexOf(";"));
+  if (cut > -1) head = head.slice(cut + 1);
+  const words = head.trim().split(/\s+/).slice(-3).join(" ");
+  return NEGATOR.test(words);
+}
+
 /* Who is making this statement? The nearest name before it; or, where a
    clause opens with a pronoun, whoever the sentence opened with. */
 function ownerOfStatement(piece, sentence, at, carry, sentenceAt) {
@@ -1312,7 +1339,7 @@ const INVERSE = [
    The "of Y" form only counts when Y is a house or a place the canon
    already knows, which keeps "one of the" and "some of them" out. */
 function readAdjacent(name, ctx) {
-  const clauses = [];
+  const clauses = [];      // { k, clause, sentence }
   const sentences = [];
   let titleRe, ofRe;
   try {
@@ -1323,18 +1350,18 @@ function readAdjacent(name, ctx) {
   for (const e of pool(ctx)) {
     if (!e._hay || !e._hay.includes(name.toLowerCase())) continue;
     for (const s of C().sentencesOf(e.text)) {
-      if (!clauses.some(c => /^is an? /.test(c))) {
+      if (!clauses.some(c => c.k === "title")) {
         const t = titleRe.exec(s);
-        if (t) { clauses.push("is " + aOrAn(t[1].toLowerCase())); sentences.push(s.trim()); }
+        if (t) clauses.push({ k: "title", clause: "is " + aOrAn(t[1].toLowerCase()), sentence: s.trim() });
       }
-      if (!clauses.some(c => /^belongs to |^is of /.test(c))) {
+      if (!clauses.some(c => c.k === "allegiance")) {
         const o = ofRe.exec(s);
         if (o) {
           const target = o[1].trim();
           const isHouse = /^House\s/i.test(target);
           if (isHouse || known.has(target.toLowerCase())) {
-            clauses.push((isHouse ? "belongs to " : "is of ") + target);
-            sentences.push(s.trim());
+            clauses.push({ k: "allegiance",
+              clause: (isHouse ? "belongs to " : "is of ") + target, sentence: s.trim() });
           }
         }
       }
@@ -1440,6 +1467,7 @@ function readTraits(name, ctx) {
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
+          if (negatedBefore(piece, m.index)) continue;
           if (!statementBelongsTo(piece, sentence, m.index, nl, carry, pieceAt)) continue;
           let hit = m;
           if (STRICT.has(t.k)) {
@@ -1462,6 +1490,7 @@ function readTraits(name, ctx) {
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
+          if (negatedBefore(piece, m.index)) continue;
           const owner = ownerOfStatement(piece, sentence, m.index, carry, pieceAt);
           if (!owner || sameSubject(owner, nl)) continue;
           /* The owner is printed, so it is normalised the same way an
@@ -1492,11 +1521,11 @@ function readTraits(name, ctx) {
   // titles and allegiances, which sit beside the name rather than after a verb
   const adj = readAdjacent(name, ctx);
   const lead = [];
-  adj.clauses.forEach((clause, i) => {
-    const key = clause.toLowerCase();
+  adj.clauses.forEach(c => {
+    const key = c.clause.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    lead.push({ k: "adjacent" + i, clause, sentence: adj.sentences[i] || "", entry: null });
+    lead.push({ k: c.k, clause: c.clause, sentence: c.sentence, entry: null });
   });
   found = lead.concat(found);
 
@@ -1569,12 +1598,86 @@ function composeSentence(name, traits) {
   return name + " " + parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";
 }
 
+/* ---------- asking for one thing in particular ----------
+   The reading layer already knows who killed whom, who founded what,
+   what somebody is called and which house they belong to. Until now
+   there was no way to ASK any of it: "who killed Enyokia" fell through
+   to a keyword search, which is a poor answer to a question the
+   assistant could answer exactly.
+
+   Each entry pairs a phrasing with the readings that answer it. When
+   nothing has been read for that attribute the handler steps aside
+   rather than declaring the matter closed, so the older search still
+   gets its turn. */
+const ASKED_ABOUT = [
+  [/^\s*who\s+killed\s+(.+?)\s*\??\s*$/i, ["killed-by", "killed-by-inv"]],
+  [/^\s*who\s+(?:did\s+)?(.+?)\s+kill\s*\??\s*$/i, ["killed"]],
+  [/^\s*who\s+(?:rules?|ruled|reigns?|reigned\s+over)\s+(.+?)\s*\??\s*$/i, ["ruled-by", "ruled-by-inv"]],
+  [/^\s*who\s+founded\s+(.+?)\s*\??\s*$/i, ["founded-by", "founded-by-inv"]],
+  [/^\s*who\s+(?:leads|led)\s+(.+?)\s*\??\s*$/i, ["led-by-inv"]],
+  [/^\s*who\s+(?:worships|worshipped)\s+(.+?)\s*\??\s*$/i, ["worshipped-by-inv"]],
+  [/^\s*who\s+betrayed\s+(.+?)\s*\??\s*$/i, ["betrayed-by-inv"]],
+  [/^\s*who\s+serves\s+(.+?)\s*\??\s*$/i, ["served-by-inv"]],
+  [/^\s*who\s+(?:does|did)\s+(.+?)\s+(?:love|like|admire)\s*\??\s*$/i, ["likes"]],
+  [/^\s*who\s+(?:does|did)\s+(.+?)\s+(?:hate|dislike|distrust)\s*\??\s*$/i, ["hates", "dislikes"]],
+  [/^\s*who\s+(?:is|was)\s+(.+?)\s+married\s+to\s*\??\s*$/i, ["married", "married-to"]],
+  [/^\s*who\s+(?:is|are|was|were)\s+(.+?)(?:'s|s')\s+(?:wife|husband|spouse)\s*\??\s*$/i, ["married", "married-to"]],
+  [/^\s*who\s+(?:is|are|was|were)\s+(.+?)(?:'s|s')\s+(?:friends?|companions?)\s*\??\s*$/i, ["friends", "friend-of"]],
+  [/^\s*who\s+(?:is|was)\s+(.+?)\s+friends\s+with\s*\??\s*$/i, ["friends", "friend-of"]],
+  [/^\s*who\s+(?:is|are|was|were)\s+(.+?)(?:'s|s')\s+(?:sisters?|brothers?|siblings?|parents?|mother|father|children|sons?|daughters?|family)\s*\??\s*$/i,
+    ["family", "relative-of"]],
+  [/^\s*(?:does|did)\s+(.+?)\s+have\s+(?:any\s+)?(?:siblings?|children|family|a\s+sister|a\s+brother|a\s+wife|a\s+husband)\s*\??\s*$/i,
+    ["family", "relative-of", "married", "married-to"]],
+  [/^\s*what\s+(?:is|was)\s+(.+?)(?:'s|s')\s+age\s*\??\s*$/i, ["age", "born"]],
+  [/^\s*what\s+(?:is|was)\s+(.+?)(?:'s|s')\s+(?:title|rank)\s*\??\s*$/i, ["title", "role"]],
+  [/^\s*what\s+(?:is|was)\s+(.+?)\s+(?:also\s+)?(?:called|known\s+as)\s*\??\s*$/i, ["alias"]],
+  [/^\s*what\s+(?:is|was)\s+(.+?)\s+known\s+for\s*\??\s*$/i, ["renown", "remembered"]],
+  [/^\s*what\s+house\s+(?:is|was)\s+(.+?)\s+(?:from|in|of)\s*\??\s*$/i, ["allegiance", "family"]],
+  [/^\s*(?:which|what)\s+house\s+(?:does|did)\s+(.+?)\s+belong\s+to\s*\??\s*$/i, ["allegiance", "family"]],
+  [/^\s*(?:is|was)\s+(.+?)\s+(?:still\s+)?(?:alive|dead|living)\s*\??\s*$/i, ["status", "died"]],
+  [/^\s*when\s+did\s+(.+?)\s+die\s*\??\s*$/i, ["died"]],
+  [/^\s*when\s+(?:was|were)\s+(.+?)\s+born\s*\??\s*$/i, ["born"]],
+  [/^\s*where\s+(?:does|did)\s+(.+?)\s+live\s*\??\s*$/i, ["lives", "from"]],
+  [/^\s*what\s+(?:is|was)\s+the\s+capital\s+of\s+(.+?)\s*\??\s*$/i, ["capital"]],
+];
+function hAttribute(q, ctx, S) {
+  for (const [re, keys] of ASKED_ABOUT) {
+    const m = re.exec(q);
+    if (!m) continue;
+    const found = findEntity(m[1]);
+    if (!found) continue;
+    const read = traitsFor(found.name, ctx);
+    const hit = read.traits.filter(t => keys.indexOf(t.k) > -1);
+    if (!hit.length) {
+      /* Nothing read for this attribute. If nothing at all was read
+         about the subject, step aside and let the older search try. But
+         where the entries plainly DO describe them and simply never say
+         this, saying so is the better answer; a keyword dump implies
+         the assistant did not understand the question. */
+      if (!read.traits.length) continue;
+      return out(`${dymNote(m[1], found)}
+        <div class="assistant-hint">Your entries describe <b>${esc(found.name)}</b>, but never say this.
+        That part is not established yet.</div>`,
+        { sources: read.sources.slice(0, 3), subject: found.name });
+    }
+    return out(`${dymNote(m[1], found)}
+      <div class="bs lead">${esc(composeSentence(found.name, hit))}</div>
+      ${quoteOnly(evidenceRows(hit))}`,
+      { sources: read.sources, subject: found.name,
+        grounded: "Read from your own wording · nothing added" });
+  }
+  return null;
+}
+
 /* ---------- "who is X" / "what is X" / "tell me about X" ----------
    The most ordinary question there is, and until now the only one with
    no handler at all. */
 function hWhoIs(q, ctx, S) {
   const m = q.match(/^\s*(?:who|what)(?:'s|s)?\s+(?:is|are|was|were)\s+(.+?)\s*\??\s*$/i) ||
-            q.match(/^\s*tell\s+me\s+about\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*tell\s+me\s+(?:about|more\s+about)\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*what\s+do\s+you\s+know\s+about\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*(?:describe|summarise|summarize)\s+(.+?)(?:\s+(?:to|for)\s+me)?\s*\??\s*$/i) ||
+            q.match(/^\s*give\s+me\s+(?:a\s+)?(?:summary|rundown|overview)\s+(?:of|on|about)\s+(.+?)\s*\??\s*$/i) ||
             q.match(/^\s*(?:info|information)\s+(?:on|about)\s+(.+?)\s*\??\s*$/i);
   if (!m) return null;
   const found = findEntity(m[1]);
@@ -1637,6 +1740,8 @@ const HANDLERS = [
   hSmalltalk, hHelp, hMemories, hRemember, hStats, hRandom,
   hCompare, hRelation, hWhoAppears, hWhen, hWhere, hHowOld,
   hWhyHow, hDefine, hFacts, hOpinion,
+  // asking for one attribute in particular, before the general form
+  hAttribute,
   // last: the most general question, so every specific shape gets first
   // refusal and this catches what is left
   hWhoIs,

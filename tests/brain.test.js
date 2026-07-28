@@ -371,6 +371,47 @@ setTimeout(() => {
   window.Codex.mentionsOf = realMentions;
   window.Codex.bestEntryFor = realBest;
 
+
+  /* ---------------------------------------------------------------
+     Two faults found by playing with it rather than testing it.
+     --------------------------------------------------------------- */
+
+  // A denial must never be read as an assertion.
+  const denial = [{ id: "d1", title: "NOTE", category: "My Notes", type: "note", wordcount: 20,
+    text: "Rhea is not a queen. Rhea never lived in Halden. Rhea does not like Doran." }];
+  denial.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: denial, entities: ["Rhea", "Halden", "Doran"] };
+  window.Codex.topicSummary = (n, k) => sentencesOf(denial.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = n => denial.filter(e => e._hay.includes(String(n).toLowerCase()));
+  window.Codex.bestEntryFor = n => denial.find(e => e._hay.includes(String(n).toLowerCase())) || null;
+
+  B.reset();
+  const rhea = leadOf(ans("who is Rhea"));
+  check("negation: 'never lived in Halden' is not read as living there",
+    !/lives in Halden/i.test(rhea), rhea);
+  check("negation: 'is not a queen' is not read as being one",
+    !/\bis a queen\b/i.test(rhea), rhea);
+  check("negation: a pattern carrying its own 'not' still works",
+    /does not like Doran/i.test(rhea) || rhea === "", rhea);
+
+  /* The writer's own words must survive being remembered. "remember:
+     Torad keeps its gates shut" was being stored as "... keeps House
+     Patton's gates shut", because the pronoun resolver rewrote the
+     statement using whatever had last been discussed. */
+  B.reset();
+  B.observe("what do you think of House Patton", "House Patton");
+  const typed = "remember: Torad keeps its gates shut after dusk";
+  check("memory: an instruction's wording is never rewritten",
+    B.resolve(typed) === typed, B.resolve(typed));
+  check("memory: but a QUESTION still resolves its pronouns",
+    /House Patton/.test(B.resolve("where is it from?")), B.resolve("where is it from?"));
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
   // markdown
   const html = B.md("## Head\n\n**Bold** and *italic* and `code`.\n\n- one\n- two\n\n1. first\n2. second\n\n> a quote\n\n<script>alert(1)</script>");
   check("md-heading", /<h5 class="md-h">Head<\/h5>/.test(html));

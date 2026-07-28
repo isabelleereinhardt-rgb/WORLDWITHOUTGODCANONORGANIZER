@@ -37,6 +37,7 @@ run "brain (no browser)" node "$HERE/brain.test.js"
 run "api request shape (no browser)" node "$HERE/ai.test.js"
 run "provider presets (no browser)" node "$HERE/providers.test.js"
 run "streaming (no browser)" node "$HERE/streaming.test.js"
+run "hostile input & edge cases (no browser)" node "$HERE/explore.js"
 
 if [ "${1:-all}" = "unit" ]; then
   echo ""

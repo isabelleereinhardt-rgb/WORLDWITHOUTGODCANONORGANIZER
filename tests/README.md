@@ -6,13 +6,16 @@ can look perfectly reasonable and still be made up, or quietly stop
 citing your entries. These suites check the things that would be
 embarrassing rather than merely broken.
 
-They have already caught six real faults: a house indexed under its bare
+They have already caught nine real faults: a house indexed under its bare
 name reported as "not in your canon", statistics disagreeing with the
 sidebar, a polite "please add a task to…" falling through to a search,
 a connected model never being called when retrieval came back empty, a
 key field wrongly hidden for custom gateways, and — the one that
 mattered most — a leftover API key being transmitted to whichever
-provider you switched to next.
+provider you switched to next. Playing with it rather than testing it
+found three more: a denial read as an assertion, the writer's own words
+being rewritten before they were saved, and every handler but one
+ignoring what the assistant had already read.
 
 ## Running them
 
@@ -60,6 +63,14 @@ boundaries, several frames in one chunk, all three delta shapes, an error
 frame arriving after a 200, a server that ignored the stream flag, and
 the rule that words already received are never thrown away when a
 connection breaks.
+
+**`explore.js`** — a hunt rather than a checklist. Hostile and malformed
+input (empty, punctuation-only, 500 characters, regex metacharacters,
+script payloads, emoji, non-Latin), markup living inside the canon,
+negation, contradictory entries, pronoun chains, empty workspaces, 400
+entries for scale, a name that is also a verb, and circular text. It
+fails the run if anything throws, hangs, leaks live markup, or states
+the opposite of what is written.
 
 **`assistant.e2e.js`** — the real site in a real browser, against the
 real World Without God canon, driven through the actual interface. Asks
