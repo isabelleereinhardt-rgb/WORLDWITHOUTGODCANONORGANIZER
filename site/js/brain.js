@@ -78,12 +78,18 @@ function resolve(q) {
    "everything" adds My Notes and any sections of your own. */
 function pool(ctx) {
   const db = C().DB;
-  let p = db.entries.filter(e => (e.type === "pdf" || e.type === "note") && e.aiRead !== false);
-  if (ctx && ctx.scope === "canon") {
-    const order = C().CANON_ORDER || [];
-    if (order.length) p = p.filter(e => order.includes(e.category));
-  }
-  return p;
+  const all = db.entries.filter(e => (e.type === "pdf" || e.type === "note") && e.aiRead !== false);
+  if (!(ctx && ctx.scope === "canon")) return all;
+  const order = C().CANON_ORDER || [];
+  if (!order.length) return all;
+  const narrowed = all.filter(e => order.includes(e.category));
+  /* "Canon only" keeps to the built-in collections, which do not include
+     My Notes. In a workspace where everything you have written IS a
+     note, that filter leaves nothing at all, and the assistant answers
+     "nothing in your canon matches" while the entry sits on screen. A
+     scope that removes every last entry is not a preference, it is a
+     dead end, so it is ignored rather than obeyed. */
+  return narrowed.length ? narrowed : all;
 }
 
 /* ---------- finding who a question is about ----------
@@ -927,18 +933,51 @@ function namesWithin(text) {
   while ((m = re.exec(text))) if (looksLikeName(m[0])) out.push({ name: m[0], at: m.index });
   return out;
 }
-/* Does this statement belong to `name`? */
-function statementBelongsTo(piece, sentence, at, nl) {
+/* Who is making this statement? The nearest name before it; or, where a
+   clause opens with a pronoun, whoever the sentence opened with. */
+function ownerOfStatement(piece, sentence, at) {
   const before = namesWithin(piece.slice(0, at));
-  if (before.length) return before[before.length - 1].name.toLowerCase() === nl;
-  // no name before it; a pronoun defers to whoever the sentence opened with
-  if (/\b(?:she|he|they|her|him|them|it)\b\s*$/i.test(piece.slice(0, at).trim() + " ") ||
-      /\b(?:she|he|they)\b/i.test(piece.slice(0, at))) {
+  if (before.length) return before[before.length - 1].name;
+  if (/\b(?:she|he|they|her|him|them|it)\b/i.test(piece.slice(0, at))) {
     const lead = namesWithin(sentence)[0];
-    return !!lead && lead.name.toLowerCase() === nl;
+    return lead ? lead.name : null;
   }
-  return false;
+  return null;
 }
+function statementBelongsTo(piece, sentence, at, nl) {
+  const owner = ownerOfStatement(piece, sentence, at);
+  return !!owner && owner.toLowerCase() === nl;
+}
+
+/* ---------- the same sentence, read from the other side ----------
+   "Lily is friends with Max" says something about Max too, and refusing
+   to see it is why asking about him returned the line about Lily with
+   nothing drawn from it. A relation has two ends: whoever the statement
+   belongs to, and whoever it names. These read the far end.
+
+   Only relations that genuinely invert are here. "Lily is seven" says
+   nothing about anyone else, and "Lily lives in Karyth" says something
+   about a place rather than a person, so neither has an entry. */
+const INVERSE = [
+  { k: "friend-of", obj: 1,
+    re: /\bfriends?\s+with\s+(.+)/i,
+    say: owner => "is a friend of " + owner },
+  { k: "married-to", obj: 1,
+    re: /\b(?:is|was)\s+married\s+to\s+(.+)/i,
+    say: owner => "is married to " + owner },
+  { k: "disliked-by", obj: 1,
+    re: /\b(?:does\s+not|doesn'?t|did\s+not|didn'?t|do\s+not|don'?t)\s+(?:like|trust|get\s+along\s+with)\s+(.+)/i,
+    say: owner => "is someone " + owner + " does not like" },
+  { k: "hated-by", obj: 1,
+    re: /\b(?:hates|hated|despises|despised|resents|resented)\s+(.+)/i,
+    say: owner => "is hated by " + owner },
+  { k: "liked-by", obj: 1,
+    re: /\b(?:likes|loves|adores|admires)\s+(.+)/i,
+    say: owner => "is liked by " + owner },
+  { k: "relative-of", obj: 2,
+    re: /\b(?:is\s+)?(?:the\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle)\s+(?:of|to)\s+(.+)/i,
+    say: (owner, m) => "has a " + m[1].toLowerCase() + ", " + owner },
+];
 
 /* Read every statement the entries make about one subject. Text is cut
    into clauses first, because a run-on line holds several separate
@@ -961,6 +1000,7 @@ function readTraits(name, ctx) {
         const pieceAt = sentence.indexOf(piece, cursor);
         cursor = pieceAt + piece.length;
         if (!piece || piece.length < 3) continue;
+        // what the clause says about its own subject
         for (const t of TRAITS) {
           if (found.some(f => f.k === t.k)) continue;      // first statement wins
           t.re.lastIndex = 0;
@@ -968,6 +1008,27 @@ function readTraits(name, ctx) {
           if (!m) continue;
           if (!statementBelongsTo(piece, sentence, m.index, nl)) continue;
           const clause = t.say(m);
+          if (!clause || clause.length < 4) continue;
+          const key = clause.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          found.push({ k: t.k, clause, sentence: sentence.trim(), entry: e });
+          used = true;
+        }
+        // and what it says about whoever it names
+        for (const t of INVERSE) {
+          if (found.some(f => f.k === t.k)) continue;
+          t.re.lastIndex = 0;
+          const m = t.re.exec(piece);
+          if (!m) continue;
+          const owner = ownerOfStatement(piece, sentence, m.index);
+          if (!owner || owner.toLowerCase() === nl) continue;
+          const objects = tidyClause(m[t.obj] || "");
+          let named;
+          try { named = new RegExp("\\b" + reEsc(name) + "\\b", "i").test(objects); }
+          catch (err) { named = false; }
+          if (!named) continue;
+          const clause = t.say(prettyName(owner), m);
           if (!clause || clause.length < 4) continue;
           const key = clause.toLowerCase();
           if (seen.has(key)) continue;
@@ -1026,7 +1087,7 @@ function hWhoIs(q, ctx, S) {
      printing it twice makes the answer look padded. */
   const quoted = Array.from(new Set(read.traits.map(t => t.sentence)));
   const quotedKeys = new Set(quoted.map(s => s.slice(0, 40).toLowerCase()));
-  const extra = summary.filter(s => !quotedKeys.has(s.slice(0, 40).toLowerCase()));
+  const extra = inferred ? summary.filter(s => !quotedKeys.has(s.slice(0, 40).toLowerCase())) : [];
 
   return out(`${dymNote(m[1], found)}
     <div class="blurb">

@@ -202,14 +202,45 @@ setTimeout(() => {
     const m = r && /<div class="bs lead">([\s\S]*?)<\/div>/.exec(r.html);
     return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
   };
+  /* Max may be described THROUGH the relation Lily's sentence states,
+     but must never inherit Lily's own attributes. */
   check("scratch: Max is not given Lily's age", !/seven/i.test(leadOf(max)), leadOf(max));
-  check("scratch: nothing at all is claimed about Max",
-    leadOf(max) === "", leadOf(max));
+  check("scratch: Max is not said to be friends with himself",
+    !/friends with Max/i.test(leadOf(max)), leadOf(max));
+  check("scratch: Max is not said to dislike Adam",
+    !/does not like Adam/i.test(leadOf(max)), leadOf(max));
   check("scratch: Lily's own claim IS composed", /^Lily is seven/.test(leadOf(lily)), leadOf(lily));
   B.reset();
   const adam = ans("who is Adam");
   const adamText = adam ? adam.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
-  check("scratch: nothing is claimed about Adam either", leadOf(adam) === "", leadOf(adam));
+  check("scratch: Adam is not said to dislike himself",
+    !/Adam does not like|does not like Adam/i.test(leadOf(adam)), leadOf(adam));
+  check("scratch: Adam is not given Lily's age", !/seven/i.test(leadOf(adam)), leadOf(adam));
+
+  /* The other side of a relation. "Lily is friends with Max" says
+     something about Max too, and the answer to "who is Max" should be
+     about Max rather than a line about Lily with nothing drawn from it. */
+  B.reset();
+  const maxLead = leadOf(ans("who is Max"));
+  check("scratch: reads the relation from Max's side", /^Max is a friend of Lily\.?$/.test(maxLead), maxLead);
+  B.reset();
+  check("scratch: and from Steve's", /^Steve is a friend of Lily\.?$/.test(leadOf(ans("who is Steve"))),
+    leadOf(ans("who is Steve")));
+  B.reset();
+  check("scratch: a dislike inverts too, without reversing who dislikes whom",
+    /^Adam is someone Lily does not like\.?$/.test(leadOf(ans("who is Adam"))), leadOf(ans("who is Adam")));
+  B.reset();
+  check("scratch: Lily is still not described as her own friend",
+    !/friend of Lily/.test(leadOf(ans("who is lily"))), leadOf(ans("who is lily")));
+
+  /* "Canon only" keeps to the built-in collections, which exclude My
+     Notes. A workspace made entirely of notes must not be told its own
+     entries do not exist. */
+  B.reset();
+  const canonScoped = B.answer("who is steve", { scope: "canon", length: "brief" });
+  check("scratch: 'Canon only' does not blind it when every entry is a note",
+    !!canonScoped && /Steve is a friend of Lily/.test(canonScoped.html),
+    canonScoped ? leadOf(canonScoped) : "returned null");
 
   // a predicate is not a name
   B.reset();

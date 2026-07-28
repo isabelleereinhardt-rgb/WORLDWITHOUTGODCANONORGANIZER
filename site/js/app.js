@@ -1397,7 +1397,13 @@ function searchAll(q, forAssistant, scope) {
   if (meaty.length) terms = meaty;
   const res = [];
   let pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
-  if (forAssistant && scope === "canon") pool = pool.filter(e => CANON_ORDER.includes(e.category));
+  if (forAssistant && scope === "canon") {
+    // see brain.js: a scope that leaves nothing to read is a dead end,
+    // not a preference; a workspace made entirely of notes would be
+    // told its own entries do not exist
+    const narrowed = pool.filter(e => CANON_ORDER.includes(e.category));
+    if (narrowed.length) pool = narrowed;
+  }
   for (const e of pool) {
     const hay = e._hay, title = e.title.toLowerCase(); let score = 0;
     for (const t of terms) {
