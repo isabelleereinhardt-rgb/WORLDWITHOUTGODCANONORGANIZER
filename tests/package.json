@@ -1,0 +1,12 @@
+{
+  "name": "beep-beep-assistant-tests",
+  "private": true,
+  "description": "Tests for the Beep Beep Organizer assistant. Not part of the site; the site ships as static files with no build step.",
+  "scripts": {
+    "test": "./run.sh",
+    "test:unit": "./run.sh unit"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}

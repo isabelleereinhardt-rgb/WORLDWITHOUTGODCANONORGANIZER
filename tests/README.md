@@ -1,0 +1,63 @@
+# Tests for the assistant
+
+These exist because the assistant is the one part of the site that can be
+confidently wrong. Everything else either renders or does not; an answer
+can look perfectly reasonable and still be made up, or quietly stop
+citing your entries. These suites check the things that would be
+embarrassing rather than merely broken.
+
+They have already caught four real faults: a house indexed under its bare
+name reported as "not in your canon", statistics disagreeing with the
+sidebar, a polite "please add a task to…" falling through to a search,
+and a connected model never being called when retrieval came back empty.
+
+## Running them
+
+```bash
+./tests/run.sh unit     # fast, no browser
+./tests/run.sh          # everything, including the browser suite
+```
+
+The browser suite needs Playwright once:
+
+```bash
+cd tests && npm install
+```
+
+Nothing here talks to the internet, and no API key is needed. The suites
+block outbound requests and use a local stand-in provider instead.
+
+## What each one covers
+
+**`brain.test.js`** — the on-device understanding, against a small
+invented canon so the expected answers are knowable. Every question shape
+(compare, relationship, when, where, why, how old, define, facts,
+opinion, statistics), pronoun and "what about X" resolution, typo
+tolerance, the markdown renderer, and — just as important — the questions
+the brain must *not* answer, so it keeps handing those to the older
+handlers instead of swallowing them.
+
+**`ai.test.js`** — the request actually sent to a provider, with `fetch`
+stubbed. That conversation history is sanitised into strict alternation,
+that a dangling user turn is dropped, that standing instructions and the
+persona reach the system prompt, and that turning the personality off
+removes it without disturbing anything else.
+
+**`assistant.e2e.js`** — the real site in a real browser, against the
+real World Without God canon, driven through the actual interface. Asks
+questions, checks the answers name real entries, teaches it a fact and
+confirms a later answer uses it, runs every action and confirms the
+records exist and that undo removes them, configures the API path through
+Settings, and verifies a bad key downgrades instead of breaking.
+
+**`stub-provider.js`** — a stand-in that speaks the OpenAI request shape.
+It records everything it is sent so the tests can assert on the real
+payload, echoes back proof of what arrived, and has a `/fail` route for
+testing the failure path. Using it means no key, no cost, and no network.
+
+## A note on the end-to-end suite
+
+It signs in as a guest whose workspace carries the canon, which is the
+configuration a reader of this repository gets. It writes to that
+workspace: a few tasks, a draft note, a document, a section. They live in
+that browser profile only and are discarded when it closes.
