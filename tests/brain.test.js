@@ -31,9 +31,13 @@ const entries = [
 entries.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
 const entities = ["Amara", "Veyra", "Karyth", "The Sundering", "Accord", "Silver Reach", "Vael"];
 
+/* mirrors app.js exactly, including the fallback: a note with no full
+   stop is still one sentence, and a stub that returned [] there hid a
+   real answer behind a fixture bug */
 const sentencesOf = t => {
-  const m = String(t || "").replace(/\s+/g, " ").match(/[^.!?]+[.!?]+(?=\s|$)/g);
-  return m ? m.map(s => s.trim()) : [];
+  const x = String(t || "").replace(/\s+/g, " ").trim();
+  const m = x.match(/[^.!?]+[.!?]+(?=\s|$)/g);
+  return (m && m.length) ? m.map(s => s.trim()) : (x ? [x] : []);
 };
 window.Codex = {
   DB: { entries, entities },
@@ -153,6 +157,75 @@ setTimeout(() => {
   check("skip consistency", ans("check consistency") === null);
   check("skip plain name", ans("Amara") === null);
   check("skip remember-when", ans("remember when the war started?") === null);
+
+
+  // ---------------------------------------------------------------
+  // A WORKSPACE STARTED FROM SCRATCH: no imported canon, one note,
+  // and the person you are asking about exists only inside its text.
+  // This is the shape of a real bug report: "who is lily" answered
+  // "Nothing in your canon matches" while the note sat on screen.
+  // ---------------------------------------------------------------
+  const scratch = [{ id: "s1", title: "Untitled note", category: "My Notes", type: "note",
+    wordcount: 17,
+    text: "LILY IS SEVEN AND Friends with Max Steve Ivory But she does not like Adam or even" }];
+  scratch.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  const realDB = window.Codex.DB;
+  const realTopic = window.Codex.topicSummary;
+  const realMentions = window.Codex.mentionsOf;
+  const realBest = window.Codex.bestEntryFor;
+  window.Codex.DB = { entries: scratch, entities: ["Untitled note"] };   // names = titles only
+  window.Codex.topicSummary = (n, k) => sentencesOf(scratch.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(n.toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = n => scratch.filter(e => e._hay.includes(n.toLowerCase()));
+  window.Codex.bestEntryFor = n => scratch.find(e => e._hay.includes(n.toLowerCase())) || null;
+
+  B.reset();
+  let lily = ans("who is lily");
+  const lilyText = lily ? lily.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
+  check("scratch: 'who is lily' is answered at all", !!lily, "returned null");
+  check("scratch: reads her age out of the note", /Lily is seven/i.test(lilyText), lilyText.slice(0, 200));
+  check("scratch: reads who she is friends with", /friends with Max Steve Ivory/i.test(lilyText), lilyText.slice(0, 200));
+  check("scratch: reads who she dislikes", /does not like Adam/i.test(lilyText), lilyText.slice(0, 200));
+  check("scratch: does not swallow the trailing 'or even'",
+    !/like Adam or even/i.test(lilyText.split("Where I read")[0]), lilyText.slice(0, 220));
+  check("scratch: names her properly, not SHOUTED", /Lily/.test(lilyText) && lily.subject === "Lily", lily && lily.subject);
+  check("scratch: says the reading came from the writer's own words",
+    /own wording/i.test(lily.grounded || ""), lily && lily.grounded);
+
+  // the failure that matters most: traits must not leak between people
+  B.reset();
+  const max = ans("tell me about Max");
+  const maxText = max ? max.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
+  /* Only the COMPOSED sentence is a claim; the quoted source underneath
+     it is context and is expected to name everyone. */
+  const leadOf = r => {
+    const m = r && /<div class="bs lead">([\s\S]*?)<\/div>/.exec(r.html);
+    return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
+  };
+  check("scratch: Max is not given Lily's age", !/seven/i.test(leadOf(max)), leadOf(max));
+  check("scratch: nothing at all is claimed about Max",
+    leadOf(max) === "", leadOf(max));
+  check("scratch: Lily's own claim IS composed", /^Lily is seven/.test(leadOf(lily)), leadOf(lily));
+  B.reset();
+  const adam = ans("who is Adam");
+  const adamText = adam ? adam.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
+  check("scratch: nothing is claimed about Adam either", leadOf(adam) === "", leadOf(adam));
+
+  // a predicate is not a name
+  B.reset();
+  check("scratch: 'who is <a description>' is not treated as a name",
+    ans("who is terrified of open water") === null);
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
+  // back on the ordinary fixture, the plain question still works
+  B.reset();
+  const whoAmara = ans("who is Amara");
+  check("'who is X' answers on a normal canon too", !!whoAmara &&
+    /Amara/.test(whoAmara.html), whoAmara && whoAmara.html.slice(0, 120));
 
   // markdown
   const html = B.md("## Head\n\n**Bold** and *italic* and `code`.\n\n- one\n- two\n\n1. first\n2. second\n\n> a quote\n\n<script>alert(1)</script>");

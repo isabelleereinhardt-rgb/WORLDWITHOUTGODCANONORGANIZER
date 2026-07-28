@@ -1375,9 +1375,27 @@ function trimToWords(seg, cutHead, cutTail) {
    switch set when the entry was imported; scope="canon" additionally
    keeps to the built-in collections, which is what the rail's scope
    chip promises when it says "Canon only". */
+/* The words a question is BUILT from, as opposed to the words it is
+   about. Every term used to be required, which meant "who is Lily"
+   searched for "who" as hard as it searched for "Lily"; and since nobody
+   writes "who" in their notes, the entry about Lily could never match.
+   A question would reliably fail where the bare name succeeded. */
+const GRAMMAR_WORDS = new Set([
+  "who", "whos", "what", "whats", "when", "where", "why", "how", "which",
+  "is", "are", "was", "were", "be", "been", "am", "do", "does", "did",
+  "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "about",
+  "and", "or", "but", "tell", "me", "my", "your", "you", "i", "it",
+  "can", "could", "would", "should", "please", "there", "their", "they",
+  "he", "she", "him", "her", "his", "hers", "them", "this", "that",
+]);
 function searchAll(q, forAssistant, scope) {
   q = q.trim().toLowerCase(); if (!q) return [];
-  const terms = q.split(/\s+/); const res = [];
+  let terms = q.split(/\s+/);
+  /* Drop the grammar and keep the substance; but only when something is
+     left, so a search for the literal word "who" still works. */
+  const meaty = terms.filter(t => !GRAMMAR_WORDS.has(t) && t.length > 1);
+  if (meaty.length) terms = meaty;
+  const res = [];
   let pool = forAssistant ? DB.entries.filter(e => e.aiRead !== false) : DB.entries;
   if (forAssistant && scope === "canon") pool = pool.filter(e => CANON_ORDER.includes(e.category));
   for (const e of pool) {

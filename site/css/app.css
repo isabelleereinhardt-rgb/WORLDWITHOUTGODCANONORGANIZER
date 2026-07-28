@@ -2349,3 +2349,12 @@ a.a-chip{text-decoration:none;display:inline-block}
 @keyframes acaret{0%,100%{opacity:1}50%{opacity:0}}
 [data-motion="calm"] .a-model.streaming .am-text > *:last-child:after{animation:none;opacity:.7}
 .a-model.streaming .am-text{min-height:1.2em}
+
+/* ---------- an answer that was read, not quoted ---------- */
+.blurb .bs.lead{font-size:15.5px;line-height:1.6;color:var(--ink)}
+.infer-src{margin-top:8px}
+.infer-src summary{font-family:var(--serif);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-faint);cursor:pointer;padding:4px 0}
+.infer-src summary:hover{color:var(--blush)}
+.a-more{font-size:13px;line-height:1.55;color:var(--ink-soft);margin-top:9px;
+  padding-top:8px;border-top:1px solid var(--line)}

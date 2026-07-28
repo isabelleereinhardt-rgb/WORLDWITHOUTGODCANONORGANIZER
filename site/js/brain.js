@@ -139,6 +139,15 @@ function findEntity(raw) {
   hit = ents.find(n => n.toLowerCase().startsWith(nl)) ||
         ents.find(n => n.toLowerCase().includes(nl));
   if (hit) return { name: hit, guessed: hit.toLowerCase() !== nl };
+
+  /* Still nothing. The name index is built from entry TITLES and the
+     pre-extracted canon, so anyone who exists only inside the body of a
+     note you typed is invisible to it; and because every capability
+     resolves its subject through here, that one gap made the whole
+     assistant look broken on a workspace someone started from scratch.
+     So look in the writing itself. */
+  const inText = nameInText(name);
+  if (inText) return { name: inText, guessed: false };
   // fuzzy last: one slip for short names, two for long ones
   if (nl.length >= 4) {
     const cap = nl.length > 6 ? 2 : 1;
@@ -151,6 +160,36 @@ function findEntity(raw) {
   }
   return null;
 }
+/* Look for a name in the body of the entries rather than in the index.
+   The guard that keeps this honest is capitalisation: it will only
+   accept a match that is WRITTEN like a name where it appears. Without
+   that, "who is terrified of open water" would match the words
+   "terrified of open water" and confidently report them as a character.
+   Notes are often shouted, so ALL CAPS counts as capitalised. */
+function nameInText(name) {
+  const words = name.trim().split(/\s+/);
+  if (!words.length || words.length > 3 || name.length < 2) return null;
+  let re;
+  try { re = new RegExp("\\b" + reEsc(name) + "\\b", "gi"); } catch (e) { return null; }
+  for (const e of pool(null)) {
+    const text = e.text || "";
+    if (!text) continue;
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m[0].split(/\s+/).every(w => /^[A-Z]/.test(w))) return prettyName(m[0]);
+    }
+  }
+  return null;
+}
+/* "LILY" is the same person as "Lily"; only one of them is worth
+   printing back at somebody. */
+function prettyName(s) {
+  return s.split(/(\s+)/).map(part =>
+    /^[A-Z][A-Z'’-]*$/.test(part) && part.length > 1
+      ? part.charAt(0) + part.slice(1).toLowerCase() : part).join("");
+}
+
 function dymNote(asked, found) {
   const a = cleanName(asked);
   if (!found || !found.guessed || a.toLowerCase() === found.name.toLowerCase()) return "";
@@ -783,12 +822,243 @@ function hOpinion(q, ctx) {
 }
 
 /* ============================================================
+   READING, RATHER THAN QUOTING
+
+   Everything above finds the right sentences and shows them to you. That
+   is retrieval, and it is not the same as an answer. Asked "who is
+   Lily", a person who had read "LILY IS SEVEN AND Friends with Max Steve
+   Ivory But she does not like Adam" would not read the line back; they
+   would say Lily is seven, is friends with Max Steve Ivory, and does not
+   like Adam.
+
+   So: a small set of patterns for the things writers actually state
+   about a character, each one turning a fragment of your own wording
+   into a clause. Then the clauses are assembled into a sentence.
+
+   The line this must not cross is invention. Every clause is a
+   rearrangement of words you wrote; nothing adds a fact that is not on
+   the page, and the sentences it read from are shown underneath so any
+   claim can be checked in one glance.
+   ============================================================ */
+const STOP_CLAUSE = /\s*\b(?:but|however|although|though|whereas|while|and then)\b|[.;:!?]|$/i;
+
+/* cut a captured fragment at the first thing that ends the thought, and
+   tidy the trailing filler people leave when they trail off */
+function tidyClause(s) {
+  let t = String(s || "").replace(/\s+/g, " ").trim();
+  const stop = t.search(STOP_CLAUSE);
+  if (stop > 0) t = t.slice(0, stop);
+  return t.replace(/[,;:.\s]+$/, "").replace(/\s+\b(?:or\s+even|or\s+anything|etc\.?)\s*$/i, "").trim();
+}
+
+const NUMBER_WORD = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|" +
+  "thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty";
+
+/* Each pattern says how to recognise a statement and how to say it back.
+   `about` marks the ones that must appear near the subject's own name,
+   so a second character's dislikes are not attributed to the first. */
+const TRAITS = [
+  { k: "age", about: true,
+    re: new RegExp("\\b(?:is|was|are|were)\\s+(\\d{1,3}|" + NUMBER_WORD + ")\\b(\\s+years?\\s+old)?", "i"),
+    say: m => "is " + m[1].toLowerCase() + (m[2] ? " years old" : "") },
+  { k: "role", about: true,
+    re: /\b(?:is|was)\s+((?:a|an|the)\s+[a-z][\w'-]*(?:\s+[a-z][\w'-]*){0,3})/i,
+    say: m => "is " + tidyClause(m[1]) },
+  { k: "friends",
+    re: /\bfriends?\s+with\s+(.+)/i,
+    say: m => "is friends with " + tidyClause(m[1]) },
+  { k: "dislikes",
+    re: /\b(?:does\s+not|doesn'?t|did\s+not|didn'?t|do\s+not|don'?t)\s+(?:like|trust|get\s+along\s+with)\s+(.+)/i,
+    say: m => "does not like " + tidyClause(m[1]) },
+  { k: "hates",
+    re: /\b(?:hates|hated|despises|despised|resents|resented)\s+(.+)/i,
+    say: m => "hates " + tidyClause(m[1]) },
+  { k: "likes",
+    re: /\b(?:likes|loves|adores|admires)\s+(.+)/i,
+    say: m => "loves " + tidyClause(m[1]) },
+  { k: "family",
+    re: /\b(?:is\s+)?(?:the\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|heir)\s+(?:of|to)\s+(.+)/i,
+    say: m => "is the " + m[1].toLowerCase() + " of " + tidyClause(m[2]) },
+  { k: "married",
+    re: /\b(?:is|was)\s+married\s+to\s+(.+)/i,
+    say: m => "is married to " + tidyClause(m[1]) },
+  { k: "lives",
+    re: /\b(?:lives?|lived|resides?|resided)\s+in\s+(.+)/i,
+    say: m => "lives in " + tidyClause(m[1]) },
+  { k: "from",
+    re: /\b(?:is|was|comes|came)\s+from\s+(.+)/i,
+    say: m => "is from " + tidyClause(m[1]) },
+  { k: "status", about: true,
+    re: /\b(?:is|was)\s+(dead|alive|missing|exiled|banished|imprisoned|crowned|widowed)\b/i,
+    say: m => "is " + m[1].toLowerCase() },
+];
+
+/* ---------- whose statement is it? ----------
+   The hard part of reading a sentence is not spotting "friends with";
+   it is knowing WHO is friends. In "LILY IS SEVEN AND Friends with Max
+   Steve Ivory But she does not like Adam", every one of those claims
+   belongs to Lily, yet Max and Adam are both named in it. Attaching a
+   trait to whichever name happens to sit in the sentence produces
+   confident nonsense: "Max is seven, friends with Max Steve Ivory".
+
+   The rule that fixes it is grammatical position. A statement belongs to
+   the nearest name BEFORE it, never to a name that follows it; a name
+   after the verb is its object, not its subject. Where the clause opens
+   with a pronoun instead, it belongs to whoever the sentence opened
+   with. Anything that cannot be settled that way is left unclaimed. */
+const COMMON_WORDS = new Set(("is are was were am be been being has have had do does did " +
+  "and or but the a an of to in on at for with from by not no if as so then than " +
+  "she he they it her him them his hers their its this that these those there here " +
+  "who what when where why how all any some more most very just only even still yet " +
+  "about into over under after before while because friends friend like likes liked " +
+  "love loves loved hate hates hated lives lived from married sister brother mother " +
+  "father son daughter wife husband cousin aunt uncle heir dead alive missing exiled " +
+  "one two three four five six seven eight nine ten eleven twelve thirteen fourteen " +
+  "fifteen sixteen seventeen eighteen nineteen twenty years year old").split(" "));
+
+function looksLikeName(tok) {
+  return tok.length > 1 && /^[A-Z]/.test(tok) && !COMMON_WORDS.has(tok.toLowerCase());
+}
+/* every name-ish token in a string, with where it sits */
+function namesWithin(text) {
+  const out = [];
+  const re = /\b[A-Za-z][\w'’-]*\b/g;
+  let m;
+  while ((m = re.exec(text))) if (looksLikeName(m[0])) out.push({ name: m[0], at: m.index });
+  return out;
+}
+/* Does this statement belong to `name`? */
+function statementBelongsTo(piece, sentence, at, nl) {
+  const before = namesWithin(piece.slice(0, at));
+  if (before.length) return before[before.length - 1].name.toLowerCase() === nl;
+  // no name before it; a pronoun defers to whoever the sentence opened with
+  if (/\b(?:she|he|they|her|him|them|it)\b\s*$/i.test(piece.slice(0, at).trim() + " ") ||
+      /\b(?:she|he|they)\b/i.test(piece.slice(0, at))) {
+    const lead = namesWithin(sentence)[0];
+    return !!lead && lead.name.toLowerCase() === nl;
+  }
+  return false;
+}
+
+/* Read every statement the entries make about one subject. Text is cut
+   into clauses first, because a run-on line holds several separate
+   claims and matching across the whole of it would blend them together. */
+function readTraits(name, ctx) {
+  const nl = name.toLowerCase();
+  const found = [];
+  const seen = new Set();
+  const sources = [];
+  for (const e of pool(ctx)) {
+    if (!e._hay || !e._hay.includes(nl)) continue;
+    let used = false;
+    for (const sentence of C().sentencesOf(e.text)) {
+      if (!sentence.toLowerCase().includes(nl) && !/\b(?:she|he|they)\b/i.test(sentence)) continue;
+      // split on the connectives that separate one claim from the next,
+      // keeping the offsets so ownership can be judged in context
+      let cursor = 0;
+      const pieces = sentence.split(/\b(?:but|however|although|though|and then)\b/i);
+      for (const piece of pieces) {
+        const pieceAt = sentence.indexOf(piece, cursor);
+        cursor = pieceAt + piece.length;
+        if (!piece || piece.length < 3) continue;
+        for (const t of TRAITS) {
+          if (found.some(f => f.k === t.k)) continue;      // first statement wins
+          t.re.lastIndex = 0;
+          const m = t.re.exec(piece);
+          if (!m) continue;
+          if (!statementBelongsTo(piece, sentence, m.index, nl)) continue;
+          const clause = t.say(m);
+          if (!clause || clause.length < 4) continue;
+          const key = clause.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          found.push({ k: t.k, clause, sentence: sentence.trim(), entry: e });
+          used = true;
+        }
+      }
+    }
+    if (used && !sources.includes(e)) sources.push(e);
+  }
+  return { traits: found, sources };
+}
+
+/* Assemble the clauses into something a person would actually say.
+   The subject is named once; after that the repeated "is" is dropped,
+   because "Lily is seven, is friends with Max, and does not like Adam"
+   reads like a form rather than a sentence. */
+function composeSentence(name, traits) {
+  if (!traits.length) return "";
+  const parts = traits.map((t, i) => i === 0 ? t.clause : t.clause.replace(/^is\s+/, ""));
+  if (parts.length === 1) return name + " " + parts[0] + ".";
+  if (parts.length === 2) return name + " " + parts[0] + " and " + parts[1] + ".";
+  return name + " " + parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";
+}
+
+/* ---------- "who is X" / "what is X" / "tell me about X" ----------
+   The most ordinary question there is, and until now the only one with
+   no handler at all. */
+function hWhoIs(q, ctx, S) {
+  const m = q.match(/^\s*(?:who|what)(?:'s|s)?\s+(?:is|are|was|were)\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*tell\s+me\s+about\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*(?:info|information)\s+(?:on|about)\s+(.+?)\s*\??\s*$/i);
+  if (!m) return null;
+  const found = findEntity(m[1]);
+  if (!found) return null;               // not a subject; let the pipeline try
+  const name = found.name;
+
+  const read = readTraits(name, ctx);
+  const summary = C().topicSummary(name, Math.max(2, Math.min(S, 4)));
+  const home = C().bestEntryFor(name, true);
+  const facts = home ? C().factsOf(home, 8) : [];
+  const inferred = composeSentence(name, read.traits);
+
+  if (!inferred && !summary.length && !facts.length) {
+    return out(`${dymNote(m[1], found)}
+      <div class="assistant-hint"><b>${esc(name)}</b> is mentioned in your entries, but nothing
+      there says anything about ${esc(name)} yet.</div>`, { subject: name });
+  }
+
+  const sources = read.sources.length ? read.sources
+    : (home ? [home] : C().mentionsOf(name, null, true).slice(0, 4));
+
+  /* The sentences the reading came from, and then whatever the summary
+     adds BEYOND them. On a short note those are the same line, and
+     printing it twice makes the answer look padded. */
+  const quoted = Array.from(new Set(read.traits.map(t => t.sentence)));
+  const quotedKeys = new Set(quoted.map(s => s.slice(0, 40).toLowerCase()));
+  const extra = summary.filter(s => !quotedKeys.has(s.slice(0, 40).toLowerCase()));
+
+  return out(`${dymNote(m[1], found)}
+    <div class="blurb">
+      <div class="bt">${home ? C().catDot(home.category) : ""} ${esc(name)}</div>
+      ${home ? `<div class="bc">${esc(home.category)}</div>` : ""}
+      ${inferred ? `<div class="bs lead">${esc(inferred)}</div>` : ""}
+      ${!inferred && summary.length ? `<div class="bs">${esc(summary.join(" ").slice(0, 420))}</div>` : ""}
+      ${facts.length ? `<dl class="sc-facts">${facts.map(f =>
+        `<dt>${esc(f.k)}</dt><dd>${esc(f.v)}</dd>`).join("")}</dl>` : ""}
+      ${home ? `<div style="margin-top:9px"><a class="btn sm" href="#/entry/${encodeURIComponent(home.id)}">Open entry</a></div>` : ""}
+    </div>
+    ${quoted.length ? `<details class="infer-src">
+      <summary>Where I read that</summary>
+      ${quoted.map(s => `<div class="ev-row"><span class="ev-q">${esc(s)}</span></div>`).join("")}
+    </details>` : ""}
+    ${extra.length ? `<div class="a-more">${esc(extra.join(" ").slice(0, 340))}</div>` : ""}`,
+    { sources, subject: name,
+      grounded: inferred
+        ? "Read from your own wording · nothing added"
+        : "Grounded in your entries · nothing invented" });
+}
+
+/* ============================================================
    DISPATCH; first shape that matches, answers
    ============================================================ */
 const HANDLERS = [
   hSmalltalk, hHelp, hMemories, hRemember, hStats, hRandom,
   hCompare, hRelation, hWhoAppears, hWhen, hWhere, hHowOld,
   hWhyHow, hDefine, hFacts, hOpinion,
+  // last: the most general question, so every specific shape gets first
+  // refusal and this catches what is left
+  hWhoIs,
 ];
 function answer(q, ctx) {
   if (!C() || !C().DB) return null;
