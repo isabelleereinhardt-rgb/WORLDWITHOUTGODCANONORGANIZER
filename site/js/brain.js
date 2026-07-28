@@ -127,7 +127,17 @@ function cleanName(raw) {
     .replace(/^(the|a|an)\s+/i, "")
     .trim();
 }
+/* Every capability resolves its subject through findEntity, so this is
+   the one place worth fixing the spelling of a name: whatever comes out
+   here is what gets printed back. Matching stays case-insensitive
+   throughout, so softening the display form changes nothing downstream. */
 function findEntity(raw) {
+  const found = findEntityRaw(raw);
+  if (!found) return null;
+  const shown = displayCase(found.name);
+  return shown === found.name ? found : { name: shown, guessed: found.guessed };
+}
+function findEntityRaw(raw) {
   const name = cleanName(raw);
   if (!name || !C()) return null;
   const db = C().DB, nl = name.toLowerCase();
@@ -201,6 +211,32 @@ function prettyName(s) {
   return s.split(/(\s+)/).map(part =>
     /^[A-Z][A-Z'’-]*$/.test(part) && part.length > 1
       ? part.charAt(0) + part.slice(1).toLowerCase() : part).join("");
+}
+/* Names arrive shouted more often than you would think: people title a
+   note "MERA" and write "Mera" inside it, and the answer then came back
+   as "MERA protects the orphans", which reads like the assistant is
+   raising its voice at you.
+
+   Softening it blindly would be wrong, though — a canon carries real
+   initialisms (PTSD, GRRM) that are not shouting and must be left
+   alone. So the writer's own spelling decides: if the same name is
+   written in mixed case anywhere in the entries, use that spelling,
+   because it is what they chose. Failing that, a shouted word is only
+   softened when every part of it has a vowel, which is what separates a
+   name being emphasised from a string of initials. */
+function displayCase(name) {
+  if (!name || !/^[^a-z]*$/.test(name) || !/[A-Z]{2}/.test(name)) return name;
+  let re;
+  try { re = new RegExp("\\b" + reEsc(name) + "\\b", "gi"); } catch (e) { return name; }
+  for (const e of pool(null)) {
+    const text = e.text || "";
+    if (!text) continue;
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) if (/[a-z]/.test(m[0]) && /^[A-Z]/.test(m[0])) return m[0];
+  }
+  const words = name.split(/\s+/);
+  return words.every(w => w.length < 2 || /[AEIOUY]/.test(w)) ? prettyName(name) : name;
 }
 
 function dymNote(asked, found) {
@@ -1030,8 +1066,11 @@ function wellFormed(clause) {
   // "the firstborn of Emperor" names a rank and then stops
   if (new RegExp("\\b(?:" + TITLES + ")\\s*$", "i").test(c)) return false;
   // a clause whose whole object is one short word says nothing
-  const tail = c.replace(/^[a-z]+(?:\s+(?:a|an|the|to|of|by|in|at|with|as|not|like))*\s+/i, "");
-  if (tail.length < 4 || /^(?:one|two|some|many|other|others|this|that)$/i.test(tail)) return false;
+  const tail = c.replace(/^(?:(?:was|were|is|are|has|have|had|been)\s+)?[a-z]+(?:\s+(?:a|an|the|to|of|by|in|at|with|as|not|like))*\s+/i, "");
+  /* "was shot by people" names an agent that identifies nobody; it sat
+     in Crandona's sentence between two tellings of the same death and
+     added nothing to either. */
+  if (tail.length < 4 || /^(?:one|two|some|many|other|others|this|that|people|someone|somebody|anyone|everyone|nobody|them|they|us|folk)$/i.test(tail)) return false;
   return /\s/.test(c);
 }
 
@@ -1327,6 +1366,11 @@ const TRAITS = [
     say: m => {
       const object = tidyClause(m[2], 6);
       if (!object) return "";
+      /* "the walls Caraen built were dedicated to his family" is a
+         sentence about the walls, and reading it as a deed produced
+         "Caraen built were dedicated to his family". Nothing a person
+         does is followed by a finite verb, so that shape is not one. */
+      if (/^(?:was|were|is|are|has|have|had|been|will|would|should|could|do|does|did|and|or|that|which|who|whom)\b/i.test(object)) return "";
       const verb = m[1].toLowerCase();
       const passive = /^(?:up|down|out|off|away|back|apart|aside)?\s*by\b/i.test(object);
       return passive ? "was " + verb + " " + object : verb + " " + object;
@@ -1591,6 +1635,56 @@ function typeOf(name, ctx) {
   return "unknown";
 }
 
+/* Most facts come in ones: you have a single age, a single birthplace,
+   one father. Taking the first statement and ignoring the rest is right
+   for those, and it stops a name repeated across forty entries filling
+   the answer with the same clause.
+
+   Deeds are the exception. What somebody does is a list, not a value,
+   and keeping only the first of them turned "Mera protects the orphans
+   and heals the wounded, and was struck down by arrows" into "Mera
+   protects the orphans" — a third of what the entry says about her, and
+   thin evidence to judge her character on. So actions are allowed to
+   accumulate, up to the point where the sentence would sprawl. */
+const MULTI = { does: 3 };
+function allowance(k) { return MULTI[k] || 1; }
+function countOf(list, k) { let n = 0; for (const f of list) if (f.k === k) n++; return n; }
+
+/* Two deeds are the same deed when the verb matches and the objects are
+   about the same thing. Objects are compared on their content words so
+   that "the house" and "House Orana" meet on "house", while "her kess"
+   and "the ceremony" share nothing and stay apart. */
+const DEED_STOP = new Set(["the", "a", "an", "his", "her", "their", "its", "our", "my",
+  "your", "this", "that", "these", "those", "of", "to", "for", "in", "on", "at", "by",
+  "with", "and", "own", "all", "some", "every", "own"]);
+function deedWords(s) {
+  return String(s).toLowerCase().replace(/[’'](s)?\b/g, " ").split(/[^a-z]+/)
+    .filter(w => w.length > 2 && !DEED_STOP.has(w));
+}
+/* Between two tellings of one deed, the one that names what was acted
+   on is the one worth keeping — "burned House Orana" over "burned the
+   house to the ground", even though it is the shorter of the two.
+   Length only settles it when neither names anything. */
+function namesSomething(clause) {
+  return /\s[A-Z][a-z’'-]+/.test(clause);
+}
+function beatsDeed(g, f, j, i) {
+  const ng = namesSomething(g.clause), nf = namesSomething(f.clause);
+  if (ng !== nf) return ng;
+  if (g.clause.length !== f.clause.length) return g.clause.length > f.clause.length;
+  return j < i;
+}
+function sameDeed(a, b) {
+  if (a.k !== b.k || allowance(a.k) < 2) return false;
+  const va = /^\s*(?:was\s+|were\s+)?([a-z]+)/i.exec(a.clause);
+  const vb = /^\s*(?:was\s+|were\s+)?([a-z]+)/i.exec(b.clause);
+  if (!va || !vb || va[1].toLowerCase() !== vb[1].toLowerCase()) return false;
+  const wa = deedWords(a.clause.slice(va[0].length));
+  const wb = deedWords(b.clause.slice(vb[0].length));
+  if (!wa.length || !wb.length) return true;      // "burned" twice with nothing said
+  return wa.some(w => wb.indexOf(w) > -1);
+}
+
 /* Read every statement the entries make about one subject. Text is cut
    into clauses first, because a run-on line holds several separate
    claims and matching across the whole of it would blend them together. */
@@ -1617,7 +1711,7 @@ function readTraits(name, ctx) {
         if (!piece || piece.length < 3) continue;
         // what the clause says about its own subject
         for (const t of TRAITS) {
-          if (found.some(f => f.k === t.k)) continue;      // first statement wins
+          if (countOf(found, t.k) >= allowance(t.k)) continue;   // first statement wins
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
@@ -1702,9 +1796,45 @@ function readTraits(name, ctx) {
     : kind === "house" ? HOUSE_BLOCK : null;
   if (blocked) found = found.filter(f => blocked.indexOf(f.k) < 0);
 
-  const trimmed = found.filter((f, i) =>
+  /* A house can be destroyed, founded or betrayed; it cannot be shot.
+     "House Schmidtavaca was struck down by over forty arrows" came from
+     a sentence about the empress who died in that family's entry, and
+     it is the kind of error a reader spots instantly. Blocking the deed
+     pattern outright would also lose "House Vemer trains assassins", so
+     only what happens to a body is refused. */
+  if (kind === "house") {
+    const bodily = /^(?:was\s+)?(?:shot|stabbed|struck|beaten|beat|kicked|hit|wounded|drowned|poisoned|hanged|strangled|whipped|nursed|healed|birthed)\b/i;
+    found = found.filter(f => !(allowance(f.k) > 1 && bodily.test(f.clause)));
+  }
+
+  let trimmed = found.filter((f, i) =>
     !found.some((g, j) => j !== i && g.clause.length > f.clause.length &&
       g.clause.toLowerCase().includes(f.clause.toLowerCase())));
+
+  /* Letting deeds accumulate exposed a duplicate the old first-wins rule
+     had been hiding: a writer names the thing once and pronouns it
+     afterwards, so the same act arrives twice — "Liacaion burned the
+     house and burned House Orana", "Leranoan raises Minaraʼs suspicion
+     and raises her suspicion". Same verb acting on the same thing is
+     one deed, and the telling of it that names the thing is the one
+     worth keeping. Different objects stay: someone who keeps her
+     children and keeps the ceremony has done two things. */
+  trimmed = trimmed.filter((f, i) =>
+    !trimmed.some((g, j) => j !== i && sameDeed(f, g) && beatsDeed(g, f, j, i)));
+
+  /* Deeds accumulate, and only the first four clauses are spoken, so a
+     busy character can push their own identity out of their own
+     sentence: House Orana lost "was founded by Liaerto" to a third
+     deed. Everything read is kept — it still feeds the verdict and the
+     "also found" list — but past the second deed they queue behind the
+     facts that say what the subject actually is. */
+  const LEAD_DEEDS = 2;
+  let deeds = 0;
+  const front = [], back = [];
+  trimmed.forEach(f => {
+    if (allowance(f.k) > 1 && ++deeds > LEAD_DEEDS) back.push(f); else front.push(f);
+  });
+  trimmed = front.concat(back);
 
   return { traits: trimmed, sources, kind };
 }
@@ -1740,13 +1870,30 @@ const quoteOnly = rows => rows.map(r => `<div class="ev-row"><span class="ev-q">
   `</div>`).join("");
 
 /* Assemble the clauses into something a person would actually say.
-   The subject is named once; after that the repeated "is" is dropped,
+   The subject is named once; after that a repeated copula is dropped,
    because "Lily is seven, is friends with Max, and does not like Adam"
-   reads like a form rather than a sentence. */
+   reads like a form rather than a sentence.
+
+   The drop is only legal while the copula is genuinely being shared, so
+   it has to look at the clause immediately before rather than blindly
+   stripping every "is". Once an ordinary verb interrupts the run the
+   verb is no longer available to borrow: "Adam kicks dogs and someone
+   Lily does not like" is what blind stripping produced, and it is not a
+   sentence. Guarding on the previous clause gives "Adam kicks dogs and
+   is someone Lily does not like", and still gives the short form when
+   the copular clauses do sit together. */
+const COPULA = /^(is|was|are|were)\s+/i;
 function composeSentence(name, traits) {
   if (!traits.length) return "";
   const use = traits.slice(0, MAX_CLAUSES);
-  const parts = use.map((t, i) => i === 0 ? t.clause : t.clause.replace(/^is\s+/, ""));
+  let prev = "";
+  const parts = use.map((t, i) => {
+    const m = t.clause.match(COPULA);
+    const here = m ? m[1].toLowerCase() : "";
+    const share = i > 0 && here && here === prev;
+    prev = here;
+    return share ? t.clause.replace(COPULA, "") : t.clause;
+  });
   if (parts.length === 1) return name + " " + parts[0] + ".";
   if (parts.length === 2) return name + " " + parts[0] + " and " + parts[1] + ".";
   return name + " " + parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";

@@ -474,13 +474,23 @@ setTimeout(() => {
       text: "LILY IS SEVEN AND Friends with Max Steve Ivory But she does not like Adam or even" },
     { id: "k2", title: "PTS", category: "My Notes", type: "note", wordcount: 6,
       text: "Adam Kicks dogs and beat childern" },
-    { id: "k3", title: "Mera", category: "Characters", type: "pdf", wordcount: 20,
+    { id: "k3", title: "MERA", category: "Characters", type: "pdf", wordcount: 20,
       text: "Mera protects the orphans and heals the wounded. Mera was struck down by arrows." },
     { id: "k4", title: "Vex", category: "Characters", type: "pdf", wordcount: 20,
       text: "Vex was killed by Doran. Vex was betrayed by his own guard." },
+    { id: "k5", title: "PTSD", category: "My Notes", type: "note", wordcount: 8,
+      text: "PTSD is a thread running through the later books." },
+    { id: "k6", title: "Liacaion", category: "Characters", type: "pdf", wordcount: 22,
+      text: "Liacaion burned the house to the ground. Later that night Liacaion burned House Orana as well. Liacaion was shot by people." },
+    { id: "k7", title: "House Vemer", category: "Noble Houses", type: "pdf", wordcount: 24,
+      text: "House Vemer trains assassins and keeps things quiet. House Vemer was struck down by over forty arrows." },
+    { id: "k8", title: "Caraen", category: "Characters", type: "pdf", wordcount: 26,
+      text: "The high walls that Caraen built were dedicated to his family. Caraen commands over one hundred knights." },
   ];
   deeds.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
-  window.Codex.DB = { entries: deeds, entities: ["NOTE", "PTS", "Mera", "Vex", "Doran"] };
+  window.Codex.DB = { entries: deeds,
+    entities: ["NOTE", "PTS", "MERA", "Vex", "Doran", "PTSD", "Liacaion", "House Orana",
+      "House Vemer", "Caraen"] };
   window.Codex.topicSummary = (n, k) => sentencesOf(deeds.map(e => e.text).join(" "))
     .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
   window.Codex.mentionsOf = (n, ex) => deeds.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
@@ -519,6 +529,50 @@ setTimeout(() => {
   check("tone: a content verdict names the clause it rests on",
     /chiefly that Adam/i.test(ans("what do you think of Adam").html),
     ans("what do you think of Adam").html.replace(/<[^>]+>/g, " ").slice(-180));
+
+  /* A shared "is" may only be dropped while it is genuinely shared.
+     "Adam kicks dogs and someone Lily does not like" is not English. */
+  B.reset();
+  check("compose: an ordinary verb does not strip the next clause's verb",
+    !/\band someone\b|,\s*someone\b/i.test(leadOf(ans("who is Adam"))),
+    leadOf(ans("who is Adam")));
+  B.reset();
+  check("compose: the subject is not shouted back",
+    /\bMera\b/.test(leadOf(ans("who is Mera"))) && !/MERA/.test(leadOf(ans("who is Mera"))),
+    leadOf(ans("who is Mera")));
+  B.reset();
+  check("compose: a real initialism is left alone",
+    !/\bPtsd\b/.test(ans("what is PTSD").html),
+    leadOf(ans("what is PTSD")) || ans("what is PTSD").html.replace(/<[^>]+>/g, " ").slice(0, 120));
+
+  /* What somebody does is a list, not a single value. */
+  B.reset();
+  check("deeds: several deeds are read, not just the first",
+    /protects the orphans/i.test(leadOf(ans("who is Mera"))) &&
+    /heals the wounded/i.test(leadOf(ans("who is Mera"))),
+    leadOf(ans("who is Mera")));
+  B.reset();
+  check("deeds: the same act told twice is one deed",
+    (leadOf(ans("who is Liacaion")).match(/burned/gi) || []).length === 1 &&
+    /burned House Orana/i.test(leadOf(ans("who is Liacaion"))),
+    leadOf(ans("who is Liacaion")));
+  B.reset();
+  check("deeds: an agent who identifies nobody is not worth saying",
+    !/by people/i.test(leadOf(ans("who is Liacaion"))),
+    leadOf(ans("who is Liacaion")));
+  B.reset();
+  check("deeds: a house is not shot",
+    !/struck down/i.test(leadOf(ans("what is House Vemer"))),
+    leadOf(ans("what is House Vemer")));
+  B.reset();
+  check("deeds: but a house still does what a house does",
+    /trains assassins/i.test(leadOf(ans("what is House Vemer"))),
+    leadOf(ans("what is House Vemer")));
+  B.reset();
+  check("deeds: a deed is not followed by a finite verb",
+    !/built were/i.test(leadOf(ans("who is Caraen"))) &&
+    /commands over one hundred/i.test(leadOf(ans("who is Caraen"))),
+    leadOf(ans("who is Caraen")));
 
   window.Codex.DB = realDB;
   window.Codex.topicSummary = realTopic;
