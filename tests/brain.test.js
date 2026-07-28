@@ -217,6 +217,18 @@ setTimeout(() => {
     !/Adam does not like|does not like Adam/i.test(leadOf(adam)), leadOf(adam));
   check("scratch: Adam is not given Lily's age", !/seven/i.test(leadOf(adam)), leadOf(adam));
 
+
+  /* The handlers must not contradict one another. "who is Lily" saying
+     she is seven while "how old is Lily" says it is not established is
+     worse than either answer on its own. */
+  B.reset();
+  const howOld = ans("how old is lily");
+  check("scratch: 'how old' agrees with 'who is'",
+    !!howOld && /Lily is seven/i.test(howOld.html), howOld ? leadOf(howOld) : "returned null");
+  B.reset();
+  check("scratch: and still admits what is NOT written",
+    /never|not established/i.test((ans("where is lily") || {}).html || ""), "");
+
   /* The other side of a relation. "Lily is friends with Max" says
      something about Max too, and the answer to "who is Max" should be
      about Max rather than a line about Lily with nothing drawn from it. */
@@ -336,6 +348,23 @@ setTimeout(() => {
   B.reset();
   check("trap: the answer stays a readable length",
     leadOf(ans("who is Kaeya")).split(/\s+/).length < 40, leadOf(ans("who is Kaeya")));
+
+
+  /* Statements do not travel between kinds of thing. */
+  B.reset();
+  check("kind: an entry filed under Characters is a person",
+    B.typeOf("Kaeya", { scope: "everything" }) === "person", B.typeOf("Kaeya", { scope: "everything" }));
+  check("kind: an entry filed under Maps is a place",
+    B.typeOf("Torad", { scope: "everything" }) === "place", B.typeOf("Torad", { scope: "everything" }));
+  check("kind: a name beginning 'House' is a house",
+    B.typeOf("House Veren", { scope: "everything" }) === "house", B.typeOf("House Veren", { scope: "everything" }));
+  B.reset();
+  check("kind: a place is never given a spouse or an age",
+    !/(?:has a wife|has a husband|is married|is \\d+ years old)/i.test(leadOf(ans("who is Torad"))),
+    leadOf(ans("who is Torad")));
+  B.reset();
+  check("kind: a person is never said to have been founded",
+    !/was founded (?:by|in)/i.test(leadOf(ans("who is Kaeya"))), leadOf(ans("who is Kaeya")));
 
   window.Codex.DB = realDB;
   window.Codex.topicSummary = realTopic;

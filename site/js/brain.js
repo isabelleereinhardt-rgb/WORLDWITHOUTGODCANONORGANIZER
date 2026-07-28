@@ -638,7 +638,17 @@ function hWhen(q, ctx, S) {
   if (!subjRaw) return null;
   const found = findEntity(subjRaw);
   const name = found ? found.name : cleanName(subjRaw);
+  const readT = found ? traitsFor(found.name, ctx) : null;
+  const datedTraits = readT ? clauseOf(readT, ["born", "died", "founded-in"]) : null;
   const rows = sentencesWith(name, TEMPORAL, ctx, S * 3);
+  if (!rows.length && datedTraits) {
+    return out(`${dymNote(subjRaw, found)}
+      <div class="ans-label">What your canon dates for ${esc(name)}</div>
+      <div class="bs lead">${esc(composeSentence(name, datedTraits))}</div>
+      ${quoteOnly(evidenceRows(datedTraits))}`,
+      { sources: readT.sources, subject: name,
+        grounded: "Read from your own wording · nothing added" });
+  }
   if (!rows.length) {
     if (!found) return null;                      // let the general pipeline try
     return out(`${dymNote(subjRaw, found)}
@@ -678,6 +688,17 @@ function hWhere(q, ctx, S) {
       <div style="margin-top:8px"><a class="btn sm" href="#/entry/${encodeURIComponent(home.id)}">Open entry</a></div></div>`,
       { sources: [home], subject: name });
   }
+  const readW = traitsFor(name, ctx);
+  const placed = clauseOf(readW, ["lives", "from", "located", "capital", "seat"]);
+  if (placed) {
+    return out(`${dymNote(m[1], found)}
+      <div class="ans-label">Where your canon puts ${esc(name)}</div>
+      <div class="bs lead">${esc(composeSentence(name, placed))}</div>
+      ${quoteOnly(evidenceRows(placed))}`,
+      { sources: readW.sources, subject: name,
+        grounded: "Read from your own wording · nothing added" });
+  }
+
   const rows = sentencesWith(name, PLACE_CUE, ctx, S * 2);
   const mentions = C().mentionsOf(name, null, true);
   if (!rows.length) {
@@ -705,6 +726,24 @@ function hHowOld(q, ctx, S) {
   const home = C().bestEntryFor(name, true);
   const ageFacts = home ? C().factsOf(home, 12).filter(f => /^(age|born|died)$/i.test(f.k)) : [];
   const rows = sentencesWith(name, /\b(age|aged|years? old|born|birth|died|death)\b/i, ctx, S);
+
+  /* The reading layer knows "LILY IS SEVEN" states an age even though
+     the line contains none of the words this handler searches for.
+     Without asking it, the assistant answered "who is Lily" with "Lily
+     is seven" and "how old is Lily" with "that is not established",
+     which is worse than either answer alone. */
+  const read = traitsFor(name, ctx);
+  const aged = clauseOf(read, ["age", "born", "died"]);
+  if (aged) {
+    return out(`${dymNote(m[1], found)}
+      <div class="ans-label">What your canon says about ${esc(name)}'s age</div>
+      <div class="bs lead">${esc(composeSentence(name, aged))}</div>
+      ${ageFacts.map(f => `<div class="glance-row"><span class="gk">${esc(f.k)}</span><span class="gv">${esc(f.v)}</span></div>`).join("")}
+      ${quoteOnly(evidenceRows(aged))}`,
+      { sources: read.sources.length ? read.sources : (home ? [home] : []), subject: name,
+        grounded: "Read from your own wording · nothing added" });
+  }
+
   if (!ageFacts.length && !rows.length) {
     return out(`${dymNote(m[1], found)}<div class="assistant-hint">Your entries never state an age,
       birth or death for <b>${esc(name)}</b>. That's not established yet.</div>`, { subject: name });
@@ -959,10 +998,16 @@ function plausibleName(text) {
    the judgement above. Ten names is the line: below that the index is
    too thin to prove anything, and refusing everything it lacks would
    make the assistant useless on a new workspace. */
+/* "ATION" and "TIONS" are in the name index because the extractor cut
+   words in half, not because anybody is called that. A name written
+   entirely in capitals with no lowercase anywhere is a fragment. */
+function indexArtefact(t) {
+  return /^[A-Z]{2,}$/.test(String(t || "").trim());
+}
 function resolveTarget(text) {
   const ents = (C().DB.entities || []);
   const t = String(text || "").replace(/^the\s+/i, "").trim();
-  if (!t) return null;
+  if (!t || indexArtefact(t)) return null;
   if (/^House\s+[A-Z]/i.test(t)) return t;
   if (ents.length >= 10) {
     const lower = t.toLowerCase();
@@ -971,7 +1016,7 @@ function resolveTarget(text) {
     /* The capture often drags a heading in with it. Keep the longest
        indexed name inside it and discard the rest, rather than printing
        "loyal to Vikistv Key Turning Points". */
-    const inside = ents.filter(n => n.length > 3 && lower.includes(n.toLowerCase()))
+    const inside = ents.filter(n => n.length > 3 && !indexArtefact(n) && lower.includes(n.toLowerCase()))
       .sort((a, b) => b.length - a.length)[0];
     return inside || null;
   }
@@ -1005,7 +1050,9 @@ const PROPER = "((?:the\\s+)?[A-Z][\\w'’-]*(?:\\s+[A-Z][\\w'’-]*){0,3})";
 const named = (before, after) => new RegExp(before + "\\s+" + (after || PROPER), "i");
 // traits built with named() take a NAMED object; their target is checked
 const STRICT = new Set(["rules","founded","leads","serves","loyal","worships",
-  "killed","betrayed","heir"]);
+  "killed","betrayed","heir",
+  // the passive forms name a person or house as well
+  "founded-by","killed-by","ruled-by"]);
 
 /* The nouns that actually name what somebody or something IS. Without
    this list the role pattern matched any noun at all, and reported that
@@ -1296,6 +1343,73 @@ function readAdjacent(name, ctx) {
   return { clauses, sentences };
 }
 
+/* ---------- person, place, or house? ----------
+   Statements do not travel between kinds. A city has no age and no
+   spouse; a person is not the capital of anywhere and was not founded
+   by anybody. Without this the assistant reported that a saint "was
+   founded by House Mava" and that a region "has a wife", which are not
+   near-misses but category errors.
+
+   The entry's own category decides it where there is one, because that
+   is the writer's own filing. Otherwise the evidence is weighed: a title
+   in front of the name and pronouns around it argue for a person;
+   being somewhere, or having a capital, argues for a place. A verdict
+   is only reached when one side is clearly ahead, and "unknown" gates
+   nothing, so an ambiguous name keeps everything it had. */
+const PERSON_KEYS = ["age", "married", "family", "friends", "likes", "dislikes", "hates",
+  "born", "died", "lives", "from", "status", "relative-of", "friend-of", "married-to",
+  "disliked-by", "liked-by", "hated-by"];
+const PLACE_KEYS = ["capital", "seat", "located", "founded-in", "founded-by", "ruled-by",
+  "ruled-by-inv", "founded-by-inv"];
+const HOUSE_BLOCK = ["age", "married", "friends", "likes", "dislikes", "hates", "status",
+  "relative-of", "friend-of", "married-to", "disliked-by", "liked-by", "hated-by"];
+
+function typeOf(name, ctx) {
+  const nl = name.toLowerCase();
+  if (/^house\s/i.test(name)) return "house";
+  const exact = pool(ctx).find(e => e.title.toLowerCase() === nl);
+  if (exact) {
+    if (exact.category === "Characters") return "person";
+    if (exact.category === "Maps & Locations") return "place";
+    if (exact.category === "Noble Houses") return "house";
+  }
+  let person = 0, place = 0, locatives = 0;
+  let titleRe, atRe;
+  try {
+    titleRe = new RegExp("\\b(?:" + TITLES + ")\\s+" + reEsc(name) + "\\b", "i");
+    atRe = new RegExp("\\b(?:in|at|near|within|across|throughout)\\s+" + reEsc(name) + "\\b(?![\u2019'\u02bc\u2018\u00b4]s)", "i");
+  } catch (e) { return "unknown"; }
+  for (const e of pool(ctx)) {
+    if (!e._hay || !e._hay.includes(nl)) continue;
+    for (const s of C().sentencesOf(e.text)) {
+      if (!s.toLowerCase().includes(nl)) continue;
+      /* Pronouns and family words only count when this name is what the
+         sentence is ABOUT. "House Patton of Aicruae, whose son..." is
+         evidence about the son, not about Aicruae. */
+      const lead = namesWithin(s)[0];
+      const isSubject = lead && sameSubject(lead.name, nl);
+      if (titleRe.test(s)) { person += 6; }
+      if (isSubject) {
+        if (/\b(?:she|he|her|his|him|herself|himself)\b/i.test(s)) person += 1;
+        if (/\b(?:married|born|died|daughter|son|mother|father|sister|brother|wife|husband|reigned)\b/i.test(s)) person += 2;
+      }
+      // the defining property of a place is that things are IN it
+      if (atRe.test(s)) { place += 2; locatives++; }
+      /* Place words in a sentence are only corroboration; on their own
+         they follow anybody who lives in a kingdom. */
+      if (isSubject && locatives &&
+          /\b(?:capital|region|city|kingdom|realm|province|village|island|lies|located|borders|territory)\b/i.test(s)) place += 2;
+      if (person > 14 || place > 14) break;
+    }
+    if (person > 14 || place > 14) break;
+  }
+  if (person >= place + 3) return "person";
+  /* Calling a character a place strips her age and her family, so this
+     verdict needs the real evidence, not a tally of nearby nouns. */
+  if (locatives >= 2 && place >= person + 3) return "place";
+  return "unknown";
+}
+
 /* Read every statement the entries make about one subject. Text is cut
    into clauses first, because a run-on line holds several separate
    claims and matching across the whole of it would blend them together. */
@@ -1350,13 +1464,17 @@ function readTraits(name, ctx) {
           if (!m) continue;
           const owner = ownerOfStatement(piece, sentence, m.index, carry, pieceAt);
           if (!owner || sameSubject(owner, nl)) continue;
-          if (!knownTarget(owner)) continue;          // the owner ends up in the answer
+          /* The owner is printed, so it is normalised the same way an
+             object is; "Matter House Patton" is House Patton with a
+             stray word from the line above swept in. */
+          const ownerName = resolveTarget(owner) || (knownTarget(owner) ? owner : null);
+          if (!ownerName) continue;
           const objects = tidyClause(m[t.obj] || "", 10);
           let named;
           try { named = new RegExp("\\b" + reEsc(name) + "\\b", "i").test(objects); }
           catch (err) { named = false; }
           if (!named) continue;
-          const clause = t.say(prettyName(owner).replace(new RegExp("^(?:" + TITLES + ")\\s+", "i"), ""), m);
+          const clause = t.say(prettyName(ownerName).replace(new RegExp("^(?:" + TITLES + ")\\s+", "i"), ""), m);
           if (!wellFormed(clause) || selfReferential(clause, name)) continue;
           const key = clause.toLowerCase();
           if (seen.has(key)) continue;
@@ -1394,11 +1512,18 @@ function readTraits(name, ctx) {
   });
   found = found.filter(f => !suppress.has(f.k));
 
+  /* Statements that belong to a different kind of thing entirely. */
+  const kind = typeOf(name, ctx);
+  const blocked = kind === "place" ? PERSON_KEYS
+    : kind === "person" ? PLACE_KEYS
+    : kind === "house" ? HOUSE_BLOCK : null;
+  if (blocked) found = found.filter(f => blocked.indexOf(f.k) < 0);
+
   const trimmed = found.filter((f, i) =>
     !found.some((g, j) => j !== i && g.clause.length > f.clause.length &&
       g.clause.toLowerCase().includes(f.clause.toLowerCase())));
 
-  return { traits: trimmed, sources };
+  return { traits: trimmed, sources, kind };
 }
 
 /* A well-documented character can satisfy a dozen patterns, and reading
@@ -1406,6 +1531,30 @@ function readTraits(name, ctx) {
    The list is ordered most-identifying first, so the top few are the
    ones worth saying; the rest are in the entry. */
 const MAX_CLAUSES = 4;
+
+/* ---------- read once per question ----------
+   Several handlers now ask the same thing about the same subject, and
+   reading every entry three times over to answer one question is waste.
+   The cache is cleared whenever a new question starts. */
+let traitCache = {};
+function traitsFor(name, ctx) {
+  const key = name.toLowerCase() + "|" + ((ctx && ctx.scope) || "");
+  if (!traitCache[key]) traitCache[key] = readTraits(name, ctx);
+  return traitCache[key];
+}
+function clauseOf(read, keys) {
+  const hit = read.traits.filter(t => keys.indexOf(t.k) > -1);
+  return hit.length ? hit : null;
+}
+/* The sentence a set of clauses was read from, for the evidence line. */
+function evidenceRows(traits) {
+  const seen = new Set();
+  return traits.filter(t => t.sentence && !seen.has(t.sentence) && seen.add(t.sentence))
+    .map(t => ({ s: t.sentence, e: t.entry }));
+}
+const quoteOnly = rows => rows.map(r => `<div class="ev-row"><span class="ev-q">${esc(r.s)}</span>` +
+  (r.e ? ` <a class="ev-src" href="#/entry/${encodeURIComponent(r.e.id)}">${esc(r.e.title)}</a>` : "") +
+  `</div>`).join("");
 
 /* Assemble the clauses into something a person would actually say.
    The subject is named once; after that the repeated "is" is dropped,
@@ -1432,7 +1581,7 @@ function hWhoIs(q, ctx, S) {
   if (!found) return null;               // not a subject; let the pipeline try
   const name = found.name;
 
-  const read = readTraits(name, ctx);
+  const read = traitsFor(name, ctx);
   const summary = C().topicSummary(name, Math.max(2, Math.min(S, 4)));
   const home = C().bestEntryFor(name, true);
   const facts = home ? C().factsOf(home, 8) : [];
@@ -1495,6 +1644,7 @@ const HANDLERS = [
 function answer(q, ctx) {
   if (!C() || !C().DB) return null;
   ctx = ctx || {};
+  traitCache = {};          // a new question reads the entries afresh
   const S = ctx.length === "full" ? 6 : 3;
   for (const h of HANDLERS) {
     let r = null;
@@ -1555,7 +1705,7 @@ function greetingHtml() {
 }
 
 window.CodexBrain = {
-  answer, resolve, observe, reset, subject,
+  answer, resolve, observe, reset, subject, typeOf,
   md, greetingHtml, capabilitiesHtml,
 };
 })();
