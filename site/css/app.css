@@ -2330,3 +2330,12 @@ a.a-chip{text-decoration:none;display:inline-block}
   border-radius:2px;padding:4px 10px;font-family:var(--sans);font-size:11.5px;cursor:pointer}
 .act-undo:hover{border-color:var(--blush);color:var(--blush)}
 .act-undo:disabled{opacity:.45;cursor:default}
+
+/* ---------- provider setup ---------- */
+.av-chip.local{border-style:dashed}
+.ai-local-note{border:1px solid var(--gold);background:var(--panel2);border-radius:2px;
+  padding:10px 13px;margin-top:12px}
+.ai-local-note .aln-k{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--ink)}
+.ai-local-note .aln-b{font-size:13px;color:var(--ink-soft);line-height:1.5;margin-top:3px}
+.ai-model-row{display:flex;gap:6px;align-items:center}
+.ai-model-row .import-title{flex:1;min-width:0}

@@ -6,10 +6,13 @@ can look perfectly reasonable and still be made up, or quietly stop
 citing your entries. These suites check the things that would be
 embarrassing rather than merely broken.
 
-They have already caught four real faults: a house indexed under its bare
+They have already caught six real faults: a house indexed under its bare
 name reported as "not in your canon", statistics disagreeing with the
 sidebar, a polite "please add a task to…" falling through to a search,
-and a connected model never being called when retrieval came back empty.
+a connected model never being called when retrieval came back empty, a
+key field wrongly hidden for custom gateways, and — the one that
+mattered most — a leftover API key being transmitted to whichever
+provider you switched to next.
 
 ## Running them
 
@@ -42,6 +45,13 @@ stubbed. That conversation history is sanitised into strict alternation,
 that a dangling user turn is dropped, that standing instructions and the
 persona reach the system prompt, and that turning the personality off
 removes it without disturbing anything else.
+
+**`providers.test.js`** — every provider preset, with `fetch` stubbed:
+the URL each one builds, the headers it carries, and the body shape,
+which genuinely differs between Anthropic, OpenAI and Gemini. Also that
+the two local presets connect with no key at all, that they never
+forward a key left behind by a paid provider, and that model discovery
+reads each provider's own listing format.
 
 **`assistant.e2e.js`** — the real site in a real browser, against the
 real World Without God canon, driven through the actual interface. Asks

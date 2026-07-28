@@ -34,12 +34,45 @@
 
 const KEY = "codex.ai";          // its own key, never merged into settings
 
+/* ---------- the OpenAI request shape ----------
+   Most of the industry speaks it, including every model you can run on
+   your own machine, so it is written once and shared. A provider that
+   uses it only has to say where it lives and what a key looks like. */
+const OPENAI_SHAPE = {
+  headers: k => Object.assign({ "content-type": "application/json" },
+    k ? { authorization: "Bearer " + k } : {}),
+  body: (model, system, messages, maxTokens) => ({
+    model, max_tokens: maxTokens,
+    messages: [{ role: "system", content: system }].concat(messages),
+  }),
+  read: j => {
+    if (!j) return "";
+    if (j.choices && j.choices[0]) {
+      const m = j.choices[0].message || j.choices[0];
+      return String((m && (m.content || m.text)) || "").trim();
+    }
+    if (j.content && j.content.map) return j.content.map(c => c.text || "").join("").trim();
+    return String(j.text || j.output || "").trim();
+  },
+  error: j => (j && ((j.error && (j.error.message || j.error)) || j.message)) || "",
+  // every OpenAI-shaped server lists its models at .../models
+  modelsUrl: base => String(base || "").replace(/\/chat\/completions\/?$/, "/models"),
+  readModels: j => ((j && (j.data || j.models)) || []).map(m => m.id || m.name).filter(Boolean),
+};
+function openaiProvider(extra) { return Object.assign({}, OPENAI_SHAPE, extra); }
+
+/* ---------- who you can point this at ----------
+   `models` are only suggestions for the dropdown. Model names change
+   constantly, and a stale hard-coded list that cannot be overridden is
+   worse than none, so the field is always editable and every provider
+   here can be asked what it actually offers today. */
 const PROVIDERS = {
   anthropic: {
     label: "Anthropic",
     models: ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
     base: "https://api.anthropic.com/v1/messages",
     keyHint: "sk-ant-…",
+    keysAt: "https://console.anthropic.com/settings/keys",
     /* Anthropic needs an explicit opt-in header before a browser is
        allowed to call it directly; without it the request is refused by
        CORS and looks, unhelpfully, like a network error. */
@@ -54,46 +87,119 @@ const PROVIDERS = {
     }),
     read: j => (j && j.content && j.content.map(c => c.text || "").join("").trim()) || "",
     error: j => (j && j.error && j.error.message) || "",
+    modelsUrl: base => String(base || "").replace(/\/messages\/?$/, "/models"),
+    readModels: j => ((j && j.data) || []).map(m => m.id).filter(Boolean),
   },
-  openai: {
+
+  openai: openaiProvider({
     label: "OpenAI",
     models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o"],
     base: "https://api.openai.com/v1/chat/completions",
     keyHint: "sk-…",
+    keysAt: "https://platform.openai.com/api-keys",
     headers: k => ({ "content-type": "application/json", authorization: "Bearer " + k }),
+  }),
+
+  /* Gemini speaks its own shape: the model sits in the URL rather than
+     the body, the roles are named differently, and the system prompt is
+     its own field. */
+  google: {
+    label: "Google Gemini",
+    models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+    base: "https://generativelanguage.googleapis.com/v1beta/models",
+    keyHint: "AIza…",
+    keysAt: "https://aistudio.google.com/apikey",
+    url: (base, model) => base + "/" + encodeURIComponent(model) + ":generateContent",
+    headers: k => ({ "content-type": "application/json", "x-goog-api-key": k }),
     body: (model, system, messages, maxTokens) => ({
-      model, max_tokens: maxTokens,
-      messages: [{ role: "system", content: system }].concat(messages),
+      systemInstruction: { parts: [{ text: system }] },
+      contents: messages.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      })),
+      generationConfig: { maxOutputTokens: maxTokens },
     }),
-    read: j => (j && j.choices && j.choices[0] && j.choices[0].message &&
-      String(j.choices[0].message.content || "").trim()) || "",
+    read: j => {
+      const c = j && j.candidates && j.candidates[0];
+      const parts = c && c.content && c.content.parts;
+      return parts ? parts.map(p => p.text || "").join("").trim() : "";
+    },
     error: j => (j && j.error && j.error.message) || "",
+    modelsUrl: base => base,
+    readModels: j => ((j && j.models) || [])
+      .map(m => String(m.name || "").replace(/^models\//, ""))
+      .filter(Boolean),
   },
-  /* Anything that speaks the OpenAI shape: a proxy, a company gateway,
-     or a model running on your own machine through Ollama or LM Studio.
-     Useful in its own right, and the only way to try this offline. */
-  custom: {
+
+  deepseek: openaiProvider({
+    label: "DeepSeek",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+    base: "https://api.deepseek.com/chat/completions",
+    keyHint: "sk-…",
+    keysAt: "https://platform.deepseek.com/api_keys",
+  }),
+
+  groq: openaiProvider({
+    label: "Groq",
+    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+    base: "https://api.groq.com/openai/v1/chat/completions",
+    keyHint: "gsk_…",
+    keysAt: "https://console.groq.com/keys",
+  }),
+
+  xai: openaiProvider({
+    label: "xAI (Grok)",
+    models: ["grok-3", "grok-3-mini"],
+    base: "https://api.x.ai/v1/chat/completions",
+    keyHint: "xai-…",
+    keysAt: "https://console.x.ai",
+  }),
+
+  mistral: openaiProvider({
+    label: "Mistral",
+    models: ["mistral-large-latest", "mistral-small-latest"],
+    base: "https://api.mistral.ai/v1/chat/completions",
+    keyHint: "…",
+    keysAt: "https://console.mistral.ai/api-keys",
+  }),
+
+  /* ---------- on your own machine ----------
+     These need no key and no account, and nothing they are sent ever
+     reaches the internet. They are the honest answer to "I want a model
+     but I do not want to pay anyone or hand over my manuscript". */
+  ollama: openaiProvider({
+    label: "Ollama (on this computer)",
+    models: [],
+    base: "http://localhost:11434/v1/chat/completions",
+    keyHint: "not needed",
+    local: true,
+    // deliberately ignores any key still in storage: a credential for a
+    // paid provider must never be posted to a server on this machine
+    headers: () => ({ "content-type": "application/json" }),
+    setup: "Install Ollama, then run a model once: ollama run llama3.2",
+  }),
+
+  lmstudio: openaiProvider({
+    label: "LM Studio (on this computer)",
+    models: [],
+    base: "http://localhost:1234/v1/chat/completions",
+    keyHint: "not needed",
+    local: true,
+    headers: () => ({ "content-type": "application/json" }),
+    setup: "Open LM Studio, load a model, and start its local server.",
+  }),
+
+  /* Anything else that speaks the OpenAI shape: a proxy, a company
+     gateway, a machine on your network. */
+  custom: openaiProvider({
     label: "Custom endpoint",
     models: [],
     base: "",
     keyHint: "optional",
-    headers: k => Object.assign({ "content-type": "application/json" },
-      k ? { authorization: "Bearer " + k } : {}),
-    body: (model, system, messages, maxTokens) => ({
-      model, max_tokens: maxTokens,
-      messages: [{ role: "system", content: system }].concat(messages),
-    }),
-    read: j => {
-      if (!j) return "";
-      if (j.choices && j.choices[0]) {
-        const m = j.choices[0].message || j.choices[0];
-        return String((m && (m.content || m.text)) || "").trim();
-      }
-      if (j.content && j.content.map) return j.content.map(c => c.text || "").join("").trim();
-      return String(j.text || j.output || "").trim();
-    },
-    error: j => (j && ((j.error && (j.error.message || j.error)) || j.message)) || "",
-  },
+    // key-optional, but not assumed local: a company gateway usually
+    // wants a token, so the field stays on screen
+    keyOptional: true,
+  }),
 };
 
 const DEF = {
@@ -127,14 +233,17 @@ function clearKey() { setConf({ key: "", mode: "device" }); }
 
 /* "on" means: the user asked for it AND there is something to call with.
    A mode of "api" with no key is not on; it is a half-finished setup, and
-   pretending otherwise would produce a confusing failure on every ask. */
+   pretending otherwise would produce a confusing failure on every ask.
+   A model on your own machine is the exception: there is no key to have,
+   so requiring one would make the local option impossible to switch on. */
 function on() {
   const c = conf();
   if (c.mode !== "api") return false;
   const p = PROVIDERS[c.provider];
   const endpoint = c.base || (p && p.base);
   if (!endpoint) return false;
-  return !!(c.key || c.provider === "custom");
+  if (p && (p.local || p.keyOptional)) return true;
+  return !!c.key;
 }
 function state() {
   const c = conf();
@@ -142,7 +251,54 @@ function state() {
   return {
     mode: c.mode, on: on(), provider: c.provider, providerLabel: p.label || c.provider,
     model: c.model, base: c.base || p.base || "", hasKey: !!c.key,
+    local: !!p.local,
   };
+}
+
+/* Whether an address is on this machine. Used for error wording, which
+   should follow where the request actually went rather than which preset
+   was picked; a custom endpoint on localhost fails the same way Ollama
+   does and deserves the same advice. */
+function isLocalUrl(u) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:|\/|$)/i.test(String(u || ""));
+}
+
+/* The address one request goes to. Most providers keep the model in the
+   body and the endpoint is simply the endpoint; Gemini puts the model in
+   the path, so it gets to build its own. */
+function endpointFor(c, p) {
+  const base = c.base || p.base;
+  return p.url ? p.url(base, c.model) : base;
+}
+
+/* ---------- what does this provider actually offer? ----------
+   Model names change every few months. Rather than ship a list that
+   quietly goes stale, ask the endpoint. Works for every provider here,
+   including a model server running on your own machine, where the answer
+   is "whatever you have downloaded" and no hard-coded list could ever
+   be right. */
+async function listModels() {
+  const c = conf();
+  const p = PROVIDERS[c.provider];
+  if (!p || !p.modelsUrl) return { ok: false, why: "This provider cannot be asked for a list." };
+  const url = p.modelsUrl(c.base || p.base);
+  if (!url) return { ok: false, why: "Set the endpoint first." };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(url, { headers: p.headers(c.key), signal: ctrl.signal });
+    const raw = await res.text();
+    let json = null;
+    try { json = JSON.parse(raw); } catch (e) {}
+    if (!res.ok) return { ok: false, why: friendly(res.status, (json && p.error(json)) || "") };
+    const models = (p.readModels ? p.readModels(json) : []).sort();
+    if (!models.length) return { ok: false, why: "It answered, but listed no models." };
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, why: (p.local || isLocalUrl(url))
+      ? "Could not reach it. Is the local server running?"
+      : "Could not reach the provider. " + ((e && e.message) || "") };
+  } finally { clearTimeout(timer); }
 }
 /* what the rail chip should say; never "On device" when it isn't */
 function label() {
@@ -245,7 +401,7 @@ async function ask(question, entries, opts) {
   if (!on()) return { ok: false, text: "", why: "The assistant is set to answer on this device." };
 
   const p = PROVIDERS[c.provider];
-  const endpoint = c.base || p.base;
+  const endpoint = endpointFor(c, p);
   const use = (entries || []).slice(0, c.contextEntries);
 
   /* An empty retrieval used to end the request here, which quietly made
@@ -285,9 +441,16 @@ async function ask(question, entries, opts) {
     if (!text) return { ok: false, text: "", why: "The provider replied without any text.", sent: use.length };
     return { ok: true, text, sent: use.length, model: c.model };
   } catch (e) {
+    /* A model on your own machine fails differently, and the useful
+       advice is different too: nobody needs to be told to check their
+       internet connection when the server they forgot to start is
+       sitting on localhost. */
     const why = e && e.name === "AbortError"
       ? "The provider did not answer in time."
-      : "Could not reach the provider. " + ((e && e.message) || "");
+      : (p.local || isLocalUrl(endpoint))
+        ? "Could not reach it. Check the local server is running, and that it allows " +
+          "requests from this page."
+        : "Could not reach the provider. " + ((e && e.message) || "");
     return { ok: false, text: "", why, sent: use.length };
   } finally {
     clearTimeout(timer);
@@ -306,14 +469,18 @@ function friendly(status, msg) {
 /* A one-shot check the Settings panel can run, so a wrong key is found
    when you paste it rather than the next time you ask a question. */
 async function test() {
-  if (!on()) return { ok: false, why: "Switch it on and paste a key first." };
+  if (!on()) {
+    const p = PROVIDERS[conf().provider] || {};
+    return { ok: false, why: (p.local || p.keyOptional)
+      ? "Set the endpoint first." : "Switch it on and paste a key first." };
+  }
   const r = await ask("Reply with the single word: ready.",
     [{ title: "Test", category: "test", text: "This is a connection test." }], { timeout: 20000 });
   return r.ok ? { ok: true, text: r.text } : { ok: false, why: r.why };
 }
 
 window.CodexAI = {
-  PROVIDERS, conf, setConf, clearKey, on, state, label, ask, test,
+  PROVIDERS, conf, setConf, clearKey, on, state, label, ask, test, listModels,
   // named so the backup code can be explicit about what it is skipping
   STORAGE_KEY: KEY,
 };

@@ -35,6 +35,7 @@ run() {   # run <name> <command...>
 
 run "brain (no browser)" node "$HERE/brain.test.js"
 run "api request shape (no browser)" node "$HERE/ai.test.js"
+run "provider presets (no browser)" node "$HERE/providers.test.js"
 
 if [ "${1:-all}" = "unit" ]; then
   echo ""

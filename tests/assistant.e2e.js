@@ -300,10 +300,63 @@ function section(t) { results.push("\n" + t); }
 
   await page.screenshot({ path: __dirname + "/shot-api.png", clip: { x: 1500 - 430, y: 0, width: 430, height: 1000 } });
 
+
+  /* ---------------- PART 2b: the local, keyless path ---------------- */
+  section("PART 2b \u2014 LOCAL MODEL (Ollama preset, no key at all)");
+
+  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.waitForSelector('[data-settab="assistant"]', { timeout: 8000 });
+  await page.click('[data-settab="assistant"]');
+  await page.waitForSelector('[data-aiprov="ollama"]', { timeout: 8000 });
+  await page.click('[data-aiprov="ollama"]');
+  await page.waitForTimeout(400);
+
+  const noKeyField = await page.locator("#aiKey").count();
+  check("local preset hides the key field entirely", noKeyField === 0);
+  const setupNote = await page.locator(".ai-local-note").count();
+  check("  shows how to set it up", setupNote === 1);
+
+  // point the preset's endpoint at the stub, which stands in for a
+  // model server running on this machine
+  await page.fill("#aiBase", STUB);
+  await page.click("#aiSave");
+  await page.waitForTimeout(400);
+  check("connects with no key whatsoever", await page.evaluate(() => window.CodexAI.on()) === true);
+
+  // "Fetch" must ask the server what it actually has
+  await page.click('[data-settab="assistant"]');
+  await page.waitForSelector("#aiFetchModels", { timeout: 8000 });
+  await page.fill("#aiBase", STUB);
+  await page.click("#aiFetchModels");
+  await page.waitForSelector(".ai-test.good, .ai-test.bad", { timeout: 15000 });
+  const fetchOut = await page.textContent("#aiTestOut");
+  check("'Fetch' lists the models the server really has", /model.? available/i.test(fetchOut), fetchOut);
+  const listed = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("#aiModelList option")).map(o => o.value));
+  check("  and they populate the model box", listed.length >= 1, listed);
+
+  // and a real answer comes back over the keyless connection
+  await page.evaluate(() => { location.hash = "#/"; });
+  await page.waitForTimeout(500);
+  if (await page.locator("#assistant").isHidden()) await page.click("#assistantToggle");
+  await page.evaluate(() => document.getElementById("assistantNew").click());
+  await page.waitForTimeout(300);
+  r = await ask("who is Enyokia", { waitFor: ".a-model:not(.pending)", settle: 500 });
+  check("a keyless local model answers in the rail", /What the passages say/.test(r.text), r.text.slice(0, 200));
+
+  const localReq = await new Promise((resolve, reject) => {
+    require("http").get("http://localhost:8322/_requests", res => {
+      let b = ""; res.on("data", c => (b += c)); res.on("end", () => { try { resolve(JSON.parse(b)); } catch (e) { reject(e); } });
+    }).on("error", reject);
+  });
+  const lastLocal = localReq[localReq.length - 1];
+  check("  and sent NO authorization header",
+    !(lastLocal.headers.authorization), lastLocal.headers.authorization);
+
   /* ---------------- PART 3: failure must downgrade ---------------- */
   section("PART 3 — FAILURE FALLBACK (bad key must not break the app)");
 
-  await page.evaluate(u => window.CodexAI.setConf({ base: u }), STUB_FAIL);
+  await page.evaluate(u => window.CodexAI.setConf({ provider: "custom", key: "test-key-123", base: u }), STUB_FAIL);
   await page.evaluate(() => { document.getElementById("assistantNew").click(); });
   await page.waitForTimeout(300);
 

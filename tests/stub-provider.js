@@ -14,6 +14,10 @@ http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     return res.end(JSON.stringify(requests));
   }
+  if (req.method === "GET" && /\/models$/.test(req.url)) {
+    res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
+    return res.end(JSON.stringify({ data: [{ id: "local-test-model" }, { id: "local-test-model-mini" }] }));
+  }
   let body = "";
   req.on("data", c => (body += c));
   req.on("end", () => {

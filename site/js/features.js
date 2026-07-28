@@ -695,28 +695,44 @@ function panelAssistant(el) {
       </div>
 
       <div class="rule-head mt"><span class="k">Provider</span><span class="hr"></span></div>
-      <div class="av-chips">${Object.keys(AI.PROVIDERS).map(id =>
+      <p class="faint set-help">Services you pay per request, or a model running on your own machine,
+        which costs nothing and sends nothing anywhere.</p>
+      <div class="av-chips">${Object.keys(AI.PROVIDERS).filter(id => !AI.PROVIDERS[id].local).map(id =>
         `<button class="av-chip${c.provider === id ? " on" : ""}" data-aiprov="${id}">${esc(AI.PROVIDERS[id].label)}</button>`).join("")}</div>
+      <div class="av-chips" style="margin-top:6px">${Object.keys(AI.PROVIDERS).filter(id => AI.PROVIDERS[id].local).map(id =>
+        `<button class="av-chip local${c.provider === id ? " on" : ""}" data-aiprov="${id}">${esc(AI.PROVIDERS[id].label)}</button>`).join("")}</div>
+
+      ${prov && prov.setup ? `<div class="ai-local-note">
+        <div class="aln-k">✧ Running it here</div>
+        <div class="aln-b">${esc(prov.setup)} Then press <b>Fetch</b> below to see the models you have.
+          Nothing you ask ever leaves this computer, and there is nothing to pay.</div>
+      </div>` : ""}
 
       <div class="ai-grid">
         <label class="ne-field"><span>Model</span>
-          ${prov && prov.models.length
-            ? `<select class="folder-select" id="aiModel">
-                 ${prov.models.map(m => `<option ${m === c.model ? "selected" : ""}>${esc(m)}</option>`).join("")}
-                 ${prov.models.indexOf(c.model) < 0 && c.model ? `<option selected>${esc(c.model)}</option>` : ""}
-               </select>`
-            : `<input class="import-title" id="aiModel" value="${esc(c.model)}" placeholder="model name">`}
+          <span class="ai-model-row">
+            <input class="import-title" id="aiModel" list="aiModelList"
+              value="${esc(c.model)}" placeholder="${prov && prov.local ? "the model you have loaded" : "model name"}">
+            <button class="btn ghost sm" id="aiFetchModels" type="button">Fetch</button>
+          </span>
+          <datalist id="aiModelList">${((prov && prov.models) || [])
+            .map(m => `<option value="${esc(m)}"></option>`).join("")}</datalist>
         </label>
-        <label class="ne-field grow"><span>API key</span>
+        ${prov && prov.local ? "" : `<label class="ne-field grow"><span>API key</span>
           <input class="import-title" id="aiKey" type="password" autocomplete="off"
-            value="${esc(c.key)}" placeholder="${esc(prov ? prov.keyHint : "")}"></label>
+            value="${esc(c.key)}" placeholder="${esc(prov ? prov.keyHint : "")}"></label>`}
       </div>
-      ${c.provider === "custom" ? `
+      ${prov && prov.keysAt ? `<p class="faint set-help">
+        A key for ${esc(prov.label)} comes from
+        <a href="${esc(prov.keysAt)}" target="_blank" rel="noopener">their console</a>;
+        you are billed by them, never by this app.</p>` : ""}
+
+      ${(prov && (prov.local || !prov.base)) ? `
         <label class="ne-field" style="margin-top:12px"><span>Endpoint URL</span>
-          <input class="import-title" id="aiBase" value="${esc(c.base)}"
+          <input class="import-title" id="aiBase" value="${esc(c.base || (prov ? prov.base : ""))}"
             placeholder="http://localhost:11434/v1/chat/completions"></label>
-        <p class="faint set-help">Anything that speaks the OpenAI request shape: a proxy, a company
-          gateway, or a model on your own machine through Ollama or LM Studio.</p>` : ""}
+        <p class="faint set-help">Anything that speaks the OpenAI request shape. The default above suits
+          a standard install; change it only if you moved the port.</p>` : ""}
 
       <label class="ne-field" style="margin-top:12px"><span>Entries sent per question</span>
         <input class="import-title" id="aiCtx" type="number" min="1" max="24" value="${c.contextEntries}"
@@ -726,12 +742,14 @@ function panelAssistant(el) {
       <div class="ai-acts">
         <button class="btn sm" id="aiSave">Save</button>
         <button class="btn ghost sm" id="aiTest">Test the connection</button>
-        <button class="btn ghost sm danger" id="aiForget">Forget my key</button>
+        ${prov && prov.local ? "" : `<button class="btn ghost sm danger" id="aiForget">Forget my key</button>`}
       </div>
       <div id="aiTestOut" class="ai-test"></div>
       <p class="faint set-help">Status: ${live
-        ? `<strong>connected</strong>; the assistant will use ${esc(c.model)}.`
-        : `not connected yet. ${c.key ? "Check the model and endpoint." : "Paste a key to finish."}`}</p>
+        ? `<strong>connected</strong>; the assistant will use ${esc(c.model || "the endpoint's default")}.`
+        : `not connected yet. ${prov && prov.local
+            ? "Start the local server, then test."
+            : (c.key ? "Check the model and endpoint." : "Paste a key to finish.")}`}</p>
     ` : `
       <p class="faint set-help" style="margin-top:14px">Nothing is sent anywhere. The assistant reads
         the entries you wrote, finds the passages that match, and answers from them; which is why it
@@ -770,20 +788,48 @@ function panelAssistant(el) {
   $$("[data-aiprov]", el).forEach(b => b.onclick = () => {
     const id = b.dataset.aiprov;
     const models = AI.PROVIDERS[id].models;
-    // moving provider carries the key over but not the model name, which
-    // would be meaningless at the new one
-    AI.setConf({ provider: id, model: models[0] || "" });
+    /* Everything provider-specific is cleared on the way out. The model
+       name would be meaningless at the new one; a leftover endpoint
+       would send Gemini's request shape to Ollama's port; and the key is
+       the important one: carrying it over means the next "Test the
+       connection" posts a credential belonging to one company straight
+       to a different company's server. Retyping a key is a small price
+       for it never being handed to somebody it was not issued for. */
+    AI.setConf({ provider: id, model: models[0] || "", base: "", key: "" });
     viewSettings("assistant");
   });
   const readForm = () => {
     const patch = {
       model: ($("#aiModel", el) || {}).value || "",
-      key: ($("#aiKey", el) || {}).value || "",
       contextEntries: Number(($("#aiCtx", el) || {}).value) || 6,
     };
+    /* Local providers have no key field at all. Reading a missing input
+       as "" would wipe a key that is still wanted the moment you switch
+       back to a paid provider, so it is only written when it is shown. */
+    const keyEl = $("#aiKey", el);
+    if (keyEl) patch.key = keyEl.value;
     const baseEl = $("#aiBase", el);
     if (baseEl) patch.base = baseEl.value.trim();
     return patch;
+  };
+  const fetchBtn = $("#aiFetchModels", el);
+  if (fetchBtn) fetchBtn.onclick = async () => {
+    AI.setConf(readForm());
+    const out = $("#aiTestOut", el);
+    fetchBtn.disabled = true;
+    out.className = "ai-test working";
+    out.textContent = "Asking what it offers…";
+    const r = await AI.listModels();
+    fetchBtn.disabled = false;
+    if (!r.ok) { out.className = "ai-test bad"; out.textContent = r.why; return; }
+    const list = $("#aiModelList", el);
+    if (list) list.innerHTML = r.models.map(m => `<option value="${esc(m)}"></option>`).join("");
+    // an empty box with a fresh list should not stay empty
+    const modelEl = $("#aiModel", el);
+    if (modelEl && !modelEl.value.trim()) { modelEl.value = r.models[0]; AI.setConf({ model: r.models[0] }); }
+    out.className = "ai-test good";
+    out.textContent = r.models.length + " model" + (r.models.length === 1 ? "" : "s") +
+      " available. Click the model box to choose one.";
   };
   if ($("#aiSave", el)) $("#aiSave", el).onclick = () => {
     AI.setConf(readForm());
