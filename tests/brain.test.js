@@ -465,6 +465,66 @@ setTimeout(() => {
   window.Codex.mentionsOf = realMentions;
   window.Codex.bestEntryFor = realBest;
 
+
+  /* ---------------------------------------------------------------
+     Plain actions, and a verdict that agrees with its own reading.
+     --------------------------------------------------------------- */
+  const deeds = [
+    { id: "k1", title: "NOTE", category: "My Notes", type: "note", wordcount: 17,
+      text: "LILY IS SEVEN AND Friends with Max Steve Ivory But she does not like Adam or even" },
+    { id: "k2", title: "PTS", category: "My Notes", type: "note", wordcount: 6,
+      text: "Adam Kicks dogs and beat childern" },
+    { id: "k3", title: "Mera", category: "Characters", type: "pdf", wordcount: 20,
+      text: "Mera protects the orphans and heals the wounded. Mera was struck down by arrows." },
+    { id: "k4", title: "Vex", category: "Characters", type: "pdf", wordcount: 20,
+      text: "Vex was killed by Doran. Vex was betrayed by his own guard." },
+  ];
+  deeds.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: deeds, entities: ["NOTE", "PTS", "Mera", "Vex", "Doran"] };
+  window.Codex.topicSummary = (n, k) => sentencesOf(deeds.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = (n, ex) => deeds.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
+  window.Codex.bestEntryFor = n => deeds.find(e => e.title.toLowerCase() === String(n).toLowerCase())
+    || deeds.find(e => e._hay.includes(String(n).toLowerCase())) || null;
+  const voiceOf = r => {
+    const m = r && /<div class="a-voice">([\s\S]*?)<\/div>/.exec(r.html);
+    return m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
+  };
+
+  B.reset();
+  check("deeds: a plain action is read", /kicks dogs/i.test(leadOf(ans("who is Adam"))),
+    leadOf(ans("who is Adam")));
+  B.reset();
+  check("deeds: a passive is not read as an action",
+    /was struck down/i.test(ans("who is Mera").html), leadOf(ans("who is Mera")));
+
+  /* The verdict must not contradict the reading printed beside it. */
+  B.reset();
+  check("tone: a man who kicks dogs is not called quiet",
+    /not a kind figure|menace|frightens|MONSTER|unflattering|would not be received|would not nap/i.test(voiceOf(ans("what do you think of Adam"))),
+    voiceOf(ans("what do you think of Adam")));
+  B.reset();
+  check("tone: disliking one person does not make you unkind",
+    !/not a kind figure/i.test(voiceOf(ans("what do you think of Lily"))),
+    voiceOf(ans("what do you think of Lily")));
+  B.reset();
+  check("tone: protecting and healing reads as warm",
+    /comes off well|follow into a cold night|decent|carries themselves well|Good person|nice|warm/i.test(voiceOf(ans("what do you think of Mera"))),
+    voiceOf(ans("what do you think of Mera")));
+  B.reset();
+  check("tone: being killed and betrayed does not make you the villain",
+    !/not a kind figure|menace|MONSTER/i.test(voiceOf(ans("what do you think of Vex"))),
+    voiceOf(ans("what do you think of Vex")));
+  B.reset();
+  check("tone: a content verdict names the clause it rests on",
+    /chiefly that Adam/i.test(ans("what do you think of Adam").html),
+    ans("what do you think of Adam").html.replace(/<[^>]+>/g, " ").slice(-180));
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
   // markdown
   const html = B.md("## Head\n\n**Bold** and *italic* and `code`.\n\n- one\n- two\n\n1. first\n2. second\n\n> a quote\n\n<script>alert(1)</script>");
   check("md-heading", /<h5 class="md-h">Head<\/h5>/.test(html));

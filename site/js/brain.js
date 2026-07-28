@@ -273,6 +273,8 @@ const VOICES = {
     bye: "I'll be right here when you come back.",
     love: "Oh; I'd blush if I could. Now go write something wonderful.",
     saved: "Tucked safely into your notes. I'll remember.",
+    dark: n => `${n} frightens me a little, and I have read every word about him.`,
+    warm: n => `${n} is the sort I would follow into a cold night.`,
     high: n => `Between us? ${n} might be my favourite thing in this whole world of yours.`,
     mid: n => `I'm fond of ${n}. There's more to say about them than you may realise.`,
     low: n => `${n} is quiet so far; but quiet things in this canon have a way of blooming.`,
@@ -284,6 +286,8 @@ const VOICES = {
     bye: "Go. The archive will survive without you. Barely.",
     love: "Recorded, and stricken from the record. Get back to work.",
     saved: "Filed. Try not to contradict it next week.",
+    dark: n => `${n} is a menace. Finally, something in here with teeth.`,
+    warm: n => `${n} is decent. Somebody has to be, I suppose.`,
     high: n => `${n} is, and I say this grudgingly, the best-built thing in here.`,
     mid: n => `${n} is adequate. Which from me is practically a parade.`,
     low: n => `${n} barely exists yet. One entry. I have hairballs with more canon presence.`,
@@ -295,6 +299,8 @@ const VOICES = {
     bye: "The archive holds until your return.",
     love: "The sentiment is received, and; against protocol; returned.",
     saved: "Entered into the royal record. It is canon now.",
+    dark: n => `${n} would not be received at court, and the court would be right.`,
+    warm: n => `${n} carries themselves well. The realm is the better for it.`,
     high: n => `${n} carries real weight in this realm; the record bends around them.`,
     mid: n => `${n} holds an honourable place, though not yet a commanding one.`,
     low: n => `${n} is newly arrived at court; the record has little to say. Yet.`,
@@ -306,6 +312,8 @@ const VOICES = {
     bye: "Night. I'll dream in your canon.",
     love: "That's nice... I'll keep it under my paw.",
     saved: "Noted... filed... zzz. It's safe, I promise.",
+    dark: n => `${n}... no. I would not nap anywhere near ${n}.`,
+    warm: n => `${n} is warm. Good lap. Good person.`,
     high: n => `${n}... yes. Even half-asleep I can tell that one matters.`,
     mid: n => `${n} is nice. Solid. Good to doze against.`,
     low: n => `${n} is barely a whisper in here so far. Wake them up sometime.`,
@@ -317,6 +325,8 @@ const VOICES = {
     bye: "Fine. I'll entertain myself. This will have consequences.",
     love: "MINE. This compliment lives under the sofa now.",
     saved: "STOLEN. I mean saved. It's in the notes. Probably.",
+    dark: n => `${n} is a MONSTER and I am obsessed with the drama of it.`,
+    warm: n => `${n} is nice. Boring. Nice, though.`,
     high: n => `${n}?? Unhinged. Iconic. The best thing you've made and I would die for them.`,
     mid: n => `${n} has potential for chaos. I respect that.`,
     low: n => `${n} who? One entry. Feed them more story and I'll reconsider.`,
@@ -328,6 +338,8 @@ const VOICES = {
     bye: "I shall continue the survey in your absence.",
     love: "I shall cite this warmly in the acknowledgements.",
     saved: "Recorded, dated, and cross-referenced. The record grows.",
+    dark: n => `The record on ${n} is unflattering, and consistently so.`,
+    warm: n => `The record on ${n} is warm, and warmth is rarer than villainy.`,
     high: n => `By every measure I keep; citations, connections, sheer text; ${n} is load-bearing.`,
     mid: n => `${n} is well attested, though the record still has open questions.`,
     low: n => `${n} appears once in the corpus. A footnote awaiting its chapter.`,
@@ -865,19 +877,70 @@ function hOpinion(q, ctx) {
   const words = e ? (e.wordcount || 0) : 0;
   const related = sentencesWith(name, null, ctx, 40).length;
   const score = mentions * 2 + Math.min(6, facts) + Math.min(6, words / 300) + Math.min(6, related / 4);
-  const tier = score >= 14 ? "high" : score >= 6 ? "mid" : "low";
+  const volume = score >= 14 ? "high" : score >= 6 ? "mid" : "low";
+
+  /* Tone should follow what somebody DOES, not how much has been written
+     about them. Judging by volume alone produced "Adam is quiet so far"
+     about a man the same answer described as kicking dogs: the verdict
+     contradicting its own reading in the space of one card. Where the
+     entries say something plainly dark or plainly warm, that decides the
+     line; where they are neutral, how established the name is decides it
+     instead, which is all the old measure was ever good for. */
+  const readEarly = traitsFor(name, ctx);
+  const said = readEarly.traits.map(t => t.clause).join(" ").toLowerCase();
+  /* Weighted, because not every unkind word carries the same charge.
+     Killing somebody is not the same as not liking them, and the first
+     pass at this called Lily unkind for disliking Adam while the same
+     card said she was friends with three people. Doing harm counts
+     heavily, disliking counts a little, and being disliked BY somebody
+     says more about them than about the subject. */
+  const HEAVY_DARK = /\b(?:kills?|killed|murders?|murdered|betrays?|betrayed|cruel|beats?|beat|kicks?|kicked|burns?|burned|burnt|destroys?|destroyed|curses?|cursed|steals?|stole|robs?|robbed|tortures?|tortured|stabs?|stabbed|tyrant)\b/g;
+  const LIGHT_DARK = /\b(?:hates?|hated|does not like|dislikes?|disliked|exiled|banished|imprisoned)\b/g;
+  const WARM = /\b(?:friends?|loves?|loved|protects?|protected|rescues?|rescued|saves?|saved|heals?|healed|blesses|blessed|guards?|guarded|teaches|taught|guides?|guided|mourns?|mourned)\b/g;
+  /* Only what the subject DID counts against them. Crandona was called
+     unkind for having been killed, and Minara for having been struck
+     down by forty arrows; suffering something is not doing it. Passive
+     clauses and the inverted readings (which describe somebody else's
+     conduct or opinion) are read for warmth but never for blame. */
+  const suffered = t => /^was\s/i.test(t.clause) ||
+    /-by(?:-inv)?$/.test(t.k) || t.k === "disliked-by" || t.k === "hated-by";
+  const didSay = readEarly.traits.filter(t => !suffered(t))
+    .map(t => t.clause).join(" ").toLowerCase();
+  const tally = (text, re) => (text.match(re) || []).length;
+  const darkScore = tally(didSay, HEAVY_DARK) * 3 + tally(didSay, LIGHT_DARK);
+  const warmScore = tally(said, WARM) * 2;
+  /* Calling somebody unkind needs more evidence than calling them
+     decent, so the margins are deliberately uneven. */
+  const tone = darkScore >= warmScore + 2 ? "dark"
+    : warmScore > darkScore ? "warm" : null;
+  /* The clause the verdict rests on is often past the four the sentence
+     has room for, which leaves "not a kind figure" sitting under a
+     perfectly mild-sounding summary. Name it, so the judgement can be
+     checked against the line that produced it. */
+  const decidingClause = !tone ? "" : (readEarly.traits.filter(t =>
+    (tone === "dark" ? (!suffered(t) && (HEAVY_DARK.test(t.clause.toLowerCase()) ||
+       LIGHT_DARK.test(t.clause.toLowerCase())))
+     : WARM.test(t.clause.toLowerCase()))
+  )[0] || {}).clause || "";
+  [HEAVY_DARK, LIGHT_DARK, WARM].forEach(re => { re.lastIndex = 0; });
+  const tier = tone || volume;
+
   const vo = voice();
-  const line = vo ? vo.v[tier](name)
-    : tier === "high" ? `${name} is one of the most established things in your canon.`
-    : tier === "mid" ? `${name} is solidly present, with room to grow.`
-    : `${name} barely has a footprint yet.`;
+  const plainLine = {
+    dark: `${name} is not a kind figure, going by what you have written.`,
+    warm: `${name} comes off well in your own words.`,
+    high: `${name} is one of the most established things in your canon.`,
+    mid: `${name} is solidly present, with room to grow.`,
+    low: `${name} barely has a footprint yet.`,
+  }[tier];
+  const line = (vo && vo.v[tier]) ? vo.v[tier](name) : plainLine;
   /* An opinion about somebody should show that they were read. This
      used to print topicSummary straight out, which on loose notes is
      every sentence containing the name glued end to end; asked what it
      thought of Adam it replied with both notes verbatim, including a
      line about Lily. Say what was actually understood instead, and keep
      the raw sentences underneath where they belong. */
-  const read = traitsFor(name, ctx);
+  const read = readEarly;
   const characterisation = composeSentence(name, read.traits);
   const sents = characterisation ? [] : C().topicSummary(name, 2);
   return out(`${dymNote(m[1], found)}
@@ -889,8 +952,12 @@ function hOpinion(q, ctx) {
       <div class="bl">My reasoning, with the numbers on the table: the name runs through
         <b>${mentions}</b> ${mentions === 1 ? "entry" : "entries"}, carries <b>${facts}</b> declared
         fact${facts === 1 ? "" : "s"}, and sits in <b>${related}</b> sentence${related === 1 ? "" : "s"}
-        of your prose. ${tier === "high" ? "That is a load-bearing piece of this world."
-          : tier === "mid" ? "Established, and clearly still gathering weight."
+        of your prose. ${tone
+          ? "The verdict above follows what those entries say rather than how many there are" +
+            (decidingClause ? "; chiefly that " + esc(name) + " " +
+              esc(decidingClause.replace(/^is\s+/, "")) + "." : ".")
+          : volume === "high" ? "That is a load-bearing piece of this world."
+          : volume === "mid" ? "Established, and clearly still gathering weight."
           : "There is not much on the page yet; which is an invitation, not a flaw."}</div>
     </div>
     ${read.traits.length ? `<details class="infer-src">
@@ -1110,6 +1177,34 @@ const ROLE_NOUNS = new Set(("king queen emperor empress prince princess lord lad
   "city town village capital kingdom empire realm region province duchy county island " +
   "mountain river sea forest fortress castle palace tower").split(" "));
 
+/* Verbs of plain action. Curated rather than open-ended: "any word
+   ending in -s" matches most of a family tree. Nothing here duplicates
+   a verb handled by its own pattern above (killed, founded, ruled, led,
+   served, worshipped, betrayed, married, lived, died, born), so the two
+   readings can never restate each other. */
+const ACTION_VERBS = [
+  "kicks", "kicked", "beats", "beat", "hits", "hit", "strikes", "struck",
+  "stabs", "stabbed", "shoots", "shot", "burns", "burned", "burnt",
+  "steals", "stole", "robs", "robbed", "saves", "saved", "rescues", "rescued",
+  "protects", "protected", "guards", "guarded", "shields", "shielded",
+  "teaches", "taught", "trains", "trained", "raises", "raised",
+  "abandons", "abandoned", "hunts", "hunted", "chases", "chased",
+  "commands", "commanded", "builds", "built", "destroys", "destroyed",
+  "breaks", "broke", "wields", "wielded", "carries", "carried",
+  "wears", "wore", "rides", "rode", "sails", "sailed",
+  "fights", "fought", "wins", "won", "loses", "lost",
+  "flees", "fled", "escapes", "escaped", "hides", "hid",
+  "speaks", "spoke", "sings", "sang", "writes", "wrote",
+  "studies", "studied", "learns", "learned", "heals", "healed",
+  "curses", "cursed", "blesses", "blessed", "prays", "prayed",
+  "swears", "swore", "promises", "promised", "spies", "spied",
+  "plots", "plotted", "plans", "planned", "rebels", "rebelled",
+  "obeys", "obeyed", "defies", "defied",
+  "avenges", "avenged", "mourns", "mourned", "buries", "buried",
+  "guides", "guided", "follows", "followed", "seeks", "sought",
+  "collects", "collected", "keeps", "tends", "tended", "feeds", "fed",
+].join("|");
+
 const TITLES = "King|Queen|Lord|Lady|Saint|Duke|Duchess|Prince|Princess|Emperor|Empress|" +
   "Baron|Baroness|Count|Countess|Archduke|Archduchess|High Priest|High Priestess|" +
   "Captain|General|Commander|Chancellor|Regent";
@@ -1218,6 +1313,24 @@ const TRAITS = [
   { k: "status",
     re: /\b(?:is|was)\s+(dead|alive|missing|exiled|banished|imprisoned|crowned|widowed)\b/i,
     say: m => "is " + m[1].toLowerCase() },
+  /* Plain doing. Everything above reads a particular KIND of statement;
+     none of them read "Adam kicks dogs", so a character defined by what
+     he does was described only through other people's opinions of him.
+
+     The verb has to come from a list rather than being "any word ending
+     in s", because on a real canon that matches half the nouns in a
+     family tree. The list is deliberately broad and easy to extend, and
+     leaves out every verb already handled above so the two never
+     produce the same clause twice. */
+  { k: "does",
+    re: new RegExp("\\b(" + ACTION_VERBS + ")\\s+([^.;:,!?]{2,40})", "i"),
+    say: m => {
+      const object = tidyClause(m[2], 6);
+      if (!object) return "";
+      const verb = m[1].toLowerCase();
+      const passive = /^(?:up|down|out|off|away|back|apart|aside)?\s*by\b/i.test(object);
+      return passive ? "was " + verb + " " + object : verb + " " + object;
+    } },
 ];
 
 /* ---------- whose statement is it? ----------
