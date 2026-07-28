@@ -1876,6 +1876,11 @@ body.reader-mode .lucky-stage{display:none}
 .ai-test.good{color:var(--gold)}
 .ai-test.bad{color:#e0a0a0}
 
+/* how much of this month's free page allowance is spent */
+.ocr-meter{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin:12px 0 8px}
+.ocr-meter span{display:block;height:100%;background:var(--gold);transition:width .3s ease}
+.ocr-meter.full span{background:#e0a0a0}
+
 /* ---- chapter list with order and publish state ---- */
 .ch-list{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .work-ch{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);

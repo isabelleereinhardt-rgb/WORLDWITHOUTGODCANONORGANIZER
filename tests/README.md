@@ -15,7 +15,11 @@ mattered most — a leftover API key being transmitted to whichever
 provider you switched to next. Playing with it rather than testing it
 found three more: a denial read as an assertion, the writer's own words
 being rewritten before they were saved, and every handler but one
-ignoring what the assistant had already read.
+ignoring what the assistant had already read. The scanned-pages suite
+immediately caught two of its own: an import writing its explanation to
+a log that saving the note then wiped, so a refused page read as an
+empty page; and the connection test redrawing the panel over the answer
+it had just given.
 
 ## Running them
 
@@ -64,6 +68,17 @@ frame arriving after a 200, a server that ignored the stream flag, and
 the rule that words already received are never thrown away when a
 connection breaks.
 
+**`ocr.test.js`** — reading scanned pages through Google Cloud Vision,
+with `fetch` stubbed. The request shape (key in the query, not a header;
+dense document text, not a caption), the text going back to the page it
+came from, batching, and every failure worth explaining in words rather
+than a status code. Most of it is about the money: that pages are counted
+against the free allowance, that a page Google found nothing on is still
+counted because it is still billed, that a job which would overrun is
+refused rather than quietly trimmed, that a refusal costs nothing, that a
+failure part-way keeps what was already paid for, and that a new month
+restores the allowance.
+
 **`explore.js`** — a hunt rather than a checklist. Hostile and malformed
 input (empty, punctuation-only, 500 characters, regex metacharacters,
 script payloads, emoji, non-Latin), markup living inside the canon,
@@ -79,6 +94,16 @@ confirms a later answer uses it, runs every action and confirms the
 records exist and that undo removes them, configures the API path through
 Settings, watches a streamed answer actually grow on screen, and verifies
 a bad key downgrades instead of breaking.
+
+**`ocr.e2e.js`** — the real site in a real browser importing a real PDF
+that carries no text layer, which is what a scan looks like to pdf.js.
+Google is intercepted rather than called, so it costs nothing and runs
+offline, but everything this side of the wire is the shipping code: the
+file imports empty while the feature is off and nothing is sent; the
+Settings panel switches it on and tests the key; the chapter then comes
+in as text, in page order, findable by search and answerable by the
+assistant; the allowance is counted and refused at the line; a refused
+key does not lose the file; and the key never reaches a backup.
 
 **`stub-provider.js`** — a stand-in that speaks the OpenAI request shape.
 It records everything it is sent so the tests can assert on the real

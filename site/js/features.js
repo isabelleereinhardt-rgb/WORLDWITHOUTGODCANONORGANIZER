@@ -316,6 +316,7 @@ const SET_TABS = [
   ["sound", "Sound & atmosphere", "✦"],
   ["lucky", "Lucky", "✧"],
   ["assistant", "Assistant", "❖"],
+  ["scans", "Scanned pages", "✦"],
   ["sections", "Sections", "✧"],
   ["restore", "Restore", "✦"],
   ["backup", "Workspaces & backup", "❖"],
@@ -352,7 +353,7 @@ function renderSetPanel() {
   const el = $("#setPanel");
   ({
     appearance: panelAppearance, avatar: panelAvatar, typography: panelTypography,
-    sound: panelSound, lucky: panelLucky, assistant: panelAssistant,
+    sound: panelSound, lucky: panelLucky, assistant: panelAssistant, scans: panelScans,
     sections: panelSections, restore: panelRestore, backup: panelBackup,
     account: panelAccount, report: panelReport,
   })[setTab](el);
@@ -654,6 +655,118 @@ function panelLucky(el) {
   };
   const ni = $("#luckyNameInput", el);
   ni.onchange = () => { L.setName(ni.value.trim() || "Lucky"); toast("He answers to " + (ni.value.trim() || "Lucky") + " now"); };
+}
+
+/* ---------- Scanned pages (Google Cloud Vision) ----------
+   The one place in this app where your writing leaves the machine on
+   import rather than on a question, so it says so first and in the
+   plainest words available. */
+function panelScans(el) {
+  const OCR = window.CodexOCR;
+  if (!OCR) { el.innerHTML = `<p class="faint set-help">The page reader did not load.</p>`; return; }
+  const c = OCR.conf(), u = OCR.usage();
+  const pct = Math.min(100, Math.round((u.used / u.cap) * 100));
+
+  el.innerHTML = `
+    <div class="rule-head"><span class="k">Reading scanned pages</span><span class="hr"></span></div>
+    <p class="faint set-help">A PDF made by scanning paper holds pictures of words rather than words.
+      Nothing in this app can search one, index a name in one, or answer a question about one; a scanned
+      chapter is invisible to your own canon. Google Cloud Vision reads those pages so they become text
+      like everything else.</p>
+
+    <div class="sfx-row"><span class="sfx-label">Read scanned pages on import
+      <em>Only pages that arrived with no text of their own are sent. Pages that already carry text
+      never leave this machine.</em></span>
+      <button class="switch${c.on ? " on" : ""}" id="ocrSwitch" role="switch"
+        aria-checked="${c.on}"><span></span></button></div>
+
+    ${c.on ? `
+      <div class="ai-warn">
+        <div class="aw-head">✦ What this changes</div>
+        <ul class="aw-list">
+          <li>A picture of each unreadable page <strong>is sent to Google Cloud Vision</strong> to be read.
+            Pages that already have text, and everything you type, stay here.</li>
+          <li>Google's free allowance is ${OCR.FREE_UNITS} pages a calendar month. This app counts what it
+            uses and stops at the line rather than spending your money quietly.</li>
+          <li>Your key is kept on this device only. It is never uploaded, never synced, and is
+            deliberately left out of backups.</li>
+          <li>If a page cannot be read the import still finishes, and says which pages it could not read.</li>
+        </ul>
+      </div>
+
+      <div class="rule-head mt"><span class="k">Key</span><span class="hr"></span></div>
+      <p class="faint set-help">Create one in the Google Cloud console under
+        <b>APIs &amp; Services → Credentials</b>, and switch on the <b>Cloud Vision API</b> for that
+        project. <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com"
+        target="_blank" rel="noopener">Enable Cloud Vision →</a></p>
+      <label class="ne-field grow"><span>Vision API key</span>
+        <input class="import-title" id="ocrKey" type="password" autocomplete="off"
+          placeholder="AIza…" value="${esc(c.key || "")}"></label>
+      <div class="ai-acts">
+        <button class="btn sm" id="ocrSave">Save key</button>
+        <button class="btn ghost sm" id="ocrTest">Test the connection</button>
+        ${c.key ? `<button class="btn ghost sm danger" id="ocrForget">Forget my key</button>` : ""}
+      </div>
+      <div id="ocrResult" class="ai-test"></div>
+
+      <div class="rule-head mt"><span class="k">This month</span><span class="hr"></span></div>
+      <div class="ocr-meter${u.left ? "" : " full"}"><span style="width:${pct}%"></span></div>
+      <p class="faint set-help"><b>${u.used}</b> of <b>${u.cap}</b> pages used in ${esc(u.month)};
+        ${u.left} left. The count resets on the 1st.</p>
+      <p class="faint set-help">If you would rather pay past the free allowance, raise this limit.
+        Google charges about $1.50 for each further thousand pages.</p>
+      <label class="ne-field"><span>Stop after this many pages a month</span>
+        <input class="import-title" id="ocrCap" type="number" min="0" step="100" value="${u.cap}"
+          style="max-width:140px"></label>
+      <div class="ai-acts"><button class="btn sm" id="ocrSaveCap">Save limit</button></div>`
+    : `<p class="faint set-help" style="margin-top:14px">While this is off, a scanned page imports as a
+        picture and nothing else — you will be able to look at it, but not find it.</p>`}`;
+
+  $("#ocrSwitch", el).onclick = () => {
+    const next = !OCR.conf().on;
+    OCR.setConf({ on: next });
+    viewSettings("scans");
+    toast(next ? "Scanned pages will be read on import" : "Scans stay unread");
+  };
+  const say = (ok, msg) => {
+    const r = $("#ocrResult", el);
+    if (!r) return;
+    r.className = "ai-test " + (ok ? "good" : "bad");
+    r.textContent = msg;
+  };
+  const saveBtn = $("#ocrSave", el);
+  if (saveBtn) saveBtn.onclick = () => {
+    OCR.setConf({ key: $("#ocrKey", el).value.trim() });
+    say(true, "Saved on this device.");
+  };
+  const capBtn = $("#ocrSaveCap", el);
+  if (capBtn) capBtn.onclick = () => {
+    OCR.setConf({ cap: Math.max(0, Number($("#ocrCap", el).value) || 0) });
+    viewSettings("scans");
+    toast("Limit saved");
+  };
+  const forget = $("#ocrForget", el);
+  if (forget) forget.onclick = () => { OCR.clearKey(); viewSettings("scans"); toast("Key forgotten"); };
+  const testBtn = $("#ocrTest", el);
+  if (testBtn) testBtn.onclick = async () => {
+    OCR.setConf({ key: $("#ocrKey", el).value.trim() });
+    testBtn.disabled = true; testBtn.textContent = "Asking Google…";
+    const r = await OCR.test();
+    testBtn.disabled = false; testBtn.textContent = "Test the connection";
+    say(r.ok, r.why);
+    /* The test spends a page, so the meter is stale; redrawing the whole
+       panel would update it and wipe the answer that was just given, so
+       only the meter moves. */
+    const u = OCR.usage(), bar = $(".ocr-meter", el);
+    if (bar) {
+      bar.classList.toggle("full", !u.left);
+      const fillEl = bar.firstElementChild;
+      if (fillEl) fillEl.style.width = Math.min(100, Math.round((u.used / u.cap) * 100)) + "%";
+      const line = bar.nextElementSibling;
+      if (line) line.innerHTML = `<b>${u.used}</b> of <b>${u.cap}</b> pages used in ${esc(u.month)};
+        ${u.left} left. The count resets on the 1st.`;
+    }
+  };
 }
 
 /* ---------- Assistant ---------- */

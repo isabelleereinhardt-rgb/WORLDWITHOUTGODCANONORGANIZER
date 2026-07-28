@@ -1098,6 +1098,20 @@ function viewImport() {
       <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
     </div>
     <div class="import-progress" id="importProgress" hidden></div>
+    ${(() => {
+      /* Whether scans get read is decided in Settings, but it matters
+         here, at the moment a scanned chapter is about to come in as a
+         picture and vanish from your own canon. */
+      const O = window.CodexOCR;
+      if (!O) return "";
+      const u = O.usage();
+      return O.configured()
+        ? `<p class="faint set-help">Scanned pages will be read by Google Cloud Vision;
+             ${u.left} of this month's ${u.cap} free pages left.
+             <a href="#/settings/scans">Change →</a></p>`
+        : `<p class="faint set-help">Scanned pages will import as pictures and stay unsearchable.
+             <a href="#/settings/scans">Switch on reading scans →</a></p>`;
+    })()}
 
     <div class="lore-grid">
       <div>
@@ -1192,7 +1206,12 @@ async function handleFiles(fileList) {
     if (/^image\//.test(f.type)) {
       try { images.push(await window.CodexImg.fileToScaledDataURL(f)); } catch (e) { logImport(`Couldn't read image ${esc(name)}`); }
     } else if (/\.pdf$/i.test(name) || f.type === "application/pdf") {
-      try { await importPdf(f, cat); logImport(`Imported <b>${esc(name.replace(/\.pdf$/i, ""))}</b> (text + page images).`, cat); }
+      try {
+        const r = await importPdf(f, cat);
+        logImport(`Imported <b>${esc(name.replace(/\.pdf$/i, ""))}</b> (text + page images)${
+          r && r.scanned ? `; ${r.scanned} scanned page${r.scanned === 1 ? "" : "s"} read by Vision` : ""}.`, cat);
+        if (r && r.trouble) logImport(`Its scanned pages were not read: ${esc(r.trouble)}`, cat);
+      }
       catch (e) { logImport(`Couldn't read PDF ${esc(name)}: ${esc(e.message || "")}`); }
     } else if (/\.docx$/i.test(name)) {
       try { await importDocx(f, cat); logImport(`Imported <b>${esc(name.replace(/\.docx$/i, ""))}</b>.`, cat); }
@@ -1215,34 +1234,79 @@ async function handleFiles(fileList) {
     }
   }
   if (images.length) {
-    const note = await addNote("Imported images · " + new Date().toLocaleDateString(), "", images, cat);
-    logImport(`Added ${images.length} image${images.length === 1 ? "" : "s"} as a gallery.`, cat);
+    /* A photograph of a page is the other way a chapter arrives
+       unreadable, so the same offer applies to it. */
+    let body = "", scanned = 0, trouble = "";
+    const OCR = window.CodexOCR;
+    if (OCR && OCR.configured()) {
+      importProgress(`Reading ${images.length} image${images.length === 1 ? "" : "s"}…`);
+      const r = await OCR.read(images.map((image, at) => ({ at, image })),
+        (done, total) => importProgress(`Reading images; ${done} of ${total}…`));
+      if (r.results.length) {
+        body = r.results.sort((a, b) => a.at - b.at).map(x => x.text).join("\n\n");
+        scanned = r.results.length;
+      }
+      if (!r.ok) trouble = r.why;
+    }
+    // saved first, because saving re-renders this screen and clears the log
+    await addNote("Imported images · " + new Date().toLocaleDateString(), body, images, cat);
+    logImport(`Added ${images.length} image${images.length === 1 ? "" : "s"} as a gallery${
+      scanned ? `; text read from ${scanned} of them` : ""}.`, cat);
+    if (trouble) logImport(`They were not read: ${esc(trouble)}`, cat);
   }
   const p = $("#importProgress"); if (p) p.hidden = true;
 }
 
 /* PDF import: extract text AND render every page to an image, Notion-style,
-   so the visuals come across, not just the words. */
+   so the visuals come across, not just the words.
+
+   A scanned page has no text layer, so pdf.js hands back nothing for it
+   and the page arrives as a picture the rest of the app cannot read. If
+   reading scans is switched on, those pages — and only those — are sent
+   to Google Cloud Vision and the text is put back at the page it came
+   from, so the chapter reads in order. */
 async function importPdf(file, cat) {
   if (!window.pdfjsLib) throw new Error("PDF reader not loaded");
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let text = "";
+  const pages = [];
   const images = [];
   const maxPages = Math.min(pdf.numPages, 60);
   for (let i = 1; i <= maxPages; i++) {
     importProgress(`Reading ${file.name}; page ${i} of ${maxPages}…`);
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map(it => it.str).join(" ") + "\n\n";
+    pages.push(content.items.map(it => it.str).join(" "));
     const viewport = page.getViewport({ scale: 1.6 });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width; canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     images.push(canvas.toDataURL("image/jpeg", 0.82));
   }
+
+  let scanned = 0, trouble = "";
+  const OCR = window.CodexOCR;
+  if (OCR && OCR.configured()) {
+    const blank = [];
+    pages.forEach((t, i) => { if (OCR.looksUnread(t)) blank.push({ at: i, image: images[i] }); });
+    if (blank.length) {
+      const r = await OCR.read(blank, (done, total) =>
+        importProgress(`Reading ${blank.length === 1 ? "a scanned page" : blank.length + " scanned pages"} of ${file.name}; ${done} of ${total}…`));
+      r.results.forEach(x => { pages[x.at] = x.text; });
+      scanned = r.results.length;
+      /* A refusal is worth saying out loud — an unread page looks exactly
+         like a page with nothing on it, and importing a blank chapter
+         quietly is how you lose a chapter. It is handed back rather than
+         logged here, because saving the note re-renders this screen and
+         would wipe anything written before it. */
+      if (!r.ok) trouble = r.why;
+      else if (r.oversize) trouble = r.oversize + (r.oversize === 1 ? " page was" : " pages were") + " too large to send for reading.";
+    }
+  }
+
   const title = file.name.replace(/\.pdf$/i, "");
-  await addNote(title, text.trim(), images, cat);
+  await addNote(title, pages.join("\n\n").trim(), images, cat);
+  return { scanned, pages: maxPages, trouble };
 }
 
 /* Word (.docx) import via mammoth; pulls text and any embedded images. */
@@ -2319,15 +2383,22 @@ async function backupAll() {
      yourself, dropped in cloud storage, kept for years. An API key inside
      it is a live secret in all of those places, so the AI settings are
      skipped outright rather than filtered field by field. */
-  const SECRET_KEYS = [window.CodexAI ? CodexAI.STORAGE_KEY : "codex.ai"];
+  const SECRET_KEYS = [
+    window.CodexAI ? CodexAI.STORAGE_KEY : "codex.ai",
+    window.CodexOCR ? CodexOCR.STORAGE_KEY : "codex.ocr",
+  ];
   data.prefs = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k || !k.startsWith("codex.")) continue;
-    if (SECRET_KEYS.indexOf(k) > -1) continue;
+    /* Matched on the stem rather than the whole name. Signing in scopes
+       some keys as "codex.thing@who", and an exact comparison would let
+       a scoped credential through into the one file that gets emailed
+       around. */
+    if (SECRET_KEYS.some(s => k === s || k.startsWith(s + "@"))) continue;
     data.prefs[k] = localStorage.getItem(k);
   }
-  data._skipped = "AI provider settings and API key are never included in a backup.";
+  data._skipped = "AI provider settings, API keys and the Vision key are never included in a backup.";
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -2518,7 +2589,9 @@ function route() {
   else if (path === "history") window.CodexPages && CodexPages.history(parts[1] || "");
   else if (path === "tasks") window.CodexUI && CodexUI.viewTasks();
   else if (path === "feed") window.CodexUI && CodexUI.viewFeed();
-  else if (path === "settings") window.CodexUI && CodexUI.viewSettings();
+  // "#/settings/scans" opens straight onto that tab, so a link can point
+  // at the setting it is talking about rather than at Settings in general
+  else if (path === "settings") window.CodexUI && CodexUI.viewSettings(parts[1] || "");
   else viewDesk();
   markActive();
 }

@@ -37,6 +37,7 @@ run "brain (no browser)" node "$HERE/brain.test.js"
 run "api request shape (no browser)" node "$HERE/ai.test.js"
 run "provider presets (no browser)" node "$HERE/providers.test.js"
 run "streaming (no browser)" node "$HERE/streaming.test.js"
+run "scanned pages (no browser)" node "$HERE/ocr.test.js"
 run "hostile input & edge cases (no browser)" node "$HERE/explore.js"
 
 if [ "${1:-all}" = "unit" ]; then
@@ -61,6 +62,7 @@ STUB_PID=$!
 sleep 2
 
 run "assistant end to end (real canon, real browser)" node "$HERE/assistant.e2e.js"
+run "scanned pages end to end (real PDF, real browser)" node "$HERE/ocr.e2e.js"
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SOMETHING FAILED"; fi
