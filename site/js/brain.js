@@ -846,15 +846,149 @@ function hOpinion(q, ctx) {
    the page, and the sentences it read from are shown underneath so any
    claim can be checked in one glance.
    ============================================================ */
-const STOP_CLAUSE = /\s*\b(?:but|however|although|though|whereas|while|and then)\b|[.;:!?]|$/i;
+const STOP_CLAUSE = new RegExp(
+  "[,;:.!?()\\[\\]\"\u201c\u201d]" +
+  "|\\s\\b(?:but|however|although|though|whereas|while|that|which|who|whom|when|where|" +
+  "before|after|because|since|and|and then|as well as)\\b" +
+  "|$", "i");
 
 /* cut a captured fragment at the first thing that ends the thought, and
    tidy the trailing filler people leave when they trail off */
-function tidyClause(s) {
+function tidyClause(s, maxWords) {
   let t = String(s || "").replace(/\s+/g, " ").trim();
+  /* Years in this canon are written 8,544 BR. Cutting at every comma
+     turned that into "8", so the separators are hidden from the search
+     and put back afterwards. */
+  const GUARD = "\u0001";
+  t = t.replace(/(\d),(\d)/g, "$1" + GUARD + "$2");
   const stop = t.search(STOP_CLAUSE);
   if (stop > 0) t = t.slice(0, stop);
-  return t.replace(/[,;:.\s]+$/, "").replace(/\s+\b(?:or\s+even|or\s+anything|etc\.?)\s*$/i, "").trim();
+  t = t.split(GUARD).join(",");
+  t = t.replace(/[,;:.\s]+$/, "").replace(/\s+\b(?:or\s+even|or\s+anything|etc\.?)\s*$/i, "").trim();
+  /* Much of this canon is not prose but family trees and Quick Facts
+     blocks: long comma-joined runs with no full stop anywhere. Read
+     greedily, those produce a "sentence" the length of a paragraph. A
+     statement that cannot be said in a few words is not a statement this
+     can safely make, so it is dropped rather than truncated. */
+  if (!t || t.split(/\s+/).length > (maxWords || 7)) return "";
+  return t;
+}
+/* tidyClause returns "" when a fragment is too long or too tangled to
+   state cleanly, which leaves clauses hanging: "the daughter of",
+   "also known as", "was founded by". A clause that trails off is worse
+   than no clause, so it is dropped. */
+function wellFormed(clause) {
+  const c = String(clause || "").trim();
+  if (c.length < 6) return false;
+  if (/\b(?:of|by|to|in|at|as|for|with|the|a|an|and|or)\s*$/i.test(c)) return false;
+  if (/\s{2,}/.test(c)) return false;
+  // "hates her" tells you nothing without knowing who "her" is
+  if (/\b(?:her|him|them|it|us|me|you|himself|herself|themselves)\s*$/i.test(c)) return false;
+  // "the only saint to have" trails off mid-thought
+  if (/\b(?:have|has|had|be|been|being|is|was|were|will|would|could|should|do|does|did)\s*$/i.test(c)) return false;
+  // "the firstborn of Emperor" names a rank and then stops
+  if (new RegExp("\\b(?:" + TITLES + ")\\s*$", "i").test(c)) return false;
+  // a clause whose whole object is one short word says nothing
+  const tail = c.replace(/^[a-z]+(?:\s+(?:a|an|the|to|of|by|in|at|with|as|not|like))*\s+/i, "");
+  if (tail.length < 4 || /^(?:one|two|some|many|other|others|this|that)$/i.test(tail)) return false;
+  return /\s/.test(c);
+}
+
+/* Nobody kills, founds or mothers themselves. A clause naming its own
+   subject came from a sentence about somebody else, so it is wrong
+   rather than merely clumsy. */
+function selfReferential(clause, name) {
+  const body = clause.replace(/^[a-z' ]+?\b(?:of|by|to|as|with|in|at)\s+/i, "");
+  try { return new RegExp("\\b" + reEsc(name) + "\\b", "i").test(body); }
+  catch (e) { return false; }
+}
+
+/* Family trees and Quick Facts blocks are not prose. Read as sentences
+   they yield statements nobody wrote; this keeps the reading to text
+   that actually reads like text. */
+function looksLikeProse(s) {
+  if (!s || s.length > 400) return false;
+  const words = s.trim().split(/\s+/);
+  if (words.length < 4 || words.length > 60) return false;
+  /* What marks a family tree is a run of Title Case names, not capitals
+     as such. Counting every capital condemned notes typed in CAPS, which
+     are shouting rather than tabular; "LILY IS SEVEN AND Friends with
+     Max" is perfectly ordinary prose said loudly. */
+  /* The first word is capitalised by grammar, not by being a name, so
+     it is not evidence either way. And a sentence in fiction carries a
+     lot of proper nouns; "Sevtor is loyal to House Orana and serves
+     Lord Dain" is half names and still perfectly ordinary prose. What a
+     family tree looks like is almost NOTHING but names. */
+  const rest = words.slice(1);
+  if (!rest.length) return false;
+  const titleCase = rest.filter(w => /^[A-Z][a-z]/.test(w)).length;
+  return titleCase / rest.length < 0.65;
+}
+const aOrAn = w => (/^[aeiou]/i.test(w) ? "an " : "a ") + w;
+
+/* ---------- is this actually a name? ----------
+   The expensive lesson from running the first draft of this over a real
+   canon: capitalisation alone is not enough. "led by Through", "founded
+   by Tbd", "has a mother, Ii" all came from capitalised words that are
+   not names; headings, placeholders and regnal numerals.
+
+   Where the workspace has a real name index, that index decides. Where
+   it does not; a workspace someone started last week; fall back to
+   asking whether the word looks like a name and is not a numeral, an
+   abbreviation, or an ordinary English word. */
+const NOT_A_NAME = new Set(("through before after during within without across against between " +
+  "key turning points accomplishments succession status quick facts era born died known " +
+  "tbd tba unknown none n/a various several many other others part role notes note summary " +
+  "overview history background timeline reference the this that these those there here " +
+  "first second third last next previous new old great high low true false").split(" "));
+const ROMAN = /^(?:i{1,3}|iv|v|vi{1,3}|ix|x{1,3}|xl|l|c|d|m)+$/i;
+
+function plausibleName(text) {
+  const t = String(text || "").replace(/^the\s+/i, "").trim();
+  if (!t) return false;
+  const words = t.split(/\s+/);
+  if (words.length > 4) return false;
+  const first = words[0];
+  if (first.length < 3) return false;                 // "Ii", "Br"
+  if (ROMAN.test(first)) return false;                // regnal numerals
+  if (NOT_A_NAME.has(first.toLowerCase())) return false;
+  if (COMMON_WORDS.has(first.toLowerCase())) return false;
+  return /^[A-Z]/.test(first);
+}
+/* A canon with a real index gets checked against it; one without gets
+   the judgement above. Ten names is the line: below that the index is
+   too thin to prove anything, and refusing everything it lacks would
+   make the assistant useless on a new workspace. */
+function resolveTarget(text) {
+  const ents = (C().DB.entities || []);
+  const t = String(text || "").replace(/^the\s+/i, "").trim();
+  if (!t) return null;
+  if (/^House\s+[A-Z]/i.test(t)) return t;
+  if (ents.length >= 10) {
+    const lower = t.toLowerCase();
+    const exact = ents.find(n => n.toLowerCase() === lower);
+    if (exact) return exact;
+    /* The capture often drags a heading in with it. Keep the longest
+       indexed name inside it and discard the rest, rather than printing
+       "loyal to Vikistv Key Turning Points". */
+    const inside = ents.filter(n => n.length > 3 && lower.includes(n.toLowerCase()))
+      .sort((a, b) => b.length - a.length)[0];
+    return inside || null;
+  }
+  return plausibleName(t) ? t : null;
+}
+function knownTarget(text) {
+  const ents = (C().DB.entities || []);
+  const t = String(text || "").replace(/^the\s+/i, "").trim();
+  if (!t) return false;
+  if (/^House\s+[A-Z]/i.test(t)) return true;
+  if (ents.length >= 10) {
+    const lower = t.toLowerCase();
+    if (ents.some(n => n.toLowerCase() === lower)) return true;
+    // "King Layern Patton" contains the indexed name "Layern Patton"
+    return ents.some(n => n.length > 3 && lower.includes(n.toLowerCase()));
+  }
+  return plausibleName(t);
 }
 
 const NUMBER_WORD = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|" +
@@ -863,16 +997,126 @@ const NUMBER_WORD = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twe
 /* Each pattern says how to recognise a statement and how to say it back.
    `about` marks the ones that must appear near the subject's own name,
    so a second character's dislikes are not attributed to the first. */
+/* Most of these verbs take a NAMED object in practice: you found a
+   house, you killed a person, you rule a kingdom. Requiring the object
+   to be a proper noun is what keeps "Duri's ten rules that govern the
+   faith" from being read as Duri ruling something called "that". */
+const PROPER = "((?:the\\s+)?[A-Z][\\w'’-]*(?:\\s+[A-Z][\\w'’-]*){0,3})";
+const named = (before, after) => new RegExp(before + "\\s+" + (after || PROPER), "i");
+// traits built with named() take a NAMED object; their target is checked
+const STRICT = new Set(["rules","founded","leads","serves","loyal","worships",
+  "killed","betrayed","heir"]);
+
+/* The nouns that actually name what somebody or something IS. Without
+   this list the role pattern matched any noun at all, and reported that
+   a character "is a promise" or "is the last". */
+const ROLE_NOUNS = new Set(("king queen emperor empress prince princess lord lady duke duchess " +
+  "baron baroness count countess regent chancellor saint god goddess deity priest priestess " +
+  "knight soldier warrior general captain commander guard assassin thief spy healer scholar " +
+  "scribe archivist merchant farmer smith sailor hunter bard poet witch mage sorcerer wizard " +
+  "heir ruler leader founder monarch noble commoner slave servant steward " +
+  "mother father sister brother daughter son wife husband cousin aunt uncle child girl boy " +
+  "man woman twin orphan widow widower " +
+  "house dynasty family order guild council court temple church faith religion sect " +
+  "city town village capital kingdom empire realm region province duchy county island " +
+  "mountain river sea forest fortress castle palace tower").split(" "));
+
+const TITLES = "King|Queen|Lord|Lady|Saint|Duke|Duchess|Prince|Princess|Emperor|Empress|" +
+  "Baron|Baroness|Count|Countess|Archduke|Archduchess|High Priest|High Priestess|" +
+  "Captain|General|Commander|Chancellor|Regent";
+
+/* Ordered by how much each one identifies somebody, because that is the
+   order they will be read out in. Titles and roles first, then blood and
+   marriage, then what they did, then where they were, then how they are
+   remembered. */
 const TRAITS = [
-  { k: "age", about: true,
-    re: new RegExp("\\b(?:is|was|are|were)\\s+(\\d{1,3}|" + NUMBER_WORD + ")\\b(\\s+years?\\s+old)?", "i"),
-    say: m => "is " + m[1].toLowerCase() + (m[2] ? " years old" : "") },
-  { k: "role", about: true,
+  { k: "divine",
+    re: /\b(?:is|was)\s+the\s+(god|goddess)\s+of\s+(.+)/i,
+    say: m => "is the " + m[1].toLowerCase() + " of " + tidyClause(m[2]) },
+  { k: "role",
     re: /\b(?:is|was)\s+((?:a|an|the)\s+[a-z][\w'-]*(?:\s+[a-z][\w'-]*){0,3})/i,
-    say: m => "is " + tidyClause(m[1]) },
+    say: m => {
+      const phrase = tidyClause(m[1]);
+      if (!phrase) return "";
+      // it must actually name a role; otherwise any noun at all qualifies
+      const words = phrase.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/);
+      return words.some(w => ROLE_NOUNS.has(w)) ? "is " + phrase : "";
+    } },
+  { k: "age",
+    /* A number after "is" is only an age when it says so, or when it is
+       written as a word. This canon is full of dates, counts and list
+       numbering, and "Enyokia is 5" came from none of them being age. */
+    re: new RegExp("\\b(?:is|was|are|were)\\s+(?:(\\d{1,3})\\s+years?\\s+old|(" + NUMBER_WORD + ")\\b(\\s+years?\\s+old)?)", "i"),
+    say: m => "is " + String(m[1] || m[2]).toLowerCase() + (m[1] ? " years old" : (m[3] ? " years old" : "")) },
+  { k: "alias",
+    re: /\b(?:also\s+)?known\s+as\s+(.+)/i,
+    say: m => "is also known as " + tidyClause(m[1]) },
+  { k: "family",
+    re: /\b(?:is\s+)?(?:the\s+)?(?:eldest\s+|youngest\s+|only\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|heir)\s+(?:of|to)\s+(.+)/i,
+    say: m => "is the " + m[1].toLowerCase() + " of " + tidyClause(m[2]) },
+  { k: "married",
+    re: /\b(?:is|was)\s+married\s+to\s+(.+)/i,
+    say: m => "is married to " + tidyClause(m[1]) },
   { k: "friends",
     re: /\bfriends?\s+with\s+(.+)/i,
     say: m => "is friends with " + tidyClause(m[1]) },
+  { k: "rules", re: named("\\b(?:rules?|ruled|reigns?|reigned)(?:\\s+over)?"),
+    say: m => "ruled " + tidyClause(m[1]) },
+  { k: "ruled-by",
+    re: /\b(?:is|was|are|were)\s+ruled\s+by\s+(.+)/i,
+    say: m => "is ruled by " + tidyClause(m[1]) },
+  { k: "founded", re: named("\\bfounded"),
+    say: m => "founded " + tidyClause(m[1]) },
+  { k: "founded-by",
+    re: /\b(?:was|were|is|are)\s+founded\s+by\s+(.+)/i,
+    say: m => "was founded by " + tidyClause(m[1]) },
+  { k: "founded-in",
+    re: /\bfounded\s+in\s+(\d[\d,]{0,8}(?:\s+[A-Z]{2})?)/,
+    say: m => "was founded in " + tidyClause(m[1]) },
+  { k: "leads", re: named("\\b(?:leads|led)"),
+    say: m => "led " + tidyClause(m[1]) },
+  { k: "serves", re: named("\\bserve[sd](?:\\s+under)?"),
+    say: m => "serves " + tidyClause(m[1]) },
+  { k: "loyal", re: named("\\bloyal\\s+to"),
+    say: m => "is loyal to " + tidyClause(m[1]) },
+  { k: "worships", re: named("\\bworships?"),
+    say: m => "worships " + tidyClause(m[1]) },
+  { k: "killed", re: named("\\bkill(?:ed|s)"),
+    say: m => "killed " + tidyClause(m[1]) },
+  { k: "killed-by",
+    re: /\b(?:was|were|is)\s+(?:killed|slain|murdered)\s+by\s+(.+)/i,
+    say: m => "was killed by " + tidyClause(m[1]) },
+  { k: "betrayed", re: named("\\bbetray(?:ed|s)"),
+    say: m => "betrayed " + tidyClause(m[1]) },
+  { k: "heir", re: named("\\bheir\\s+(?:to|of)"),
+    say: m => "is heir to " + tidyClause(m[1]) },
+  { k: "born",
+    re: /\bborn\s+(in|on|at|to)\s+(.+)/i,
+    say: m => "was born " + m[1].toLowerCase() + " " + tidyClause(m[2]) },
+  { k: "died",
+    re: /\bdied\s+(in|at|during|of)\s+(.+)/i,
+    say: m => "died " + m[1].toLowerCase() + " " + tidyClause(m[2]) },
+  { k: "lives",
+    re: /\b(?:lives?|lived|resides?|resided)\s+in\s+(.+)/i,
+    say: m => "lives in " + tidyClause(m[1]) },
+  { k: "from",
+    re: /\b(?:is|was|comes|came)\s+from\s+(.+)/i,
+    say: m => "is from " + tidyClause(m[1]) },
+  { k: "capital",
+    re: /\b(?:is\s+)?the\s+capital\s+of\s+(.+)/i,
+    say: m => "is the capital of " + tidyClause(m[1]) },
+  { k: "seat",
+    re: /\b(?:is\s+)?the\s+seat\s+of\s+(.+)/i,
+    say: m => "is the seat of " + tidyClause(m[1]) },
+  { k: "located",
+    re: /\b(?:is\s+)?(?:located|lies|sits|stands)\s+(in|on|at|near|above|beside|beneath|within)\s+(.+)/i,
+    say: m => "lies " + m[1].toLowerCase() + " " + tidyClause(m[2]) },
+  { k: "renown",
+    re: /\bknown\s+for\s+(.+)/i,
+    say: m => "is known for " + tidyClause(m[1]) },
+  { k: "remembered",
+    re: /\bremembered\s+(?:as|for)\s+(.+)/i,
+    say: m => "is remembered for " + tidyClause(m[1]) },
   { k: "dislikes",
     re: /\b(?:does\s+not|doesn'?t|did\s+not|didn'?t|do\s+not|don'?t)\s+(?:like|trust|get\s+along\s+with)\s+(.+)/i,
     say: m => "does not like " + tidyClause(m[1]) },
@@ -882,19 +1126,7 @@ const TRAITS = [
   { k: "likes",
     re: /\b(?:likes|loves|adores|admires)\s+(.+)/i,
     say: m => "loves " + tidyClause(m[1]) },
-  { k: "family",
-    re: /\b(?:is\s+)?(?:the\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|heir)\s+(?:of|to)\s+(.+)/i,
-    say: m => "is the " + m[1].toLowerCase() + " of " + tidyClause(m[2]) },
-  { k: "married",
-    re: /\b(?:is|was)\s+married\s+to\s+(.+)/i,
-    say: m => "is married to " + tidyClause(m[1]) },
-  { k: "lives",
-    re: /\b(?:lives?|lived|resides?|resided)\s+in\s+(.+)/i,
-    say: m => "lives in " + tidyClause(m[1]) },
-  { k: "from",
-    re: /\b(?:is|was|comes|came)\s+from\s+(.+)/i,
-    say: m => "is from " + tidyClause(m[1]) },
-  { k: "status", about: true,
+  { k: "status",
     re: /\b(?:is|was)\s+(dead|alive|missing|exiled|banished|imprisoned|crowned|widowed)\b/i,
     say: m => "is " + m[1].toLowerCase() },
 ];
@@ -930,23 +1162,50 @@ function namesWithin(text) {
   const out = [];
   const re = /\b[A-Za-z][\w'’-]*\b/g;
   let m;
-  while ((m = re.exec(text))) if (looksLikeName(m[0])) out.push({ name: m[0], at: m.index });
+  while ((m = re.exec(text))) {
+    if (!looksLikeName(m[0])) continue;
+    const prev = out[out.length - 1];
+    // "House Veren" is one name; treating it as two made the owner of a
+    // statement come out as "Veren"
+    if (prev && prev.at + prev.name.length + 1 === m.index) {
+      prev.name += " " + m[0];
+    } else out.push({ name: m[0], at: m.index });
+  }
   return out;
 }
 /* Who is making this statement? The nearest name before it; or, where a
    clause opens with a pronoun, whoever the sentence opened with. */
-function ownerOfStatement(piece, sentence, at) {
-  const before = namesWithin(piece.slice(0, at));
+function ownerOfStatement(piece, sentence, at, carry, sentenceAt) {
+  /* "Queen Kaeya of House Veren was born ..." names two things, but
+     "of House Veren" modifies Kaeya rather than taking over as the
+     subject; a name introduced by "of" is part of the phrase before it. */
+  const head = piece.slice(0, at);
+  const before = namesWithin(head).filter(n => !/\bof\s+$/i.test(head.slice(0, n.at)));
   if (before.length) return before[before.length - 1].name;
-  if (/\b(?:she|he|they|her|him|them|it)\b/i.test(piece.slice(0, at))) {
-    const lead = namesWithin(sentence)[0];
-    return lead ? lead.name : null;
-  }
+  /* No name in front of it. In "Kaeya founded House Veren and ruled
+     Torad" the second half has no subject of its own; it belongs to
+     whoever the sentence opened with; but only a name that actually
+     precedes the verb, or "She was killed by Sevtor" would be read as
+     Sevtor killing himself. */
+  const absolute = (sentenceAt || 0) + at;
+  const lead = namesWithin(sentence).filter(n => n.at < absolute)[0];
+  if (lead) return lead.name;
+  /* Not even the sentence names anybody: "She is the goddess of
+     alchemy" after a sentence about Kaeya. The subject carried over
+     from the previous sentence is the only honest reading, and only a
+     pronoun licenses it. */
+  if (carry && /\b(?:she|he|they|her|him|them|it)\b/i.test(piece)) return carry;
   return null;
 }
-function statementBelongsTo(piece, sentence, at, nl) {
-  const owner = ownerOfStatement(piece, sentence, at);
-  return !!owner && owner.toLowerCase() === nl;
+function sameSubject(owner, nl) {
+  if (!owner) return false;
+  const o = owner.toLowerCase();
+  if (o === nl) return true;
+  // "King Layern Patton" is Layern Patton; "Queen Kaeya" is Kaeya
+  try { return new RegExp("\\b" + reEsc(nl) + "\\b").test(o); } catch (e) { return false; }
+}
+function statementBelongsTo(piece, sentence, at, nl, carry, sentenceAt) {
+  return sameSubject(ownerOfStatement(piece, sentence, at, carry, sentenceAt), nl);
 }
 
 /* ---------- the same sentence, read from the other side ----------
@@ -975,27 +1234,88 @@ const INVERSE = [
     re: /\b(?:likes|loves|adores|admires)\s+(.+)/i,
     say: owner => "is liked by " + owner },
   { k: "relative-of", obj: 2,
-    re: /\b(?:is\s+)?(?:the\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle)\s+(?:of|to)\s+(.+)/i,
+    re: /\b(?:is\s+)?(?:the\s+)?(?:eldest\s+|youngest\s+|only\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle)\s+(?:of|to)\s+(.+)/i,
     say: (owner, m) => "has a " + m[1].toLowerCase() + ", " + owner },
+  { k: "killed-by-inv", obj: 1, re: named("\\bkill(?:ed|s)"),
+    say: owner => "was killed by " + owner },
+  { k: "founded-by-inv", obj: 1, re: named("\\bfounded"),
+    say: owner => "was founded by " + owner },
+  { k: "ruled-by-inv", obj: 1, re: named("\\b(?:rules?|ruled|reigns?|reigned)(?:\\s+over)?"),
+    say: owner => "is ruled by " + owner },
+  { k: "led-by-inv", obj: 1, re: named("\\b(?:leads|led)"),
+    say: owner => "is led by " + owner },
+  { k: "served-by-inv", obj: 1, re: named("\\bserve[sd](?:\\s+under)?"),
+    say: owner => "is served by " + owner },
+  { k: "worshipped-by-inv", obj: 1, re: named("\\bworships?"),
+    say: owner => "is worshipped by " + owner },
+  { k: "betrayed-by-inv", obj: 1, re: named("\\bbetray(?:ed|s)"),
+    say: owner => "was betrayed by " + owner },
+  { k: "loyalty-of-inv", obj: 1, re: named("\\bloyal\\s+to"),
+    say: owner => "has the loyalty of " + owner },
+  { k: "heir-inv", obj: 1, re: named("\\bheir\\s+(?:to|of)"),
+    say: owner => "has an heir, " + owner },
 ];
+
+/* ---------- what sits right beside the name ----------
+   Two of the commonest shapes in this canon are not clauses at all.
+   "King Layern Patton II" puts the title in front of the name, and
+   "Yailk of Torad" hangs the allegiance off the back of it, so neither
+   is reachable by looking for a verb. Both are read here instead.
+
+   The "of Y" form only counts when Y is a house or a place the canon
+   already knows, which keeps "one of the" and "some of them" out. */
+function readAdjacent(name, ctx) {
+  const clauses = [];
+  const sentences = [];
+  let titleRe, ofRe;
+  try {
+    titleRe = new RegExp("\\b(" + TITLES + ")\\s+" + reEsc(name) + "\\b", "i");
+    ofRe = new RegExp("\\b" + reEsc(name) + "\\s+of\\s+(House\\s+[A-Z][\\w'’-]*|[A-Z][\\w'’-]*)", "");
+  } catch (e) { return { clauses, sentences }; }
+  const known = new Set((C().DB.entities || []).map(n => n.toLowerCase()));
+  for (const e of pool(ctx)) {
+    if (!e._hay || !e._hay.includes(name.toLowerCase())) continue;
+    for (const s of C().sentencesOf(e.text)) {
+      if (!clauses.some(c => /^is an? /.test(c))) {
+        const t = titleRe.exec(s);
+        if (t) { clauses.push("is " + aOrAn(t[1].toLowerCase())); sentences.push(s.trim()); }
+      }
+      if (!clauses.some(c => /^belongs to |^is of /.test(c))) {
+        const o = ofRe.exec(s);
+        if (o) {
+          const target = o[1].trim();
+          const isHouse = /^House\s/i.test(target);
+          if (isHouse || known.has(target.toLowerCase())) {
+            clauses.push((isHouse ? "belongs to " : "is of ") + target);
+            sentences.push(s.trim());
+          }
+        }
+      }
+    }
+  }
+  return { clauses, sentences };
+}
 
 /* Read every statement the entries make about one subject. Text is cut
    into clauses first, because a run-on line holds several separate
    claims and matching across the whole of it would blend them together. */
 function readTraits(name, ctx) {
   const nl = name.toLowerCase();
-  const found = [];
+  let found = [];
   const seen = new Set();
   const sources = [];
   for (const e of pool(ctx)) {
     if (!e._hay || !e._hay.includes(nl)) continue;
     let used = false;
+    let carry = null;                 // the subject the last sentence named
     for (const sentence of C().sentencesOf(e.text)) {
       if (!sentence.toLowerCase().includes(nl) && !/\b(?:she|he|they)\b/i.test(sentence)) continue;
+      if (!looksLikeProse(sentence)) continue;
       // split on the connectives that separate one claim from the next,
       // keeping the offsets so ownership can be judged in context
+      const named0 = namesWithin(sentence)[0];
       let cursor = 0;
-      const pieces = sentence.split(/\b(?:but|however|although|though|and then)\b/i);
+      const pieces = sentence.split(/\b(?:but|however|although|though|and then|and)\b/i);
       for (const piece of pieces) {
         const pieceAt = sentence.indexOf(piece, cursor);
         cursor = pieceAt + piece.length;
@@ -1006,9 +1326,16 @@ function readTraits(name, ctx) {
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
-          if (!statementBelongsTo(piece, sentence, m.index, nl)) continue;
-          const clause = t.say(m);
-          if (!clause || clause.length < 4) continue;
+          if (!statementBelongsTo(piece, sentence, m.index, nl, carry, pieceAt)) continue;
+          let hit = m;
+          if (STRICT.has(t.k)) {
+            const target = resolveTarget(tidyClause(m[1]));
+            if (!target) continue;
+            hit = m.slice();        // rewrite the capture to the real name
+            hit[1] = target;
+          }
+          const clause = t.say(hit);
+          if (!wellFormed(clause) || selfReferential(clause, name)) continue;
           const key = clause.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
@@ -1021,15 +1348,16 @@ function readTraits(name, ctx) {
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
-          const owner = ownerOfStatement(piece, sentence, m.index);
-          if (!owner || owner.toLowerCase() === nl) continue;
-          const objects = tidyClause(m[t.obj] || "");
+          const owner = ownerOfStatement(piece, sentence, m.index, carry, pieceAt);
+          if (!owner || sameSubject(owner, nl)) continue;
+          if (!knownTarget(owner)) continue;          // the owner ends up in the answer
+          const objects = tidyClause(m[t.obj] || "", 10);
           let named;
           try { named = new RegExp("\\b" + reEsc(name) + "\\b", "i").test(objects); }
           catch (err) { named = false; }
           if (!named) continue;
-          const clause = t.say(prettyName(owner), m);
-          if (!clause || clause.length < 4) continue;
+          const clause = t.say(prettyName(owner).replace(new RegExp("^(?:" + TITLES + ")\\s+", "i"), ""), m);
+          if (!wellFormed(clause) || selfReferential(clause, name)) continue;
           const key = clause.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
@@ -1037,11 +1365,47 @@ function readTraits(name, ctx) {
           used = true;
         }
       }
+      // whatever this sentence named becomes the antecedent for the next
+      if (named0) carry = named0.name;
     }
     if (used && !sources.includes(e)) sources.push(e);
   }
-  return { traits: found, sources };
+
+  // titles and allegiances, which sit beside the name rather than after a verb
+  const adj = readAdjacent(name, ctx);
+  const lead = [];
+  adj.clauses.forEach((clause, i) => {
+    const key = clause.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    lead.push({ k: "adjacent" + i, clause, sentence: adj.sentences[i] || "", entry: null });
+  });
+  found = lead.concat(found);
+
+  /* One statement can satisfy two patterns; "is the goddess of alchemy"
+     is both a role and a divinity. Where one clause contains another,
+     the longer one already says everything the shorter one does. */
+  const PASSIVE_PAIRS = { killed: "killed-by", founded: "founded-by", rules: "ruled-by" };
+  const suppress = new Set();
+  Object.keys(PASSIVE_PAIRS).forEach(active => {
+    if (found.some(f => f.k === active) && found.some(f => f.k === PASSIVE_PAIRS[active])) {
+      suppress.add(active);      // "was killed by X" is the specific one
+    }
+  });
+  found = found.filter(f => !suppress.has(f.k));
+
+  const trimmed = found.filter((f, i) =>
+    !found.some((g, j) => j !== i && g.clause.length > f.clause.length &&
+      g.clause.toLowerCase().includes(f.clause.toLowerCase())));
+
+  return { traits: trimmed, sources };
 }
+
+/* A well-documented character can satisfy a dozen patterns, and reading
+   all of them back produces a paragraph-long sentence nobody finishes.
+   The list is ordered most-identifying first, so the top few are the
+   ones worth saying; the rest are in the entry. */
+const MAX_CLAUSES = 4;
 
 /* Assemble the clauses into something a person would actually say.
    The subject is named once; after that the repeated "is" is dropped,
@@ -1049,7 +1413,8 @@ function readTraits(name, ctx) {
    reads like a form rather than a sentence. */
 function composeSentence(name, traits) {
   if (!traits.length) return "";
-  const parts = traits.map((t, i) => i === 0 ? t.clause : t.clause.replace(/^is\s+/, ""));
+  const use = traits.slice(0, MAX_CLAUSES);
+  const parts = use.map((t, i) => i === 0 ? t.clause : t.clause.replace(/^is\s+/, ""));
   if (parts.length === 1) return name + " " + parts[0] + ".";
   if (parts.length === 2) return name + " " + parts[0] + " and " + parts[1] + ".";
   return name + " " + parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";
@@ -1072,6 +1437,10 @@ function hWhoIs(q, ctx, S) {
   const home = C().bestEntryFor(name, true);
   const facts = home ? C().factsOf(home, 8) : [];
   const inferred = composeSentence(name, read.traits);
+  /* Everything found beyond what the sentence can carry. Dropping it
+     would mean the assistant had read a death or a founding and then
+     silently decided not to mention it. */
+  const alsoFound = read.traits.slice(MAX_CLAUSES);
 
   if (!inferred && !summary.length && !facts.length) {
     return out(`${dymNote(m[1], found)}
@@ -1095,6 +1464,8 @@ function hWhoIs(q, ctx, S) {
       ${home ? `<div class="bc">${esc(home.category)}</div>` : ""}
       ${inferred ? `<div class="bs lead">${esc(inferred)}</div>` : ""}
       ${!inferred && summary.length ? `<div class="bs">${esc(summary.join(" ").slice(0, 420))}</div>` : ""}
+      ${alsoFound.length ? `<ul class="also-read">${alsoFound.map(t =>
+        `<li>${esc(t.clause.replace(/^is\s+/, ""))}</li>`).join("")}</ul>` : ""}
       ${facts.length ? `<dl class="sc-facts">${facts.map(f =>
         `<dt>${esc(f.k)}</dt><dd>${esc(f.v)}</dd>`).join("")}</dl>` : ""}
       ${home ? `<div style="margin-top:9px"><a class="btn sm" href="#/entry/${encodeURIComponent(home.id)}">Open entry</a></div>` : ""}

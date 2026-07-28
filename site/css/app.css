@@ -2358,3 +2358,8 @@ a.a-chip{text-decoration:none;display:inline-block}
 .infer-src summary:hover{color:var(--blush)}
 .a-more{font-size:13px;line-height:1.55;color:var(--ink-soft);margin-top:9px;
   padding-top:8px;border-top:1px solid var(--line)}
+
+/* the rest of what was read, when the sentence could not carry it all */
+.also-read{margin:8px 0 0;padding-left:18px;list-style:none}
+.also-read li{position:relative;font-size:13.5px;line-height:1.5;color:var(--ink-soft);margin:2px 0}
+.also-read li:before{content:"·";position:absolute;left:-12px;color:var(--gold)}

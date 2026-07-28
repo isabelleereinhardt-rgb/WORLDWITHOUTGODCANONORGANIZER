@@ -258,6 +258,90 @@ setTimeout(() => {
   check("'who is X' answers on a normal canon too", !!whoAmara &&
     /Amara/.test(whoAmara.html), whoAmara && whoAmara.html.slice(0, 120));
 
+
+  // ---------------------------------------------------------------
+  // THE EXPANDED VOCABULARY, and the traps a real canon set for it.
+  // Every rejection below is a mistake this made on 422,000 words of
+  // the writer's own material before it was tightened.
+  // ---------------------------------------------------------------
+  const vocab = [
+    { id: "v1", title: "Kaeya", category: "Characters", type: "pdf", wordcount: 40,
+      text: "Queen Kaeya of House Veren was born in 8,544 BR. She is the goddess of alchemy. " +
+            "Kaeya founded House Veren and ruled Torad for thirty years. " +
+            "Kaeya is also known as the Pale Queen. She was killed by Sevtor. " +
+            "Kaeya is remembered for ending the long winter." },
+    { id: "v2", title: "Sevtor", category: "Characters", type: "pdf", wordcount: 20,
+      text: "Sevtor betrayed Kaeya at the gate. Sevtor is loyal to House Orana and serves Lord Dain." },
+    { id: "v3", title: "Torad", category: "Maps & Locations", type: "pdf", wordcount: 20,
+      text: "Torad is the capital of the western reach. Torad lies beside the river Vael." },
+    // the shapes that produced nonsense before the guards went in
+    { id: "v4", title: "Junk", category: "Canon & Continuity", type: "pdf", wordcount: 40,
+      text: "Duri's ten rules that govern the faith are listed here. " +
+            "Status by era Key Turning Points Accomplishments succession TBD. " +
+            "Kaeya is a promise that was never kept. Kaeya is 5 of the twelve listed." },
+  ];
+  vocab.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: vocab,
+    entities: ["Kaeya", "Sevtor", "Torad", "House Veren", "House Orana", "Dain", "Vael",
+               "Duri", "Alpha", "Beta", "Gamma", "Delta"] };   // a real index (>= 10 names)
+  window.Codex.topicSummary = (n, k) => sentencesOf(vocab.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(n.toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = n => vocab.filter(e => e._hay.includes(n.toLowerCase()));
+  window.Codex.bestEntryFor = n => vocab.find(e => e.title.toLowerCase() === n.toLowerCase())
+    || vocab.find(e => e._hay.includes(n.toLowerCase())) || null;
+
+  B.reset();
+  const kaeya = leadOf(ans("who is Kaeya"));
+  check("vocab: reads a title from in front of the name", /\ba queen\b/i.test(kaeya), kaeya);
+  check("vocab: reads a house allegiance from after it", /House Veren/.test(kaeya), kaeya);
+  check("vocab: a year keeps its thousands separator", !/8,?54?4?\b/.test(kaeya) || /8,544/.test(kaeya), kaeya);
+  B.reset();
+  const kaeyaAll = ans("who is Kaeya").html;
+  check("vocab: divinity is read", /goddess of alchemy/i.test(kaeyaAll), kaeya);
+  check("vocab: founding is read", /founded House Veren/i.test(kaeyaAll), kaeya);
+  check("vocab: an alias is read", /also known as the Pale Queen/i.test(kaeyaAll), kaeya);
+  check("vocab: a death is read", /killed by Sevtor/i.test(kaeyaAll), kaeya);
+  check("vocab: never both killed and killed-by the same person",
+    !(/(?:^|[^n])\bkilled Sevtor/i.test(kaeyaAll) && /killed by Sevtor/i.test(kaeyaAll)), kaeya);
+
+  B.reset();
+  const sevtor = ans("who is Sevtor").html;
+  const sevtorSaid = sevtor.split("Where I read")[0];   // the answer, not its sources
+  check("vocab: loyalty is read", /loyal to House Orana/i.test(sevtorSaid), sevtorSaid.slice(0, 200));
+  check("vocab: service is read", /serves\s+(?:Lord\s+)?Dain/i.test(sevtorSaid), sevtorSaid.slice(0, 200));
+  B.reset();
+  check("vocab: betrayal inverts onto its victim",
+    /was betrayed by Sevtor/i.test(ans("who is Kaeya").html), "");
+
+  B.reset();
+  const torad = ans("who is Torad").html;
+  check("vocab: a place reads as a place", /capital of/i.test(torad) && /lies beside/i.test(torad),
+    leadOf(ans("who is Torad")));
+  B.reset();
+  check("vocab: rulership inverts onto the place", /ruled by Kaeya/i.test(ans("who is Torad").html), "");
+
+  // the traps
+  B.reset();
+  const junk = ans("who is Kaeya").html;
+  check("trap: a possessive noun is not a verb ('Duri's ten rules')",
+    !/ruled that|ruled ten/i.test(junk), junk.slice(0, 200));
+  check("trap: heading words are never treated as names",
+    !/Key Turning|Accomplishments|TBD/i.test(leadOf(ans("who is Kaeya"))), leadOf(ans("who is Kaeya")));
+  B.reset();
+  check("trap: 'is a promise' is not a role", !/is a promise/i.test(leadOf(ans("who is Kaeya"))),
+    leadOf(ans("who is Kaeya")));
+  B.reset();
+  check("trap: a bare number is not an age", !/\bis 5\b/.test(leadOf(ans("who is Kaeya"))),
+    leadOf(ans("who is Kaeya")));
+  B.reset();
+  check("trap: the answer stays a readable length",
+    leadOf(ans("who is Kaeya")).split(/\s+/).length < 40, leadOf(ans("who is Kaeya")));
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
   // markdown
   const html = B.md("## Head\n\n**Bold** and *italic* and `code`.\n\n- one\n- two\n\n1. first\n2. second\n\n> a quote\n\n<script>alert(1)</script>");
   check("md-heading", /<h5 class="md-h">Head<\/h5>/.test(html));
