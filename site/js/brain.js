@@ -622,7 +622,22 @@ function hWhoAppears(q, ctx) {
   if (!entry) return out(`<div class="assistant-hint">I don't have an entry called
     “${esc(raw)}”; try the exact title, or ask <b>whereis ${esc(raw)}</b> to see where the name shows up.</div>`,
     { grounded: NOT_GROUNDED });
-  const names = Array.from(C().entitiesIn(entry.text)).filter(n => n.toLowerCase() !== entry.title.toLowerCase());
+  let names = Array.from(C().entitiesIn(entry.text)).filter(n => n.toLowerCase() !== entry.title.toLowerCase());
+  /* The name index is built from titles and imported canon, so in a
+     workspace of loose notes it knows almost nothing. Read the writing
+     instead when it comes back empty. */
+  if (!names.length) {
+    const seenN = new Set();
+    namesWithin(entry.text).forEach(n => {
+      n.name.split(/\s+/).forEach(piece => {
+        if (!looksLikeName(piece)) return;
+        const pretty = prettyName(piece);
+        if (pretty.toLowerCase() === entry.title.toLowerCase() || seenN.has(pretty)) return;
+        seenN.add(pretty);
+      });
+    });
+    names = Array.from(seenN);
+  }
   if (!names.length) return out(`<div class="assistant-hint">No indexed names appear inside
     “${esc(entry.title)}” besides its own.</div>`, { sources: [entry] });
   return out(`<div class="ans-label">${names.length} ${names.length === 1 ? "name appears" : "names appear"} in “${esc(entry.title)}”</div>
@@ -856,11 +871,20 @@ function hOpinion(q, ctx) {
     : tier === "high" ? `${name} is one of the most established things in your canon.`
     : tier === "mid" ? `${name} is solidly present, with room to grow.`
     : `${name} barely has a footprint yet.`;
-  const sents = C().topicSummary(name, 2);
+  /* An opinion about somebody should show that they were read. This
+     used to print topicSummary straight out, which on loose notes is
+     every sentence containing the name glued end to end; asked what it
+     thought of Adam it replied with both notes verbatim, including a
+     line about Lily. Say what was actually understood instead, and keep
+     the raw sentences underneath where they belong. */
+  const read = traitsFor(name, ctx);
+  const characterisation = composeSentence(name, read.traits);
+  const sents = characterisation ? [] : C().topicSummary(name, 2);
   return out(`${dymNote(m[1], found)}
     <div class="a-voice">${esc(line)}</div>
     <div class="blurb">
       <div class="bt">${e ? C().catDot(e.category) : ""} ${esc(name)}</div>
+      ${characterisation ? `<div class="bs lead">${esc(characterisation)}</div>` : ""}
       ${sents.length ? `<div class="bs">${esc(sents.join(" ").slice(0, 320))}</div>` : ""}
       <div class="bl">My reasoning, with the numbers on the table: the name runs through
         <b>${mentions}</b> ${mentions === 1 ? "entry" : "entries"}, carries <b>${facts}</b> declared
@@ -868,8 +892,12 @@ function hOpinion(q, ctx) {
         of your prose. ${tier === "high" ? "That is a load-bearing piece of this world."
           : tier === "mid" ? "Established, and clearly still gathering weight."
           : "There is not much on the page yet; which is an invitation, not a flaw."}</div>
-    </div>`,
-    { sources: e ? [e] : [], subject: name,
+    </div>
+    ${read.traits.length ? `<details class="infer-src">
+      <summary>Where I read that</summary>
+      ${quoteOnly(evidenceRows(read.traits))}
+    </details>` : ""}`,
+    { sources: read.sources.length ? read.sources : (e ? [e] : []), subject: name,
       grounded: "An opinion; the measurements under it are real" });
 }
 
@@ -986,7 +1014,14 @@ const NOT_A_NAME = new Set(("through before after during within without across a
   "key turning points accomplishments succession status quick facts era born died known " +
   "tbd tba unknown none n/a various several many other others part role notes note summary " +
   "overview history background timeline reference the this that these those there here " +
-  "first second third last next previous new old great high low true false").split(" "));
+  "first second third last next previous new old great high low true false " +
+  /* verbs that turn up capitalised in notes typed in haste, and were
+     being read as surnames: "Adam Kicks dogs" became one person. */
+  "kick kicks kicked beat beats beaten hit hits went goes going said says told " +
+  "made makes took takes gave gives came comes saw sees knew knows wants needs " +
+  "tries tried keeps kept holds held runs ran walks walked thinks thought feels " +
+  "felt looks looked seems seemed becomes became remains stays stayed leaves left " +
+  "helps helped hurts hurt calls called asks asked wears wore carries carried").split(" "));
 const ROMAN = /^(?:i{1,3}|iv|v|vi{1,3}|ix|x{1,3}|xl|l|c|d|m)+$/i;
 
 function plausibleName(text) {
@@ -1209,7 +1244,13 @@ const COMMON_WORDS = new Set(("is are was were am be been being has have had do 
   "fifteen sixteen seventeen eighteen nineteen twenty years year old").split(" "));
 
 function looksLikeName(tok) {
-  return tok.length > 1 && /^[A-Z]/.test(tok) && !COMMON_WORDS.has(tok.toLowerCase());
+  const low = tok.toLowerCase();
+  /* Both lists matter here. COMMON_WORDS covers grammar; NOT_A_NAME
+     covers headings, placeholders and the verbs that get capitalised in
+     a note typed in a hurry. Consulting only the first let "Adam Kicks
+     dogs" be read as somebody called Adam Kicks. */
+  return tok.length > 1 && /^[A-Z]/.test(tok) &&
+    !COMMON_WORDS.has(low) && !NOT_A_NAME.has(low) && !ROMAN.test(low);
 }
 /* every name-ish token in a string, with where it sits */
 function namesWithin(text) {
@@ -1598,6 +1639,78 @@ function composeSentence(name, traits) {
   return name + " " + parts.slice(0, -1).join(", ") + ", and " + parts[parts.length - 1] + ".";
 }
 
+/* ---------- who turns up beside somebody ----------
+   The rail offers "Who appears alongside X?" as a follow-up, and until
+   now nothing answered it: the phrasing reached no handler and fell
+   through to a word search for "appears" and "alongside", which of
+   course matched nothing. Offering a question and then refusing it is
+   worse than never offering it, so this answers what the chip promises.
+
+   Names are read out of the writing rather than the index, because the
+   index is built from entry titles and a workspace of loose notes has
+   almost nothing in it. */
+function hAlongside(q, ctx, S) {
+  const m = q.match(/^\s*who(?:\s+else)?\s+(?:appears?|shows?\s+up|turns?\s+up|is|are)\s+(?:alongside|beside|with|next\s+to|together\s+with)\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*who(?:\s+else)?\s+(?:shares?|share)\s+(?:an?\s+)?(?:scene|page|entry|entries)\s+with\s+(.+?)\s*\??\s*$/i) ||
+            q.match(/^\s*who(?:\s+else)?\s+(?:is|are)\s+(?:in|mentioned)\s+(?:with|alongside)\s+(.+?)\s*\??\s*$/i);
+  if (!m) return null;
+  const found = findEntity(m[1]);
+  if (!found) return null;
+  const name = found.name, nl = name.toLowerCase();
+
+  const counts = {}, seenIn = {}, quotes = [];
+  const sources = [];
+  for (const e of pool(ctx)) {
+    if (!e._hay || !e._hay.includes(nl)) continue;
+    let any = false;
+    namesWithin(e.text).forEach(n => {
+      // never list the subject back as their own companion
+      if (sameSubject(n.name, nl) || n.name.toLowerCase().includes(nl) ||
+          nl.indexOf(n.name.toLowerCase()) > -1) return;
+      counts[n.name] = (counts[n.name] || 0) + 1;
+      (seenIn[n.name] = seenIn[n.name] || {})[e.id] = true;
+      any = true;
+    });
+    if (any) {
+      sources.push(e);
+      C().sentencesOf(e.text).forEach(sn => {
+        if (quotes.length < S && sn.toLowerCase().includes(nl)) quotes.push({ s: sn.trim(), e });
+      });
+    }
+  }
+  const structural = new RegExp("^(?:" + TITLES + "|House|Clan|Order|Saint)\\b", "i");
+  const known = new Set((C().DB.entities || []).map(n => n.toLowerCase()));
+  const split = {};
+  Object.keys(counts).forEach(n => {
+    const parts = n.split(/\s+/);
+    const oneName = parts.length < 2 || structural.test(n) || known.has(n.toLowerCase());
+    (oneName ? [n] : parts).forEach(piece => {
+      if (!looksLikeName(piece)) return;
+      const pretty = prettyName(piece);
+      split[pretty] = (split[pretty] || 0) + counts[n];
+      seenIn[pretty] = Object.assign({}, seenIn[pretty] || {}, seenIn[n]);
+    });
+  });
+  const names = Object.keys(split)
+    .sort((a, b) => Object.keys(seenIn[b]).length - Object.keys(seenIn[a]).length || split[b] - split[a]);
+
+  if (!names.length) {
+    return out(`${dymNote(m[1], found)}
+      <div class="assistant-hint"><b>${esc(name)}</b> never shares an entry with anybody else in your
+      canon. Whatever happens around ${esc(name)} is still unwritten.</div>`,
+      { sources: C().mentionsOf(name, null, true).slice(0, 3), subject: name });
+  }
+  return out(`${dymNote(m[1], found)}
+    <div class="ans-label">${names.length === 1 ? "One name appears" : names.length + " names appear"}
+      alongside ${esc(name)}</div>
+    <div class="recog">${names.slice(0, 24).map(n => {
+      const inN = Object.keys(seenIn[n]).length;
+      return `<span class="chip" data-subject="${esc(n)}">${esc(n)}${inN > 1 ? " · " + inN : ""}</span>`;
+    }).join("")}</div>
+    ${quotes.length ? `<div class="ans-label" style="margin-top:10px">Where they meet</div>${quoteOnly(quotes)}` : ""}`,
+    { sources: sources.slice(0, 6), subject: name });
+}
+
 /* ---------- asking for one thing in particular ----------
    The reading layer already knows who killed whom, who founded what,
    what somebody is called and which house they belong to. Until now
@@ -1740,6 +1853,8 @@ const HANDLERS = [
   hSmalltalk, hHelp, hMemories, hRemember, hStats, hRandom,
   hCompare, hRelation, hWhoAppears, hWhen, hWhere, hHowOld,
   hWhyHow, hDefine, hFacts, hOpinion,
+  // who turns up beside somebody, which the rail offers as a follow-up
+  hAlongside,
   // asking for one attribute in particular, before the general form
   hAttribute,
   // last: the most general question, so every specific shape gets first

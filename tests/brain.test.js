@@ -412,6 +412,59 @@ setTimeout(() => {
   window.Codex.mentionsOf = realMentions;
   window.Codex.bestEntryFor = realBest;
 
+
+  /* ---------------------------------------------------------------
+     Reported from real use: the rail offered "Who appears alongside
+     Adam?" as a follow-up and then answered "nothing in your canon
+     matches", and the opinion handler read back both notes verbatim
+     instead of what it had understood.
+     --------------------------------------------------------------- */
+  const two = [
+    { id: "t1", title: "NOTE", category: "My Notes", type: "note", wordcount: 17,
+      text: "LILY IS SEVEN AND Friends with Max Steve Ivory But she does not like Adam or even" },
+    { id: "t2", title: "PTS", category: "My Notes", type: "note", wordcount: 6,
+      text: "Adam Kicks dogs and beat childern" },
+  ];
+  two.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: two, entities: ["NOTE", "PTS"] };
+  window.Codex.topicSummary = (n, k) => sentencesOf(two.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = (n, ex) => two.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
+  window.Codex.bestEntryFor = n => two.find(e => e._hay.includes(String(n).toLowerCase())) || null;
+
+  B.reset();
+  const along = ans("who appears alongside Adam?");
+  check("alongside: the offered follow-up is actually answered", !!along, "returned null");
+  const alongTxt = along ? along.html.replace(/<[^>]+>/g, " ") : "";
+  check("alongside: names the people in the same entry",
+    /Lily/.test(alongTxt) && /Max/.test(alongTxt), alongTxt.slice(0, 140));
+  check("alongside: a run of names is not one person",
+    /Steve/.test(alongTxt) && /Ivory/.test(alongTxt), alongTxt.slice(0, 140));
+  check("alongside: SHOUTED names are shown properly cased",
+    !/\bLILY\b/.test(alongTxt.replace(/LILY IS SEVEN[\s\S]*/, "")), alongTxt.slice(0, 90));
+  check("alongside: the subject is not listed beside himself",
+    !/>Adam</.test(along ? along.html.split("Where they meet")[0] : ""), "");
+
+  B.reset();
+  const op = ans("what do you think of Adam");
+  const opTxt = op ? op.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ") : "";
+  check("opinion: says what it understood, not the raw notes",
+    /Adam is someone Lily does not like/i.test(opTxt), opTxt.slice(0, 150));
+  check("opinion: does not read the other note back verbatim",
+    !/LILY IS SEVEN AND Friends/.test(opTxt.split("Where I read")[0]), opTxt.slice(0, 160));
+  check("opinion: still shows its real measurements",
+    /\d+\s+entr/i.test(opTxt), opTxt.slice(0, 160));
+
+  /* A verb capitalised in a hurried note is not a surname. */
+  B.reset();
+  check("names: 'Adam Kicks dogs' is not a person called Adam Kicks",
+    !/Adam Kicks/.test((ans("who appears alongside Adam?") || {}).html || ""), "");
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
   // markdown
   const html = B.md("## Head\n\n**Bold** and *italic* and `code`.\n\n- one\n- two\n\n1. first\n2. second\n\n> a quote\n\n<script>alert(1)</script>");
   check("md-heading", /<h5 class="md-h">Head<\/h5>/.test(html));
