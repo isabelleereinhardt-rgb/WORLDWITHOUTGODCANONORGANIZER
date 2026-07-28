@@ -739,6 +739,12 @@ function panelAssistant(el) {
           style="max-width:110px"></label>
       <p class="faint set-help">Fewer means cheaper and more focused; more means broader context.</p>
 
+      <div class="sfx-row" style="margin-top:12px"><span class="sfx-label">Show answers as they are written
+        <em>Words appear as the model writes them, so you can start reading at once. Off waits and
+        shows the finished answer in one piece.</em></span>
+        <button class="switch${c.stream !== false ? " on" : ""}" id="aiStreamSwitch" role="switch"
+          aria-checked="${c.stream !== false}"><span></span></button></div>
+
       <div class="ai-acts">
         <button class="btn sm" id="aiSave">Save</button>
         <button class="btn ghost sm" id="aiTest">Test the connection</button>
@@ -811,6 +817,14 @@ function panelAssistant(el) {
     const baseEl = $("#aiBase", el);
     if (baseEl) patch.base = baseEl.value.trim();
     return patch;
+  };
+  const streamSwitch = $("#aiStreamSwitch", el);
+  if (streamSwitch) streamSwitch.onclick = () => {
+    const next = AI.conf().stream === false;   // off -> on, on -> off
+    AI.setConf({ stream: next });
+    streamSwitch.classList.toggle("on", next);
+    streamSwitch.setAttribute("aria-checked", String(next));
+    toast(next ? "Answers will appear as they are written" : "Answers will arrive whole");
   };
   const fetchBtn = $("#aiFetchModels", el);
   if (fetchBtn) fetchBtn.onclick = async () => {

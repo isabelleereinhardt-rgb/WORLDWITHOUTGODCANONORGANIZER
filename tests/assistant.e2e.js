@@ -251,14 +251,14 @@ function section(t) { results.push("\n" + t); }
   const chipLive = await page.textContent("#assistantModelName");
   check("model chip now names the model", /local-test-model/.test(chipLive), chipLive);
 
-  r = await ask("who is Enyokia", { waitFor: ".a-model:not(.pending)", settle: 400 });
+  r = await ask("who is Enyokia", { waitFor: ".a-model:not(.pending):not(.streaming)", settle: 400 });
   check("model answer rendered in the rail", /What the passages say/.test(r.text), r.text.slice(0, 260));
   check("  markdown became real HTML", /<h5 class="md-h">/.test(r.html) && /<ul>/.test(r.html) && /<strong>/.test(r.html));
   check("  device answer preserved alongside", /what this device found on its own/i.test(r.text), r.text.slice(0, 400));
   check("  states how many entries were sent", /from \d+ of your entries/i.test(r.text), r.text.slice(0, 400));
 
   // follow-up, to prove conversation history is transmitted
-  await ask("what about Vandrea?", { waitFor: ".a-turn:last-child .a-model:not(.pending)", settle: 400 });
+  await ask("what about Vandrea?", { waitFor: ".a-turn:last-child .a-model:not(.pending):not(.streaming)", settle: 400 });
 
   const sent = await new Promise((resolve, reject) => {
     require("http").get("http://localhost:8322/_requests", res => {
@@ -284,7 +284,7 @@ function section(t) { results.push("\n" + t); }
   // the model proposing an action: shown, not executed, until clicked
   await page.evaluate(() => window.__propTest = true);
   r = await ask("I keep forgetting to revise the Gherci fashion notes",
-    { waitFor: ".a-turn:last-child .a-model:not(.pending)", settle: 600 });
+    { waitFor: ".a-turn:last-child .a-model:not(.pending):not(.streaming)", settle: 600 });
   const hasProposal = await page.evaluate(() =>
     !!document.querySelector(".a-turn:last-child .act-card.proposal"));
   check("model can propose an action", hasProposal, r.text.slice(0, 300));
@@ -341,7 +341,7 @@ function section(t) { results.push("\n" + t); }
   if (await page.locator("#assistant").isHidden()) await page.click("#assistantToggle");
   await page.evaluate(() => document.getElementById("assistantNew").click());
   await page.waitForTimeout(300);
-  r = await ask("who is Enyokia", { waitFor: ".a-model:not(.pending)", settle: 500 });
+  r = await ask("who is Enyokia", { waitFor: ".a-model:not(.pending):not(.streaming)", settle: 500 });
   check("a keyless local model answers in the rail", /What the passages say/.test(r.text), r.text.slice(0, 200));
 
   const localReq = await new Promise((resolve, reject) => {
@@ -352,6 +352,71 @@ function section(t) { results.push("\n" + t); }
   const lastLocal = localReq[localReq.length - 1];
   check("  and sent NO authorization header",
     !(lastLocal.headers.authorization), lastLocal.headers.authorization);
+
+
+  /* ---------------- PART 2c: word by word ---------------- */
+  section("PART 2c \u2014 STREAMING (the answer appears as it is written)");
+
+  await page.evaluate(() => {
+    window.CodexAI.setConf({ provider: "custom", key: "test-key-123", stream: true });
+    document.getElementById("assistantNew").click();
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(u => window.CodexAI.setConf({ base: u }), STUB);
+  check("streaming is available", await page.evaluate(() => window.CodexAI.canStream()) === true);
+
+  // sample the rendered text while the answer is still being written
+  await page.fill("#assistantInput", "who is Enyokia");
+  await page.press("#assistantInput", "Enter");
+  await page.waitForSelector(".a-model.streaming .am-text", { timeout: 10000 });
+  const samples = [];
+  for (let i = 0; i < 26; i++) {
+    samples.push(await page.evaluate(() => {
+      const el = document.querySelector(".a-turn:last-child .am-text");
+      return el ? el.innerText.length : 0;
+    }));
+    await page.waitForTimeout(30);
+  }
+  const distinct = Array.from(new Set(samples)).length;
+  const grew = samples.some((n, i) => i > 0 && n > samples[i - 1]);
+  check("text visibly grows while it arrives", grew, samples.join(","));
+  check("  seen at several different lengths, not one jump", distinct >= 3, samples.join(","));
+
+  await page.waitForSelector(".a-turn:last-child .a-model:not(.streaming):not(.pending)", { timeout: 15000 });
+  const finalText = await page.evaluate(() => document.querySelector(".a-turn:last-child .a-them").innerText);
+  check("finishes with the whole answer", /What the passages say/.test(finalText), finalText.slice(0, 200));
+  const finalHtml = await page.evaluate(() => document.querySelector(".a-turn:last-child .am-text").innerHTML);
+  check("  rendered as markdown, not raw text", /<h5 class="md-h">/.test(finalHtml) && /<ul>/.test(finalHtml));
+  check("  caret class removed when done",
+    await page.evaluate(() => !document.querySelector(".a-turn:last-child .a-model.streaming")));
+
+  // a streamed action proposal must never flash raw JSON
+  await page.evaluate(() => document.getElementById("assistantNew").click());
+  await page.waitForTimeout(200);
+  await page.fill("#assistantInput", "I keep forgetting to revise the Gherci fashion notes");
+  await page.press("#assistantInput", "Enter");
+  let sawRawFence = false;
+  for (let i = 0; i < 25; i++) {
+    const txt = await page.evaluate(() => {
+      const el = document.querySelector(".a-turn:last-child .am-text");
+      return el ? el.innerText : "";
+    });
+    if (/```|"do"\s*:/.test(txt)) sawRawFence = true;
+    await page.waitForTimeout(40);
+  }
+  await page.waitForSelector(".a-turn:last-child .act-card.proposal", { timeout: 12000 });
+  check("a streamed action never flashes raw JSON", !sawRawFence);
+  check("  and still becomes a proposal card", true);
+
+  // and with streaming switched off, it still answers
+  await page.evaluate(() => {
+    window.CodexAI.setConf({ stream: false });
+    document.getElementById("assistantNew").click();
+  });
+  await page.waitForTimeout(200);
+  r = await ask("who is Enyokia", { waitFor: ".a-turn:last-child .a-model:not(.pending):not(.streaming)", settle: 500 });
+  check("switching streaming off still answers", /What the passages say/.test(r.text), r.text.slice(0, 200));
+  await page.evaluate(() => window.CodexAI.setConf({ stream: true }));
 
   /* ---------------- PART 3: failure must downgrade ---------------- */
   section("PART 3 — FAILURE FALLBACK (bad key must not break the app)");

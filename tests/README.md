@@ -53,12 +53,21 @@ the two local presets connect with no key at all, that they never
 forward a key left behind by a paid provider, and that model discovery
 reads each provider's own listing format.
 
+**`streaming.test.js`** — answers arriving as they are written, with
+`fetch` stubbed by a real `ReadableStream` of server-sent frames. It
+exercises the actual reader: frames split across arbitrary chunk
+boundaries, several frames in one chunk, all three delta shapes, an error
+frame arriving after a 200, a server that ignored the stream flag, and
+the rule that words already received are never thrown away when a
+connection breaks.
+
 **`assistant.e2e.js`** — the real site in a real browser, against the
 real World Without God canon, driven through the actual interface. Asks
 questions, checks the answers name real entries, teaches it a fact and
 confirms a later answer uses it, runs every action and confirms the
 records exist and that undo removes them, configures the API path through
-Settings, and verifies a bad key downgrades instead of breaking.
+Settings, watches a streamed answer actually grow on screen, and verifies
+a bad key downgrades instead of breaking.
 
 **`stub-provider.js`** — a stand-in that speaks the OpenAI request shape.
 It records everything it is sent so the tests can assert on the real

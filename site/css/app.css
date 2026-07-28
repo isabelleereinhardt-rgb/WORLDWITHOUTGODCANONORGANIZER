@@ -2339,3 +2339,13 @@ a.a-chip{text-decoration:none;display:inline-block}
 .ai-local-note .aln-b{font-size:13px;color:var(--ink-soft);line-height:1.5;margin-top:3px}
 .ai-model-row{display:flex;gap:6px;align-items:center}
 .ai-model-row .import-title{flex:1;min-width:0}
+
+/* ---------- an answer arriving as it is written ----------
+   A caret on the last line while words are still coming, so a pause
+   reads as thinking rather than as something having gone wrong. */
+.a-model.streaming .am-text > *:last-child:after{
+  content:"";display:inline-block;width:2px;height:1em;margin-left:2px;
+  background:var(--gold);vertical-align:-0.14em;animation:acaret 1.05s step-end infinite}
+@keyframes acaret{0%,100%{opacity:1}50%{opacity:0}}
+[data-motion="calm"] .a-model.streaming .am-text > *:last-child:after{animation:none;opacity:.7}
+.a-model.streaming .am-text{min-height:1.2em}

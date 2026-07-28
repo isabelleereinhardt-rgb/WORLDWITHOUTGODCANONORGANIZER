@@ -2045,8 +2045,42 @@ async function enrichWithModel(turn, q, local) {
   them.insertBefore(pending, them.querySelector(".a-actions"));
 
   // history stops just before the question that was pushed in askAssistant
-  const r = await CodexAI.ask(q, local.sources || [],
-    { history: rail.chat.slice(0, -1), length: rail.length });
+  const opts = { history: rail.chat.slice(0, -1), length: rail.length };
+
+  /* Streaming: the answer is painted as it arrives rather than appearing
+     whole. Repainting on every token would be wasteful and would fight
+     the browser for frames, so deltas are coalesced and rendered once per
+     animation frame; the text is still up to date within ~16ms, which is
+     faster than anyone reads. */
+  let live = null, pendingFrame = 0;
+  const paintLive = () => {
+    pendingFrame = 0;
+    if (!live || !turn.isConnected) return;
+    const body = live.el.querySelector(".am-text");
+    if (!body) return;
+    const shown = window.CodexActions ? CodexActions.stripPending(live.text) : live.text;
+    body.innerHTML = window.CodexBrain ? CodexBrain.md(shown) : esc(shown);
+  };
+  const onDelta = (piece, whole) => {
+    if (!turn.isConnected) return;
+    if (!live) {
+      // first words: swap the waiting header for a writing one
+      pending.className = "a-model streaming";
+      pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
+        <span class="am-who">${esc(CodexAI.label())}</span>
+        <span class="am-state">writing<span class="a-dots"><i>.</i><i>.</i><i>.</i></span></span></div>
+        <div class="am-text"></div>`;
+      live = { el: pending, text: "" };
+    }
+    live.text = whole;
+    if (!pendingFrame) pendingFrame = requestAnimationFrame(paintLive);
+  };
+
+  const streaming = CodexAI.canStream && CodexAI.canStream();
+  const r = streaming
+    ? await CodexAI.askStream(q, local.sources || [], opts, onDelta)
+    : await CodexAI.ask(q, local.sources || [], opts);
+  if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
   if (!turn.isConnected) return;                  // thread was cleared mid-flight
 
   if (!r.ok) {
@@ -2071,10 +2105,12 @@ async function enrichWithModel(turn, q, local) {
     <span class="am-who">${esc(r.model || CodexAI.label())}</span>
     <span class="am-state">${r.sent
       ? "from " + r.sent + " of your entries"
-      : "no matching entries; answered from the thread"}</span></div>
+      : "no matching entries; answered from the thread"}${
+      r.partial ? " · cut short" : ""}</span></div>
     <div class="am-text">${window.CodexBrain ? CodexBrain.md(parsed.text)
       : esc(parsed.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
         .replace(/^/, "<p>").replace(/$/, "</p>")}</div>
+    ${r.partial ? `<div class="am-why">The connection stopped partway through; what arrived is above.</div>` : ""}
     ${parsed.plans.map(p => CodexActions.proposalHtml(p)).join("")}`;
   if (parsed.plans.length) CodexActions.bind(pending, () => { if (window.Codex) Codex.refresh(); });
   // the local answer stays, folded away, so you can always compare

@@ -359,6 +359,20 @@ function proposalHtml(plan) {
   </div>`;
 }
 
+/* Mid-stream, an action block arrives a character at a time, and the
+   half-written fence would flash raw JSON across the answer before the
+   closing marks land. Everything from an unclosed fence onward is held
+   back until it is complete. */
+function stripPending(text) {
+  const s = String(text || "");
+  const open = s.search(/```(?:action|json:action)\b/i);
+  if (open < 0) return s;
+  const after = s.slice(open);
+  // a complete block is handled by extractProposals; only an unfinished
+  // one needs hiding
+  return /```[\s\S]*?```/.test(after) ? s : s.slice(0, open).trimEnd();
+}
+
 /* Pull ```action {...}``` blocks out of a model reply. Anything that is
    not valid JSON naming a known action is ignored rather than guessed
    at, and the block is always stripped from the prose either way. */
@@ -424,6 +438,6 @@ function helpRows() {
 
 window.CodexActions = {
   ACTIONS, parse, execute, undo, resultHtml, proposalHtml, extractProposals,
-  catalogue, promptBlock, bind, helpRows,
+  catalogue, promptBlock, bind, helpRows, stripPending,
 };
 })();

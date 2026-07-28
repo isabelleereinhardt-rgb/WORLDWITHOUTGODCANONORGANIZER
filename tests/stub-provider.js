@@ -64,6 +64,23 @@ http.createServer((req, res) => {
     }
     const answer = lines.join("\n");
 
+    if (parsed && parsed.stream) {
+      // deliberately paced, so a test can observe the answer growing
+      res.writeHead(200, Object.assign({}, cors, {
+        "content-type": "text/event-stream", "cache-control": "no-cache",
+      }));
+      const words = answer.split(/(?<=\s)/);
+      let i = 0;
+      const tick = () => {
+        if (i >= words.length) { res.write("data: [DONE]\n\n"); return res.end(); }
+        res.write("data: " + JSON.stringify({
+          choices: [{ delta: { content: words[i++] } }],
+        }) + "\n\n");
+        setTimeout(tick, 30);
+      };
+      return tick();
+    }
+
     res.writeHead(200, cors);
     res.end(JSON.stringify({
       choices: [{ message: { role: "assistant", content: answer } }],

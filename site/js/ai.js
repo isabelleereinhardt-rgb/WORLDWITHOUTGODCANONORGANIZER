@@ -41,10 +41,22 @@ const KEY = "codex.ai";          // its own key, never merged into settings
 const OPENAI_SHAPE = {
   headers: k => Object.assign({ "content-type": "application/json" },
     k ? { authorization: "Bearer " + k } : {}),
-  body: (model, system, messages, maxTokens) => ({
-    model, max_tokens: maxTokens,
-    messages: [{ role: "system", content: system }].concat(messages),
-  }),
+  body: (model, system, messages, maxTokens, stream) => {
+    const b = {
+      model, max_tokens: maxTokens,
+      messages: [{ role: "system", content: system }].concat(messages),
+    };
+    if (stream) b.stream = true;
+    return b;
+  },
+  stream: true,
+  // one server-sent frame -> the text it adds. Most frames carry
+  // bookkeeping rather than words, so "" is the common answer.
+  readChunk: o => {
+    if (!o || !o.choices || !o.choices[0]) return "";
+    const d = o.choices[0].delta || o.choices[0];
+    return String((d && (d.content || d.text)) || "");
+  },
   read: j => {
     if (!j) return "";
     if (j.choices && j.choices[0]) {
@@ -82,9 +94,14 @@ const PROVIDERS = {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     }),
-    body: (model, system, messages, maxTokens) => ({
-      model, max_tokens: maxTokens, system, messages,
-    }),
+    body: (model, system, messages, maxTokens, stream) => {
+      const b = { model, max_tokens: maxTokens, system, messages };
+      if (stream) b.stream = true;
+      return b;
+    },
+    stream: true,
+    readChunk: o => (o && o.type === "content_block_delta" && o.delta &&
+      String(o.delta.text || "")) || "",
     read: j => (j && j.content && j.content.map(c => c.text || "").join("").trim()) || "",
     error: j => (j && j.error && j.error.message) || "",
     modelsUrl: base => String(base || "").replace(/\/messages\/?$/, "/models"),
@@ -109,7 +126,8 @@ const PROVIDERS = {
     base: "https://generativelanguage.googleapis.com/v1beta/models",
     keyHint: "AIza…",
     keysAt: "https://aistudio.google.com/apikey",
-    url: (base, model) => base + "/" + encodeURIComponent(model) + ":generateContent",
+    url: (base, model, stream) => base + "/" + encodeURIComponent(model) +
+      (stream ? ":streamGenerateContent?alt=sse" : ":generateContent"),
     headers: k => ({ "content-type": "application/json", "x-goog-api-key": k }),
     body: (model, system, messages, maxTokens) => ({
       systemInstruction: { parts: [{ text: system }] },
@@ -123,6 +141,12 @@ const PROVIDERS = {
       const c = j && j.candidates && j.candidates[0];
       const parts = c && c.content && c.content.parts;
       return parts ? parts.map(p => p.text || "").join("").trim() : "";
+    },
+    stream: true,
+    readChunk: o => {
+      const c = o && o.candidates && o.candidates[0];
+      const parts = c && c.content && c.content.parts;
+      return parts ? parts.map(p => p.text || "").join("") : "";
     },
     error: j => (j && j.error && j.error.message) || "",
     modelsUrl: base => base,
@@ -212,6 +236,7 @@ const DEF = {
   // how many of your entries may be sent as context for one question
   contextEntries: 6,
   contextChars: 2400,        // per entry, so one huge PDF can't crowd out the rest
+  stream: true,              // show the answer as it is written
 };
 
 function conf() {
@@ -266,9 +291,9 @@ function isLocalUrl(u) {
 /* The address one request goes to. Most providers keep the model in the
    body and the endpoint is simply the endpoint; Gemini puts the model in
    the path, so it gets to build its own. */
-function endpointFor(c, p) {
+function endpointFor(c, p, stream) {
   const base = c.base || p.base;
-  return p.url ? p.url(base, c.model) : base;
+  return p.url ? p.url(base, c.model, stream) : base;
 }
 
 /* ---------- what does this provider actually offer? ----------
@@ -457,6 +482,144 @@ async function ask(question, entries, opts) {
   }
 }
 
+/* ============================================================
+   THE SAME QUESTION, ARRIVING AS IT IS WRITTEN
+
+   Every provider here sends the answer back as server-sent events: a
+   stream of small frames, each carrying a few more words. Reading them
+   as they land means the first sentence is on screen while the last one
+   is still being written, which is the difference between waiting for an
+   answer and watching one being thought through.
+
+   The shapes differ (OpenAI puts the words in choices[0].delta, Anthropic
+   in a content_block_delta event, Gemini in candidates[0].content.parts)
+   so each provider says how to read one frame and the loop below does not
+   care which it is talking to.
+
+   Two things this is careful about:
+
+   - A STALL MUST NOT HANG FOREVER, but a long answer is not a stall. The
+     timeout is reset by every frame that arrives, so it measures silence
+     rather than total length; a four-paragraph answer is not cut off at
+     the same mark that catches a dead connection.
+   - PARTIAL IS STILL AN ANSWER. If the stream breaks after some words
+     have arrived, those words are kept and returned, flagged as partial,
+     rather than thrown away in favour of an error.
+   ============================================================ */
+function canStream() {
+  const c = conf();
+  const p = PROVIDERS[c.provider];
+  if (!c.stream || !p || !p.stream || !p.readChunk) return false;
+  // an environment without streaming bodies quietly falls back
+  return typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined";
+}
+
+/* Pull complete SSE frames out of a growing buffer. A frame ends at a
+   blank line; anything after the last one is an unfinished frame and
+   stays in the buffer for the next read. */
+function sseFrames(buffer) {
+  const parts = buffer.split(/\r?\n\r?\n/);
+  return { frames: parts.slice(0, -1), rest: parts[parts.length - 1] };
+}
+function frameData(frame) {
+  const out = [];
+  frame.split(/\r?\n/).forEach(line => {
+    const m = /^data:\s?(.*)$/.exec(line);
+    if (m) out.push(m[1]);
+  });
+  return out.join("\n");
+}
+
+async function askStream(question, entries, opts, onDelta) {
+  opts = opts || {};
+  const c = conf();
+  if (!on()) return { ok: false, text: "", why: "The assistant is set to answer on this device." };
+  if (!canStream()) return ask(question, entries, opts);
+
+  const p = PROVIDERS[c.provider];
+  const endpoint = endpointFor(c, p, true);
+  const use = (entries || []).slice(0, c.contextEntries);
+  const ctx = use.length
+    ? buildContext(use, c.contextChars)
+    : "(Nothing in the writer's entries matched this. You have no passages for it. " +
+      "Do not invent any; if this asks about the world, say it is not established yet.)";
+  const user = `PASSAGES FROM MY ENTRIES\n\n${ctx}\n\n---\n\nMY QUESTION: ${question}`;
+  const messages = cleanHistory(opts.history).concat([{ role: "user", content: user }]);
+  const maxTokens = opts.length === "full" ? Math.min(8000, Math.max(c.maxTokens, 2400)) : c.maxTokens;
+
+  const ctrl = new AbortController();
+  const idle = opts.timeout || 45000;
+  let timer = setTimeout(() => ctrl.abort(), idle);
+  const keepAlive = () => { clearTimeout(timer); timer = setTimeout(() => ctrl.abort(), idle); };
+
+  let text = "";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: p.headers(c.key),
+      body: JSON.stringify(p.body(c.model, systemFor(opts), messages, maxTokens, true)),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const raw = await res.text();
+      let json = null;
+      try { json = JSON.parse(raw); } catch (e) {}
+      const msg = (json && p.error(json)) || raw.slice(0, 200) || ("HTTP " + res.status);
+      return { ok: false, text: "", why: friendly(res.status, msg), sent: use.length };
+    }
+    // a provider that ignored the stream flag still has to be understood
+    if (!res.body || !res.body.getReader) {
+      const json = JSON.parse(await res.text());
+      const whole = p.read(json);
+      if (whole && onDelta) onDelta(whole, whole);
+      return { ok: !!whole, text: whole, sent: use.length, model: c.model,
+        why: whole ? "" : "The provider replied without any text." };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let done = false;
+    while (!done) {
+      const step = await reader.read();
+      if (step.done) break;
+      keepAlive();
+      buffer += decoder.decode(step.value, { stream: true });
+      const cut = sseFrames(buffer);
+      buffer = cut.rest;
+      for (const frame of cut.frames) {
+        const data = frameData(frame);
+        if (!data) continue;
+        if (data === "[DONE]") { done = true; break; }
+        let obj = null;
+        try { obj = JSON.parse(data); } catch (e) { continue; }
+        // an error can arrive mid-stream, after a 200
+        const errMsg = p.error(obj);
+        if (errMsg && !p.readChunk(obj)) {
+          return text
+            ? { ok: true, text, sent: use.length, model: c.model, partial: true }
+            : { ok: false, text: "", why: errMsg, sent: use.length };
+        }
+        const piece = p.readChunk(obj);
+        if (piece) { text += piece; if (onDelta) onDelta(piece, text); }
+      }
+    }
+    if (!text) return { ok: false, text: "", why: "The provider replied without any text.", sent: use.length };
+    return { ok: true, text, sent: use.length, model: c.model };
+  } catch (e) {
+    // words already on screen are worth more than a tidy error
+    if (text) return { ok: true, text, sent: use.length, model: c.model, partial: true };
+    const why = e && e.name === "AbortError"
+      ? "The provider stopped sending partway through."
+      : (p.local || isLocalUrl(endpoint))
+        ? "Could not reach it. Check the local server is running, and that it allows requests from this page."
+        : "Could not reach the provider. " + ((e && e.message) || "");
+    return { ok: false, text: "", why, sent: use.length };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* turn the common HTTP failures into something a person can act on */
 function friendly(status, msg) {
   if (status === 401 || status === 403) return "The provider refused the key. Check it in Settings, Assistant.";
@@ -480,7 +643,7 @@ async function test() {
 }
 
 window.CodexAI = {
-  PROVIDERS, conf, setConf, clearKey, on, state, label, ask, test, listModels,
+  PROVIDERS, conf, setConf, clearKey, on, state, label, ask, askStream, canStream, test, listModels,
   // named so the backup code can be explicit about what it is skipping
   STORAGE_KEY: KEY,
 };
