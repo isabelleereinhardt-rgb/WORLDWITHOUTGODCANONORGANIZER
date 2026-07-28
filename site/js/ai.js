@@ -199,6 +199,10 @@ function systemFor(opts) {
     : "Be concise: a short paragraph or two unless asked for more.");
   const p = personaLine(); if (p) parts.push(p);
   const si = standingInstructions(); if (si) parts.push(si);
+  /* The model is told what the app can do, so "add that to my tasks"
+     becomes a real action instead of a promise it cannot keep. It only
+     ever proposes; the rail asks before anything runs. */
+  if (window.CodexActions) parts.push(CodexActions.promptBlock());
   return parts.join(" ");
 }
 
@@ -243,11 +247,18 @@ async function ask(question, entries, opts) {
   const p = PROVIDERS[c.provider];
   const endpoint = c.base || p.base;
   const use = (entries || []).slice(0, c.contextEntries);
-  if (!use.length) {
-    return { ok: false, text: "", why: "Nothing in your entries matched, so there was nothing to send." };
-  }
 
-  const ctx = buildContext(use, c.contextChars);
+  /* An empty retrieval used to end the request here, which quietly made
+     the model useless for everything that is not a canon lookup: an
+     instruction, a follow-up that leans on the conversation, a question
+     about the craft rather than the world. The model is called anyway
+     and told plainly that nothing matched, so it can say so, act, or
+     answer from the thread; the rule against inventing lore is in the
+     system prompt and does not depend on this bail-out. */
+  const ctx = use.length
+    ? buildContext(use, c.contextChars)
+    : "(Nothing in the writer's entries matched this. You have no passages for it. " +
+      "Do not invent any; if this asks about the world, say it is not established yet.)";
   const user = `PASSAGES FROM MY ENTRIES\n\n${ctx}\n\n---\n\nMY QUESTION: ${question}`;
   const messages = cleanHistory(opts.history).concat([{ role: "user", content: user }]);
   // a full-length answer needs room; a brief one should not pay for it

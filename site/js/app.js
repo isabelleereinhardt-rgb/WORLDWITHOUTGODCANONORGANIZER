@@ -1774,6 +1774,14 @@ const COMMANDS = [
   { cmd: "/namecheck", what: "Is this name already used?", q: "namecheck ", open: true },
   { cmd: "/whereis", what: "Every entry that mentions a name", q: "whereis ", open: true },
   { cmd: "/describe", what: "A blurb on any name in your canon", q: "describe ", open: true },
+  { cmd: "/task", what: "Add something to your task list", q: "add a task: ", open: true },
+  { cmd: "/draft", what: "Write a note from what your canon already says", q: "draft a note about ", open: true },
+  { cmd: "/note", what: "Make a new note by name", q: "make a note called ", open: true },
+  { cmd: "/document", what: "Start a new document and open it", q: "start a document called ", open: true },
+  { cmd: "/section", what: "Add a section under The Canon", q: "add a section called ", open: true },
+  { cmd: "/file", what: "Move one of your notes into a section", q: "file ", open: true },
+  { cmd: "/open", what: "Jump to a page or an entry", q: "open ", open: true },
+  { cmd: "/backup", what: "Download a full backup of this workspace", q: "back up my work" },
   { cmd: "/stats", what: "The shape of your canon, in numbers", q: "stats" },
   { cmd: "/random", what: "A random entry and a spark to write from", q: "surprise me" },
   { cmd: "/orphans", what: "Entries nothing else refers to", q: "orphans" },
@@ -1938,6 +1946,15 @@ function askAssistant(q) {
   if (!rail.turns) body.innerHTML = "";
   rail.turns++;
 
+  /* An instruction is not a question. "add a task: ..." should DO the
+     thing, not search the canon for it, so actions are checked before
+     any answering happens; they run on their own because writing to a
+     store is asynchronous and the answer pipeline is not. */
+  if (window.CodexActions) {
+    const plan = CodexActions.parse(q);
+    if (plan) return runAction(q, plan);
+  }
+
   const answer = assistantLookup(q, true);
   const turn = document.createElement("div");
   turn.className = "a-turn";
@@ -1980,6 +1997,31 @@ function askAssistant(q) {
   else rail.chat.push({ role: "assistant", content: turnPlainText(turn) });
 }
 
+/* ---------- an instruction, carried out ----------
+   Rendered as its own turn so the record of what was done sits in the
+   thread alongside what was asked, with the undo attached to it. */
+async function runAction(q, plan) {
+  const body = $("#assistantBody");
+  const turn = document.createElement("div");
+  turn.className = "a-turn";
+  turn.innerHTML = `<div class="a-you">${esc(q)}</div>
+    <div class="a-them"><div class="act-card working"><div class="ac-k">✦ Working…</div></div></div>`;
+  body.appendChild(turn);
+  turn.scrollIntoView({ block: "start", behavior: "smooth" });
+
+  const res = await CodexActions.execute(plan);
+  const them = turn.querySelector(".a-them");
+  them.innerHTML = CodexActions.resultHtml(res, plan) +
+    `<div class="a-ground">${res.ok
+      ? "Done on this device · nothing was sent anywhere"
+      : "Nothing was changed"}</div>`;
+  CodexActions.bind(turn, () => { if (window.Codex) Codex.refresh(); });
+  bindAssistantLinks(turn);
+
+  rail.chat.push({ role: "user", content: q });
+  rail.chat.push({ role: "assistant", content: (res.ok ? "Done: " : "Could not: ") + (res.detail || res.why || "") });
+}
+
 /* the answer as plain text, for the transcript a model receives later;
    status chrome (the model header, the action buttons) is stripped so
    the transcript reads as an answer, not a screenshot of the UI */
@@ -2018,13 +2060,23 @@ async function enrichWithModel(turn, q, local) {
     return;
   }
   rail.chat.push({ role: "assistant", content: String(r.text).slice(0, 2000) });
+  /* A model may ask for one of the same actions you could type. It is
+     shown as a proposal with its parameters visible, never run on the
+     model's say-so: a regex that matched your own words is a fact about
+     your intent, a model's suggestion is a guess about it. */
+  const parsed = window.CodexActions
+    ? CodexActions.extractProposals(r.text) : { text: r.text, plans: [] };
   pending.className = "a-model";
   pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
     <span class="am-who">${esc(r.model || CodexAI.label())}</span>
-    <span class="am-state">from ${r.sent} of your entries</span></div>
-    <div class="am-text">${window.CodexBrain ? CodexBrain.md(r.text)
-      : esc(r.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
-        .replace(/^/, "<p>").replace(/$/, "</p>")}</div>`;
+    <span class="am-state">${r.sent
+      ? "from " + r.sent + " of your entries"
+      : "no matching entries; answered from the thread"}</span></div>
+    <div class="am-text">${window.CodexBrain ? CodexBrain.md(parsed.text)
+      : esc(parsed.text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")
+        .replace(/^/, "<p>").replace(/$/, "</p>")}</div>
+    ${parsed.plans.map(p => CodexActions.proposalHtml(p)).join("")}`;
+  if (parsed.plans.length) CodexActions.bind(pending, () => { if (window.Codex) Codex.refresh(); });
   // the local answer stays, folded away, so you can always compare
   const localBlock = them.querySelector(".a-local-wrap");
   if (!localBlock) {

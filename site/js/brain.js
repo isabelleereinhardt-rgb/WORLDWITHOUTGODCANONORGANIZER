@@ -358,11 +358,22 @@ function capabilitiesHtml() {
     ["Count and measure", "Canon statistics, word counts, longest entries, most-woven names.", null],
     ["Spark a scene", "“Surprise me” pulls a random corner of your world and offers a prompt.", null],
   ];
+  /* Actions are listed from the live catalogue rather than written out
+     again here, so this panel cannot drift out of step with what the
+     assistant can actually carry out. */
+  const acts = (window.CodexActions && CodexActions.helpRows()) || [];
   return `<div class="ans-label">Everything I can do</div>
     <div class="cap-grid">${caps.map(c => `
       <div class="cap-card${c[2] ? " open" : ""}"${c[2] ? ` data-prime="${esc(c[2])}"` : ""}>
         <div class="ck">${esc(c[0])}</div><div class="cv">${esc(c[1])}</div>
       </div>`).join("")}</div>
+    ${acts.length ? `<div class="ans-label" style="margin-top:12px">And things I can do for you</div>
+      <div class="cap-grid">${acts.map(a => `
+        <div class="cap-card open" data-prime="${esc(a.hint)}">
+          <div class="ck">${esc(a.label)}</div>
+          <div class="cv">“${esc(a.hint)}”</div>
+        </div>`).join("")}</div>
+      <div class="a-ground" style="margin-top:6px">Anything I create can be undone from the card I leave behind.</div>` : ""}
     <div class="a-ground" style="margin-top:8px">Type <b>/</b> in the box above for the full command list;
       every card that names a phrasing can be clicked to prime it.</div>`;
 }
