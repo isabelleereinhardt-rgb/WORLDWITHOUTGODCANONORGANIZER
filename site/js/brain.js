@@ -1048,7 +1048,13 @@ function tidyClause(s, maxWords) {
      statement that cannot be said in a few words is not a statement this
      can safely make, so it is dropped rather than truncated. */
   if (!t || t.split(/\s+/).length > (maxWords || 7)) return "";
-  return t;
+  /* Subjects stopped being shouted a while ago, but the things they act
+     on did not: "Vandrea buries APHARIA" is a name written in a note in
+     capitals, read back at the reader as if the sentence were raising
+     its voice. Same rule as for a subject — a shouted word with vowels
+     in it is emphasis, a string of initials is not. */
+  return t.split(/(\s+)/).map(w =>
+    /^[A-Z][A-Z'’-]{2,}$/.test(w) && /[AEIOUY]/.test(w) ? prettyName(w) : w).join("");
 }
 /* tidyClause returns "" when a fragment is too long or too tangled to
    state cleanly, which leaves clauses hanging: "the daughter of",

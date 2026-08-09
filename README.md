@@ -244,6 +244,46 @@ an option at the gate, not a requirement.
 
 ---
 
+## Putting the canon on another site
+
+`site/widget/` is the organizer's assistant packaged to be embedded somewhere
+else — a Google Sites page, a Wix or Squarespace block, anywhere that accepts an
+iframe. Readers get the name index, the entries, and the assistant itself:
+they can ask "who is Enyokia?" on your public site and get an answer assembled
+from your canon in their own browser.
+
+Paste one of these into **Insert → Embed → By URL** in Google Sites:
+
+| What you want | Address |
+| --- | --- |
+| The canon in this repository | `…/site/widget/?src=canon` |
+| A workspace you shared from the app | `…/site/widget/?share=YOUR_TOKEN` |
+| A canon file of your own | `…/site/widget/?src=https://…/canon.json` |
+
+Add `&title=Your%20Title` to name it, or `&ask=who%20is%20Enyokia` to have it
+open with an answer already on screen.
+
+A share token comes from the app: **Community Space → your work → Share**. It
+grants read access to that workspace and nothing else, and revoking it in the
+app closes the widget too.
+
+Three things the widget deliberately does not do, because an embedded page sits
+in a frame owned by somebody else:
+
+- **It stores nothing.** No localStorage, no database, no cookies. Storage
+  inside a third-party frame is partitioned by Chrome and Firefox and refused
+  outright by Safari, so anything built on it would work for you and fail for
+  your readers.
+- **It never writes.** No account, no key, no way back into your canon.
+- **It reports its own height** to the page that embedded it, since a
+  cross-origin frame cannot resize itself. A host that listens for the message
+  can fit the frame; one that does not still gets a widget that scrolls neatly
+  inside a fixed box.
+
+The retrieval it runs is not a copy of the app's — both hosts share
+`site/js/canon.js`, so an answer on your public site is the same answer the
+assistant gives you.
+
 ## Adding more lore later
 
 Drop new PDFs or images into the right `source/` subfolder, then rebuild the

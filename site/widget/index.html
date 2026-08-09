@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canon · Beep Beep Organizer</title>
+<!-- A widget meant to be embedded is never the top-level page, so it
+     must not be indexed as one. -->
+<meta name="robots" content="noindex">
+<!-- The app's own stylesheet, so an answer here looks exactly like an
+     answer there. brain.js emits app class names; restyling them by hand
+     would be a second design that drifts from the first. widget.css
+     comes after it and only changes the frame around them. -->
+<link rel="stylesheet" href="../css/app.css?v=20260729m">
+<link rel="stylesheet" href="widget.css?v=20260729m">
+</head>
+<body>
+<div id="w" class="w loading">
+  <div class="w-load">Opening the canon…</div>
+</div>
+
+<!-- Supabase is only needed for a share link; the widget also runs from
+     a plain JSON file with no network calls at all. -->
+<script src="../vendor/supabase.min.js"></script>
+<script src="../js/cloud-config.js?v=20260728e"></script>
+<script src="../js/canon.js?v=20260729m"></script>
+<script src="../js/brain.js?v=20260729m"></script>
+<script src="widget.js?v=20260729m"></script>
+</body>
+</html>

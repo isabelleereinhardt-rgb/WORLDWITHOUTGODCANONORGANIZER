@@ -105,6 +105,15 @@ in as text, in page order, findable by search and answerable by the
 assistant; the allowance is counted and refused at the line; a refused
 key does not lose the file; and the key never reaches a backup.
 
+**`widget.e2e.js`** — the reader's canon widget, including the case it
+exists for: running inside somebody else's iframe. It serves a host page
+on a second origin, embeds the widget in it, and checks that the
+assistant answers there as well as it does standing alone. The rules an
+embed must not break are asserted rather than assumed — nothing written
+to localStorage, no database opened, no cookie set, in the frame and out
+of it — along with the height message that lets a host fit the frame,
+and the two ways of arriving with no canon to show.
+
 **`stub-provider.js`** — a stand-in that speaks the OpenAI request shape.
 It records everything it is sent so the tests can assert on the real
 payload, echoes back proof of what arrived, and has a `/fail` route for

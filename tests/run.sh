@@ -63,6 +63,7 @@ sleep 2
 
 run "assistant end to end (real canon, real browser)" node "$HERE/assistant.e2e.js"
 run "scanned pages end to end (real PDF, real browser)" node "$HERE/ocr.e2e.js"
+run "reader's widget, embedded cross-origin (real browser)" node "$HERE/widget.e2e.js"
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SOMETHING FAILED"; fi

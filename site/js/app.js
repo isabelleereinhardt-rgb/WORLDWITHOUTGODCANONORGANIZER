@@ -340,57 +340,20 @@ function markActive() {
 /* ============================================================
    TEXT UTILITIES; sentences, summaries, facts, relationships
    ============================================================ */
-function sentencesOf(text) {
-  const t = (text || "").replace(/\s+/g, " ").trim();
-  const parts = t.match(/[^.!?]+[.!?]+(?=\s|$)/g);
-  return (parts && parts.length) ? parts.map(s => s.trim()) : (t ? [t] : []);
-}
-const DESCRIPTIVE = /\b(is|was|are|were|has|had|known|called|named|god|goddess|king|queen|house|city|kingdom|empire|born|died|ruler|rules?|leads?|founded|worship|magic|spell|the son|the daughter|married)\b/i;
+/* Retrieval itself lives in canon.js, so that the reader's widget and
+   anything else hosting the assistant runs the same code rather than a
+   copy of it. These keep their names and signatures; every caller in
+   this file is untouched. */
+const CANON = window.CodexCanon;
+const sentencesOf = CANON.sentencesOf;
+const DESCRIPTIVE = CANON.DESCRIPTIVE;
+const FACT_KEYS = CANON.FACT_KEYS;
+const factsOf = CANON.factsOf;
 
-/* pull the best few sentences describing a subject, across the whole canon */
-function topicSummary(name, maxSent = 4) {
-  const nl = name.toLowerCase();
-  const lore = bestEntryFor(name);
-  const cands = [];
-  const consider = (e, boost) => {
-    sentencesOf(e.text).forEach((s, idx) => {
-      const sl = s.toLowerCase();
-      if (sl.includes(nl) && s.length > 28 && s.length < 340) {
-        let score = boost - idx * 0.015;
-        if (idx < 3) score += 0.4;
-        if (DESCRIPTIVE.test(s)) score += 0.7;
-        if (new RegExp("^\\s*" + nl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(s)) score += 0.5;
-        cands.push({ s: s.trim(), score });
-      }
-    });
-  };
-  if (lore) consider(lore, 3);
-  mentionsOf(name, lore ? lore.id : null).slice(0, 6).forEach(e => consider(e, 1));
-  cands.sort((a, b) => b.score - a.score);
-  const out = [], seen = new Set();
-  for (const c of cands) {
-    const key = c.s.slice(0, 44).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key); out.push(c.s);
-    if (out.length >= maxSent) break;
-  }
-  return out;
-}
-
-const FACT_KEYS = /^(Status|Origin|Founded|Founder|Seat|Faction|Spirit Animal|Colors?|Colours?|Wealth|Military|Religion|Theme Song|House Words|Motto|Sigil|Words|Region|Capital|Population|Ruler|Type|Era|Alignment|Party|Allegiance|Rank|Title|Race|Age|Gender|Born|Died|Domain|Symbol|Element)\s*:/i;
-function factsOf(entry, limit = 8) {
-  const facts = [];
-  (entry.text || "").split("\n").forEach(raw => {
-    const line = raw.trim();
-    if (facts.length >= limit) return;
-    if (FACT_KEYS.test(line) && line.length < 120 && line.includes(":")) {
-      const i = line.indexOf(":");
-      const k = line.slice(0, i).trim(), v = line.slice(i + 1).trim();
-      if (v) facts.push({ k, v });
-    }
-  });
-  return facts;
-}
+/* The host is built once and reads DB.entries through a function, so it
+   keeps up as notes are added rather than holding a stale array. */
+const CANON_HOST = CANON.host(() => DB.entries, { getEntities: () => DB.entities });
+function topicSummary(name, maxSent = 4) { return CANON_HOST.topicSummary(name, maxSent); }
 
 function entitiesIn(text) {
   const found = new Set();
@@ -477,9 +440,7 @@ function subjectsOf(entry) {
   return Array.from(subs);
 }
 function mentionsOf(name, excludeId, forAssistant) {
-  const n = name.toLowerCase();
-  return DB.entries.filter(e => e.id !== excludeId && (e.type === "pdf" || e.type === "note") &&
-    e._hay.includes(n) && (!forAssistant || readableByAI(e)));
+  return CANON_HOST.mentionsOf(name, excludeId, forAssistant);
 }
 
 /* ============================================================
@@ -1579,17 +1540,7 @@ function closeSearch() { $("#searchOverlay").hidden = true; }
    ASSISTANT; local canon retrieval + summaries + Q&A
    ============================================================ */
 function bestEntryFor(name, forAssistant) {
-  const n = name.toLowerCase();
-  const pool = forAssistant ? DB.entries.filter(readableByAI) : DB.entries;
-  let exact = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === n);
-  if (exact) return exact;
-  let houses = pool.find(e => (e.type === "pdf" || e.type === "note") && e.title.toLowerCase() === "house " + n);
-  if (houses) return houses;
-  const hits = mentionsOf(name, null, forAssistant);
-  if (!hits.length) return null;
-  const metaPenalty = e => (e.category === "Canon & Continuity" || e.category === "Reference & Lexicon") ? 1 : 0;
-  hits.sort((a, b) => metaPenalty(a) - metaPenalty(b) || (b._hay.split(n).length) - (a._hay.split(n).length));
-  return hits[0];
+  return CANON_HOST.bestEntryFor(name, forAssistant);
 }
 
 /* rich blurb: a natural-reading answer (not a raw source quote), + facts + related + sources */

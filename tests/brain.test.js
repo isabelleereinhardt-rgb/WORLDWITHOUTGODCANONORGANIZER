@@ -484,13 +484,15 @@ setTimeout(() => {
       text: "Liacaion burned the house to the ground. Later that night Liacaion burned House Orana as well. Liacaion was shot by people." },
     { id: "k7", title: "House Vemer", category: "Noble Houses", type: "pdf", wordcount: 24,
       text: "House Vemer trains assassins and keeps things quiet. House Vemer was struck down by over forty arrows." },
+    { id: "k9", title: "Shouter", category: "Characters", type: "pdf", wordcount: 14,
+      text: "Shouter buries APHARIA beneath the temple. Shouter suffers from PTSD." },
     { id: "k8", title: "Caraen", category: "Characters", type: "pdf", wordcount: 26,
       text: "The high walls that Caraen built were dedicated to his family. Caraen commands over one hundred knights." },
   ];
   deeds.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
   window.Codex.DB = { entries: deeds,
     entities: ["NOTE", "PTS", "MERA", "Vex", "Doran", "PTSD", "Liacaion", "House Orana",
-      "House Vemer", "Caraen"] };
+      "House Vemer", "Caraen", "Shouter"] };
   window.Codex.topicSummary = (n, k) => sentencesOf(deeds.map(e => e.text).join(" "))
     .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
   window.Codex.mentionsOf = (n, ex) => deeds.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
@@ -568,6 +570,12 @@ setTimeout(() => {
   check("deeds: but a house still does what a house does",
     /trains assassins/i.test(leadOf(ans("what is House Vemer"))),
     leadOf(ans("what is House Vemer")));
+  B.reset();
+  /* The quoted source keeps her capitals — it is her sentence. It is the
+     line the assistant composes in its own voice that must not shout. */
+  check("deeds: a name acted on is not shouted back either",
+    !/APHARIA/.test(leadOf(ans("who is Shouter"))) && /Apharia/.test(leadOf(ans("who is Shouter"))),
+    leadOf(ans("who is Shouter")));
   B.reset();
   check("deeds: a deed is not followed by a finite verb",
     !/built were/i.test(leadOf(ans("who is Caraen"))) &&
