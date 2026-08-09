@@ -84,6 +84,13 @@ function resolve(q) {
    the rail's scope chip: "canon" keeps to the built-in collections,
    "everything" adds My Notes and any sections of your own. */
 function pool(ctx) {
+  /* A caller may hand over its own entries to read instead of the
+     workspace's. That is how a draft in a word processor gets read by
+     the same machinery that reads the canon: the chapter is passed in
+     as one entry, and everything downstream — the trait patterns, the
+     subject attribution, the negation guard — applies to it unchanged.
+     Without this, checking a draft would mean a second, worse reader. */
+  if (ctx && ctx.entries) return ctx.entries;
   const db = C().DB;
   const all = db.entries.filter(e => (e.type === "pdf" || e.type === "note") && e.aiRead !== false);
   if (!(ctx && ctx.scope === "canon")) return all;
@@ -1857,6 +1864,10 @@ const MAX_CLAUSES = 4;
    The cache is cleared whenever a new question starts. */
 let traitCache = {};
 function traitsFor(name, ctx) {
+  /* Reading somebody else's entries is never the cached answer for this
+     workspace, so a custom pool skips the cache rather than poisoning
+     it for every later question. */
+  if (ctx && ctx.entries) return readTraits(name, ctx);
   const key = name.toLowerCase() + "|" + ((ctx && ctx.scope) || "");
   if (!traitCache[key]) traitCache[key] = readTraits(name, ctx);
   return traitCache[key];
@@ -2193,5 +2204,10 @@ function greetingHtml() {
 window.CodexBrain = {
   answer, resolve, observe, reset, subject, typeOf,
   md, greetingHtml, capabilitiesHtml,
+  /* The reading layer, for callers that want statements rather than a
+     rendered answer: the continuity checker compares what a draft says
+     about somebody against what the canon says, and both sides come
+     from here so neither can be read by a lesser parser. */
+  read: traitsFor, namesIn: namesWithin, pretty: prettyName,
 };
 })();

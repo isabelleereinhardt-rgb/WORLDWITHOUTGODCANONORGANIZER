@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,12 +7,26 @@
 <!-- A widget meant to be embedded is never the top-level page, so it
      must not be indexed as one. -->
 <meta name="robots" content="noindex">
+<!-- The theme is settled before the first paint, in the head, so the
+     widget never flashes dark inside a light page on its way to being
+     light. A frame cannot see the colours of the page holding it, so the
+     reader's own system preference is the closest honest guess;
+     ?theme=light or ?theme=dark overrides it when you know better. -->
+<script>
+(function () {
+  var want = new URLSearchParams(location.search).get("theme");
+  if (want !== "light" && want !== "dark") {
+    want = (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  }
+  document.documentElement.setAttribute("data-theme", want);
+})();
+</script>
 <!-- The app's own stylesheet, so an answer here looks exactly like an
      answer there. brain.js emits app class names; restyling them by hand
      would be a second design that drifts from the first. widget.css
      comes after it and only changes the frame around them. -->
-<link rel="stylesheet" href="../css/app.css?v=20260729m">
-<link rel="stylesheet" href="widget.css?v=20260729m">
+<link rel="stylesheet" href="../css/app.css?v=20260729n">
+<link rel="stylesheet" href="widget.css?v=20260729n">
 </head>
 <body>
 <div id="w" class="w loading">
@@ -23,8 +37,8 @@
      a plain JSON file with no network calls at all. -->
 <script src="../vendor/supabase.min.js"></script>
 <script src="../js/cloud-config.js?v=20260728e"></script>
-<script src="../js/canon.js?v=20260729m"></script>
-<script src="../js/brain.js?v=20260729m"></script>
-<script src="widget.js?v=20260729m"></script>
+<script src="../js/canon.js?v=20260729n"></script>
+<script src="../js/brain.js?v=20260729n"></script>
+<script src="widget.js?v=20260729n"></script>
 </body>
 </html>

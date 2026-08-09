@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<base target="_top">
+<style>
+  :root { --ink:#241b1e; --dim:#7c6f72; --line:#e4dad4; --gold:#9c6b3f; --bg:#fdfaf7;
+          --panel:#f6f0ea; --bad:#a6423c; --new:#4a6b8a; }
+  body { margin:0; padding:12px; font:13px/1.5 Georgia, serif; color:var(--ink); background:var(--bg); }
+  h1 { font-size:14px; margin:0 0 2px; letter-spacing:.02em; }
+  .sub { color:var(--dim); font-size:11.5px; margin-bottom:12px; }
+  button { font:inherit; font-size:12.5px; padding:6px 10px; border:1px solid var(--line);
+           background:var(--panel); color:var(--ink); border-radius:2px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--gold); color:var(--gold); }
+  button:disabled { opacity:.5; cursor:default; }
+  button.primary { background:var(--gold); color:#fff; border-color:var(--gold); }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  input { font:inherit; font-size:12.5px; width:100%; box-sizing:border-box; padding:6px 8px;
+          border:1px solid var(--line); border-radius:2px; background:#fff; color:var(--ink); }
+  .lab { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim);
+         margin:14px 0 6px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .find { border-left:2px solid var(--bad); padding:6px 0 6px 9px; margin-bottom:10px; }
+  .find.new { border-left-color:var(--new); }
+  .find .who { font-weight:bold; }
+  .find .what { color:var(--dim); font-size:11.5px; }
+  .find .q { font-style:italic; margin-top:3px; }
+  .find .c { color:var(--gold); margin-top:2px; font-size:12px; }
+  .ok { color:var(--dim); font-style:italic; }
+  .err { color:var(--bad); }
+  .muted { color:var(--dim); font-size:11.5px; }
+  .ans { border-left:2px solid var(--gold); padding-left:10px; margin-top:8px; }
+  .ans .bs, .ans .lead { margin:0 0 4px; }
+  .ans .ans-label, .ans .bc { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+                              color:var(--dim); }
+  .ans .assistant-hint { color:var(--dim); font-style:italic; }
+  .ans .btn, .ans a { display:none; }          /* app routes mean nothing here */
+  .ans .bl { list-style:none; padding-left:0; }
+  .spin { color:var(--dim); font-style:italic; }
+  .name { display:inline-block; margin:0 6px 4px 0; }
+</style>
+</head>
+<body>
+
+<h1>Beep Beep Organizer</h1>
+<div class="sub" id="state">Loading your canon…</div>
+
+<div id="app" style="display:none">
+  <div class="row">
+    <button class="primary" id="checkDoc">Check this chapter</button>
+    <button id="checkSel">Check the selection</button>
+  </div>
+
+  <div class="lab">Ask the canon</div>
+  <input id="q" placeholder="who is Enyokia" autocomplete="off">
+  <div class="row" style="margin-top:6px">
+    <button id="ask">Ask</button>
+    <button id="insert" disabled>Insert this into the document</button>
+  </div>
+  <div id="answer"></div>
+
+  <div id="results"></div>
+</div>
+
+<div id="setup" style="display:none">
+  <div class="lab">Point it at your canon</div>
+  <div class="muted" style="margin-bottom:8px">
+    Paste the address of your organizer, or a share token made in it.
+    Nothing is stored anywhere but your own Google account.
+  </div>
+  <input id="canonUrl" placeholder="https://…/WORLDWITHOUTGODCANONORGANIZER/site/">
+  <div style="height:6px"></div>
+  <input id="shareToken" placeholder="share token (optional)">
+  <div class="row" style="margin-top:8px"><button class="primary" id="save">Save</button></div>
+</div>
+
+<script>
+/* The sidebar does the thinking. It loads canon.js, brain.js and
+   continuity.js straight from the organizer's own address, so the
+   checker here is the same code as the assistant there — not a second
+   implementation that would drift away from it.
+
+   google.script.run is the only channel to the document itself; it is
+   used for four things and nothing else: read the document, read the
+   selection, insert text, remember settings. */
+
+var CFG = { canonUrl: "", shareToken: "" };
+var LAST = "";
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function say(msg, cls) { $("state").className = "sub " + (cls || ""); $("state").textContent = msg; }
+
+function load(src) {
+  return new Promise(function (ok, no) {
+    var s = document.createElement("script");
+    s.src = src;
+    s.onload = ok;
+    s.onerror = function () { no(new Error("Could not load " + src)); };
+    document.head.appendChild(s);
+  });
+}
+
+function base() {
+  var u = CFG.canonUrl.trim();
+  if (!u) return "";
+  return u.charAt(u.length - 1) === "/" ? u : u + "/";
+}
+
+async function boot() {
+  /* Everything is inside the try, including the call into Apps Script.
+     It was outside once, and a failure there — a permission not yet
+     granted, a transient error — left the sidebar sitting on "Loading
+     your canon…" for ever with nothing said. A panel that cannot
+     explain itself is worse than one that admits it is stuck. */
+  try {
+    CFG = await call("loadSettings");
+    if (!CFG.canonUrl) { say("Tell it where your canon lives."); $("setup").style.display = ""; return; }
+    say("Loading your canon…");
+    await load(base() + "js/canon.js");
+    await load(base() + "js/brain.js");
+    await load(base() + "js/continuity.js");
+    await loadCanon();
+    $("app").style.display = "";
+    $("setup").style.display = "none";
+    say(window.Codex.DB.entries.length + " entries · " + window.Codex.DB.entities.length + " names");
+  } catch (e) {
+    say((e && e.message) || "Could not load the canon.", "err");
+    $("setup").style.display = "";
+  }
+}
+
+async function loadCanon() {
+  var entries = [], names = [];
+  if (CFG.shareToken) {
+    await load(base() + "vendor/supabase.min.js");
+    await load(base() + "js/cloud-config.js");
+    var c = window.supabase.createClient(window.CODEX_CLOUD.url, window.CODEX_CLOUD.key);
+    var res = await c.rpc("read_shared", { share_token: CFG.shareToken });
+    if (res.error) throw new Error(res.error.message);
+    entries = (res.data || []).filter(function (r) { return r.store === "notes"; })
+      .map(function (r) {
+        var n = r.data || {};
+        return { id: r.local_id, title: n.title || "Untitled", text: n.text || "",
+                 category: n.category || "My Notes", type: "note",
+                 wordcount: (n.text || "").split(/\s+/).length };
+      });
+    names = entries.map(function (e) { return e.title; });
+  } else {
+    await load(base() + "data/db.js");
+    var db = window.WORLD_DB || {};
+    entries = db.entries || [];
+    names = db.entities || [];
+  }
+  if (!entries.length) throw new Error("That canon came back empty.");
+  entries.forEach(function (e) { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex = window.CodexCanon.host(
+    function () { return entries; }, { getEntities: function () { return names; } });
+}
+
+/* google.script.run, as a promise */
+function call(fn, arg) {
+  return new Promise(function (ok, no) {
+    google.script.run.withSuccessHandler(ok).withFailureHandler(no)[fn](arg);
+  });
+}
+
+async function check(which) {
+  $("results").innerHTML = '<div class="spin">Reading…</div>';
+  try {
+    var text, note = "";
+    if (which === "selection") {
+      text = await call("getSelectionText");
+      if (!text) { $("results").innerHTML = '<div class="ok">Nothing is selected.</div>'; return; }
+    } else {
+      var doc = await call("getDocText");
+      text = doc.text;
+      if (doc.truncated) note = "This document is very long; the first 200,000 characters were read.";
+    }
+    window.CodexBrain.reset();
+    var r = window.CodexContinuity.check(text);
+    render(r, note);
+  } catch (e) {
+    $("results").innerHTML = '<div class="err">' + esc((e && e.message) || "That did not work.") + "</div>";
+  }
+}
+
+function render(r, note) {
+  var out = "";
+  if (note) out += '<div class="muted">' + esc(note) + "</div>";
+
+  out += '<div class="lab">Against your canon</div>';
+  if (!r.findings.length) {
+    out += '<div class="ok">Nothing here contradicts what you have written' +
+           (r.checked ? " — " + r.checked + (r.checked === 1 ? " name" : " names") + " checked." : ".") +
+           "</div>";
+  } else {
+    r.findings.forEach(function (f) {
+      out += '<div class="find">' +
+        '<div><span class="who">' + esc(f.name) + '</span> ' +
+        '<span class="what">· ' + esc(f.about) + "</span></div>" +
+        '<div class="q">“' + esc(String(f.quote).slice(0, 220)) + '”</div>' +
+        '<div class="c">Your canon: ' + esc(f.canon) + " · " + esc(f.source) + "</div></div>";
+    });
+  }
+
+  if (r.unknown && r.unknown.length) {
+    out += '<div class="lab">Not in your canon yet</div>';
+    r.unknown.forEach(function (u) {
+      out += '<div class="find new"><div><span class="who">' + esc(u.name) + "</span>" +
+        (u.near ? ' <span class="what">· did you mean ' + esc(u.near) + "?</span>" : "") +
+        "</div></div>";
+    });
+  }
+  $("results").innerHTML = out;
+}
+
+function ask() {
+  var q = $("q").value.trim();
+  if (!q) return;
+  window.CodexBrain.reset();
+  var r = null;
+  try { r = window.CodexBrain.answer(q, { scope: "all" }); } catch (e) { r = null; }
+  if (r && r.html) {
+    $("answer").innerHTML = '<div class="ans">' + r.html + "</div>";
+    LAST = $("answer").innerText.replace(/\s*\n\s*/g, " ").trim();
+    $("insert").disabled = !LAST;
+  } else {
+    $("answer").innerHTML = '<div class="ans"><div class="assistant-hint">' +
+      "Nothing in your canon answers that.</div></div>";
+    LAST = ""; $("insert").disabled = true;
+  }
+}
+
+$("checkDoc").onclick = function () { check("document"); };
+$("checkSel").onclick = function () { check("selection"); };
+$("ask").onclick = ask;
+$("q").addEventListener("keydown", function (e) { if (e.key === "Enter") ask(); });
+$("insert").onclick = function () {
+  if (!LAST) return;
+  $("insert").disabled = true;
+  call("insertAtCursor", LAST).then(function () { $("insert").disabled = false; });
+};
+$("save").onclick = async function () {
+  CFG = await call("saveSettings", {
+    canonUrl: $("canonUrl").value.trim(),
+    shareToken: $("shareToken").value.trim(),
+  });
+  boot();
+};
+
+boot();
+</script>
+</body>
+</html>
