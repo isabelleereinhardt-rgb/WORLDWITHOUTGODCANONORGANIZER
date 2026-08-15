@@ -200,7 +200,7 @@ async function addAlias(id, alias) {
 async function merge(keepId, dropId) {
   const keep = get(keepId), drop = get(dropId);
   if (!keep || !drop || keep.id === drop.id) return { ok: false, why: "Nothing to merge." };
-  if (keep.type !== drop.type) return { ok: false, why: "Those are different kinds of thing." };
+  if (kindOf(keep) !== kindOf(drop)) return { ok: false, why: "Those are different kinds of thing." };
   namesOf(drop).forEach(n => {
     if (norm(n) !== norm(keep.name) && !keep.aliases.some(a => norm(a) === norm(n))) keep.aliases.push(n);
   });
@@ -516,6 +516,12 @@ const CUES = [
   ["character", "after", /^\s*(?:said|says|replied|asked|answered|whispered|shouted|laughed|smiled|nodded|wept|knelt|rode|drew|turned|watched|married|was born|had been born)\b/i, 4],
   ["character", "after", /^[’'ʼ]s\b/, 1],
   ["character", "after", /^[^.!?]{0,90}\b(?:she|he|her|his|him|herself|himself)\b/i, 1],
+  /* Evidence against. A person's name does not take a definite article:
+     nobody writes "the Vandrea". The Academy is written "the Academy"
+     ninety-seven times, took possessives and sat in sentences full of
+     "she" like anybody else, and was quietly filed as a person on the
+     strength of it. */
+  ["character", "before", /\bthe\s+$/i, -3],
 
   ["place", "before", /\b(?:in|at|near|from|within|across|throughout|outside|toward|towards|into|beyond)\s+$/i, 3],
   ["place", "before", new RegExp("\\b(?:" + SETTLEMENT + ")\\s+of\\s+$", "i"), 6],
@@ -599,8 +605,11 @@ async function classify(getText, opts) {
       for (const [kind, side, re, weight] of CUES) {
         if (re.test(side === "before" ? before : after)) {
           score[kind] = (score[kind] || 0) + weight;
-          hits[kind] = (hits[kind] || 0) + 1;
-          if (weight > (best[kind] || 0)) best[kind] = weight;
+          /* Only evidence FOR something counts as a sighting of it. */
+          if (weight > 0) {
+            hits[kind] = (hits[kind] || 0) + 1;
+            if (weight > (best[kind] || 0)) best[kind] = weight;
+          }
         }
       }
     }

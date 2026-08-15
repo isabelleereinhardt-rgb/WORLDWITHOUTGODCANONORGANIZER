@@ -81,7 +81,8 @@ function section(t) { results.push("\n" + t); }
     offered.length >= 4, offered);
   const spot = await page.evaluate(() => {
     const E = window.CodexEntities, out = {};
-    ["Enyokia", "Vandrea", "Isenaylini", "Solis", "Torad", "Gherci", "Vikistv", "House Patton"]
+    ["Enyokia", "Vandrea", "Isenaylini", "Solis", "Torad", "Gherci", "Vikistv", "House Patton",
+     "Academy", "GreyNest"]
       .forEach(n => { const e = E.resolve(n); out[n] = e ? E.kindOf(e) : "(none)"; });
     return out;
   });
@@ -92,6 +93,13 @@ function section(t) { results.push("\n" + t); }
   check("  Emperor Solis is a man, not the empire named after him",
     spot.Solis === "character", spot.Solis);
   check("  and a house is still a house", spot["House Patton"] === "house", spot["House Patton"]);
+  /* The town the Battle of GreyNest was fought over is a town, and the
+     Academy — possessive, spoken about, surrounded by "she" — is not a
+     person, because nobody writes "the Vandrea". */
+  check("  a town six battles are named after is not an event",
+    spot.GreyNest === "place", spot.GreyNest);
+  check("  and a thing that always takes 'the' is not a person",
+    spot.Academy !== "character", spot.Academy);
 
   section("FILTERING BY KIND");
   await page.selectOption("#vType", "house").catch(() => {});

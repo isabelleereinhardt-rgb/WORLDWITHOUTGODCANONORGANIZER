@@ -229,6 +229,7 @@ const check = (label, cond, detail) => {
   await E.create({ name: "House Orana", status: "confirmed" });
   await E.create({ name: "Ilkai", status: "confirmed" });
   await E.create({ name: "GreyNest", status: "confirmed" });
+  await E.create({ name: "Academy", status: "confirmed" });
 
   const chapters = {
     c1: "Vandrea's hands shook as she read it. Lady Vandrea had not slept. " +
@@ -238,7 +239,10 @@ const check = (label, cond, detail) => {
         "The company wintered in Torad. Torad lies at the mouth of the river. " +
         "The Battle of GreyNest was fought in the snow. After the Battle of GreyNest, " +
         "the siege of GreyNest began. The fall of GreyNest took a winter. " +
-        "The treaty of GreyNest was signed there. Ilkai is a word for grief.",
+        "The treaty of GreyNest was signed there. Ilkai is a word for grief. " +
+        "The Academy's doors were shut. She left the Academy at dawn. " +
+        "The Academy said nothing, and the Academy's silence was her answer. " +
+        "The Academy had her name. The Academy's walls. She hated the Academy.",
   };
   await E.reindexNote("c1", chapters.c1, "A chapter");
   await E.classify(id => chapters[id] || "");
@@ -254,6 +258,11 @@ const check = (label, cond, detail) => {
      about a town, not about an event. */
   check("  a town six battles are named after is still a town",
     E.kindOf(E.resolve("GreyNest")) === "place", E.kindOf(E.resolve("GreyNest")));
+  /* Possessives, speech verbs and nearby pronouns all fire on "the
+     Academy", and it was quietly filed as a person on the strength of
+     them. Nobody writes "the Vandrea". */
+  check("  a name that always takes 'the' is not a person",
+    E.kindOf(E.resolve("Academy")) !== "character", E.kindOf(E.resolve("Academy")));
   check("a name with no evidence either way stays unclaimed",
     E.kindOf(E.resolve("Ilkai")) === "concept", E.kindOf(E.resolve("Ilkai")));
   check("  the kinds offered are only the ones actually present",
@@ -287,6 +296,14 @@ const check = (label, cond, detail) => {
   const two = await E.addAlias(E.resolve("Kestrel").id, "Ashgrove");
   check("two names the app read as the same kind may still be merged",
     !!two.mergeWith && !/already a/.test(two.why || ""), two);
+  /* The merge itself has to agree. Both of these are stored as
+     "concept" and only READ as characters, so comparing the stored
+     types would refuse every merge the app's own reading made
+     possible. */
+  const done = await E.merge(E.resolve("Kestrel").id, two.mergeWith);
+  check("  and the merge goes through", done.ok, done);
+  check("  leaving one record answering to both names",
+    E.resolve("Ashgrove") === E.resolve("Kestrel"));
 
   /* ---------- it must not be slow ---------- */
   E.load([], []);
