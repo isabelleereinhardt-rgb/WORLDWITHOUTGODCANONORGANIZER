@@ -218,6 +218,76 @@ const check = (label, cond, detail) => {
   check("  it belongs to whoever that entry is about",
     E.claimsFor(E.resolve("Vane Hollow").id).some(c => c.value === "900"));
 
+  /* ---------- reading what a name turns out to be ----------
+     Nobody types seven hundred kinds by hand, and a Kind column that
+     says "concept" seven hundred times is worse than no column. The
+     evidence is grammatical: things happen IN a place, titles stand
+     before people, and battles are named after somewhere. */
+  E.load([], []);
+  await E.create({ name: "Vandrea", status: "confirmed" });
+  await E.create({ name: "Torad", status: "confirmed" });
+  await E.create({ name: "House Orana", status: "confirmed" });
+  await E.create({ name: "Ilkai", status: "confirmed" });
+  await E.create({ name: "GreyNest", status: "confirmed" });
+
+  const chapters = {
+    c1: "Vandrea's hands shook as she read it. Lady Vandrea had not slept. " +
+        "Her sister, Vandrea, said nothing at all. Vandrea rode out before dawn. " +
+        "Vandrea's mother was born in Torad, and the city of Torad had never forgiven her. " +
+        "They arrived in Torad at dusk. Nothing happened in Torad for a year. " +
+        "The company wintered in Torad. Torad lies at the mouth of the river. " +
+        "The Battle of GreyNest was fought in the snow. After the Battle of GreyNest, " +
+        "the siege of GreyNest began. The fall of GreyNest took a winter. " +
+        "The treaty of GreyNest was signed there. Ilkai is a word for grief.",
+  };
+  await E.reindexNote("c1", chapters.c1, "A chapter");
+  await E.classify(id => chapters[id] || "");
+
+  check("a name the narration follows is read as a character",
+    E.kindOf(E.resolve("Vandrea")) === "character", E.kindOf(E.resolve("Vandrea")));
+  check("  a name things happen IN is read as a place",
+    E.kindOf(E.resolve("Torad")) === "place", E.kindOf(E.resolve("Torad")));
+  check("  a house is a house from its name alone",
+    E.kindOf(E.resolve("House Orana")) === "house");
+  /* The mistake this rule exists to stop: a battle is named after the
+     place it was fought over, so "the Battle of GreyNest" is evidence
+     about a town, not about an event. */
+  check("  a town six battles are named after is still a town",
+    E.kindOf(E.resolve("GreyNest")) === "place", E.kindOf(E.resolve("GreyNest")));
+  check("a name with no evidence either way stays unclaimed",
+    E.kindOf(E.resolve("Ilkai")) === "concept", E.kindOf(E.resolve("Ilkai")));
+  check("  the kinds offered are only the ones actually present",
+    E.kinds().indexOf("object") < 0 && E.kinds().indexOf("place") >= 0, E.kinds());
+
+  check("a read kind is marked as read", E.kindWasRead(E.resolve("Torad")));
+  check("  and a shape-given one is not a guess about the prose",
+    !E.kindWasRead(E.resolve("Ilkai")));
+
+  /* A decision outranks any amount of reading — including the decision
+     that something is a concept, which is an answer, not a blank. */
+  const torad = E.resolve("Torad");
+  await E.setType(torad.id, "concept");
+  check("a kind somebody sets sticks", E.kindOf(torad) === "concept");
+  await E.classify(id => chapters[id] || "");
+  check("  and re-reading the prose does not overrule them",
+    E.kindOf(torad) === "concept", E.kindOf(torad));
+  check("  nor is it still shown as a guess", !E.kindWasRead(torad));
+
+  /* Aliasing follows the read kind, not the stored one, or every record
+     the app typed for you would refuse to merge with anything. */
+  E.load([], []);
+  await E.create({ name: "Kestrel", status: "confirmed" });
+  await E.create({ name: "Ashgrove", status: "confirmed" });
+  await E.reindexNote("c2", "Lady Kestrel said nothing. Kestrel's horse. Her sister, Kestrel, waited. " +
+    "Kestrel rode north. Kestrel's cloak. Lady Ashgrove said nothing. Ashgrove's horse. " +
+    "Her sister, Ashgrove, waited. Ashgrove rode north. Ashgrove's cloak.", "A chapter");
+  await E.classify(() => "Lady Kestrel said nothing. Kestrel's horse. Her sister, Kestrel, waited. " +
+    "Kestrel rode north. Kestrel's cloak. Lady Ashgrove said nothing. Ashgrove's horse. " +
+    "Her sister, Ashgrove, waited. Ashgrove rode north. Ashgrove's cloak.");
+  const two = await E.addAlias(E.resolve("Kestrel").id, "Ashgrove");
+  check("two names the app read as the same kind may still be merged",
+    !!two.mergeWith && !/already a/.test(two.why || ""), two);
+
   /* ---------- it must not be slow ---------- */
   E.load([], []);
   for (let i = 0; i < 750; i++) {

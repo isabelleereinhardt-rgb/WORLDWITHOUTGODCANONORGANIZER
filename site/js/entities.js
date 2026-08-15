@@ -128,8 +128,8 @@ function checkAlias(entity, alias) {
     /* AO3: "A tag can only be a synonym of a tag in the same category
        as itself." Letting a character absorb a place is how an index
        quietly becomes wrong. */
-    if (other.type !== entity.type) {
-      return "“" + a + "” is already a " + other.type + ", and this is a " + entity.type + ".";
+    if (kindOf(other) !== kindOf(entity)) {
+      return "“" + a + "” is already a " + kindOf(other) + ", and this is a " + kindOf(entity) + ".";
     }
     return "MERGE:" + other.id;      // same type: the caller may merge them
   }
@@ -224,6 +224,10 @@ async function setType(id, type) {
   const e = get(id);
   if (!e || TYPES.indexOf(type) < 0) return null;
   e.type = type;
+  /* Somebody decided this. Reading the prose must not quietly change it
+     back — including when the decision was "concept", which is a real
+     answer and not the absence of one. */
+  e.typed = true;
   return persist(e);
 }
 async function remove(id) {
@@ -442,6 +446,7 @@ function load(rows, mentionRows) {
   entities = (rows || []).map(make);
   mentions = (mentionRows || []).slice();
   claims = [];
+  inferred = Object.create(null);
   index();
   ready = true;
 }
@@ -464,9 +469,183 @@ async function migrate(noteTitles, canonNames) {
   }
   return made;
 }
+/* What a name looks like, before anybody has read a word of the prose.
+   Only the shapes that cannot really be anything else — the rest is
+   left to the reading below, because guessing from a name alone is how
+   an index fills up with confident nonsense. */
 function guessType(name) {
-  if (/^(house|clan|order)\b/i.test(name)) return "house";
+  const n = String(name || "").trim();
+  if (/^(house|clan|order)\b/i.test(n)) return "house";
+  if (/^(?:the\s+)?(?:battle|war|siege|fall|sack|rebellion|massacre|conquest|purge|plague|uprising|crusade|treaty)\s+of\b/i.test(n)
+      || /\b(?:war|rebellion|uprising|massacre|crusade)$/i.test(n)) return "event";
+  if (/^(?:mount|lake|river|isle|isles|cape|port|bay|gulf|strait)\b/i.test(n)) return "place";
   return "concept";
+}
+
+/* ============================================================
+   WHAT A NAME TURNS OUT TO BE
+
+   Typing seven hundred names by hand is not work anybody is going to
+   do, and a Kind column that says "concept" seven hundred times is
+   worse than no column at all. So the kinds are READ, from the same
+   place everything else here is read from: the prose, through the
+   mention rows that already know where every name appears.
+
+   The evidence is grammatical rather than lexical, because grammar is
+   what actually separates the kinds. Things happen IN a place and never
+   in a person. A title stands before a person and before nothing else.
+   Battles are OF somewhere. One sighting proves nothing; forty of them
+   in agreement is an answer.
+
+   Like the mention rows, this is derived and never stored. A type the
+   writer has set by hand is a decision and outranks any amount of
+   reading; a type nobody has set is re-read from the writing every time
+   the app opens, so it cannot drift away from the text it describes.
+   ============================================================ */
+let inferred = Object.create(null);          // id -> kind, derived
+
+const A_TITLE = "lord|lady|king|queen|emperor|empress|prince|princess|ser|sir|saint|st\\.?|duke|duchess|count|countess|baron|baroness|master|mistress|priest|priestess|commander|general|captain|maester|archon";
+const KIN = "sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|niece|nephew|grandmother|grandfather";
+const SETTLEMENT = "city|kingdom|realm|province|region|village|town|island|isle|port|valley|castle|keep|fortress|capital|land|lands|territory|empire|court|palace|temple|holdfast";
+
+const CUES = [
+  /* kind, what to look at, pattern, weight */
+  ["character", "before", new RegExp("\\b(?:" + A_TITLE + ")\\s+$", "i"), 6],
+  ["character", "before", new RegExp("\\b(?:his|her|their|my|our)\\s+(?:" + KIN + ")[,\\s]+$", "i"), 6],
+  ["character", "before", new RegExp("\\b(?:" + KIN + ")\\s*,\\s*$", "i"), 4],
+  ["character", "after", /^\s*(?:said|says|replied|asked|answered|whispered|shouted|laughed|smiled|nodded|wept|knelt|rode|drew|turned|watched|married|was born|had been born)\b/i, 4],
+  ["character", "after", /^[’'ʼ]s\b/, 1],
+  ["character", "after", /^[^.!?]{0,90}\b(?:she|he|her|his|him|herself|himself)\b/i, 1],
+
+  ["place", "before", /\b(?:in|at|near|from|within|across|throughout|outside|toward|towards|into|beyond)\s+$/i, 3],
+  ["place", "before", new RegExp("\\b(?:" + SETTLEMENT + ")\\s+of\\s+$", "i"), 6],
+  ["place", "before", /\b(?:born|died|raised|fled|travelled|traveled|returned|arrived|sailed|marched)\s+(?:in|at|to|for)\s+$/i, 4],
+  ["place", "after", /^\s*(?:lies|sits|stands|borders|is located|was founded|fell to)\b/i, 3],
+
+  /* "the Battle of GreyNest" names an event, and the event is that whole
+     phrase — GreyNest is the fortress town it was fought over. Reading
+     it the other way filed six towns in this canon as battles, which is
+     the sort of tidy-looking mistake nobody checks. Battles, sieges and
+     treaties are named after places, so it is evidence of a place. */
+  ["place", "before", /\bthe\s+(?:battle|war|siege|fall|sack|rebellion|massacre|conquest|treaty|council)\s+of\s+$/i, 4],
+
+  /* An event is normally called one in its own name — "The Long Winter",
+     "Battle of Afera" — which the name shapes above already settle. What
+     is left here is corroboration, never enough on its own. */
+  ["event", "before", /\b(?:during|after|before|since|until)\s+the\s+$/i, 2],
+  ["event", "after", /^\s*(?:broke out|began|ended|lasted)\b/i, 3],
+
+  ["house", "before", /\bhouse\s+$/i, 6],
+  ["house", "before", /\bof\s+house\s+$/i, 6],
+  ["house", "after", /^\s*(?:family|line|bloodline|holds|rules)\b/i, 2],
+];
+
+const WINDOW = 110;          // characters either side: a clause, not a page
+const PER_RECORD = 60;       // sightings after which the answer will not change
+const PER_NOTE = 8;          // and no one entry may supply more than this
+const STRONG = 4;            // a cue worth this much stands on its own
+const REPEATS = 5;           // this many weak ones stop being a coincidence
+
+/* getText(noteId) -> the entry's text, or "". Batched: it yields to the
+   browser so a canon this size cannot lock the page. */
+async function classify(getText, opts) {
+  opts = opts || {};
+  const read = typeof getText === "function" ? getText : () => "";
+  const next = Object.create(null);
+  /* Sightings are sampled ACROSS entries, not taken in the order they
+     were indexed. A main character's first sixty appearances are all in
+     her own character sheet — "Full Name:", "Age:", "Birth:" — which is
+     a form, not a sentence, and answers nothing about what she is. The
+     evidence lives in the chapters, so every entry that names her gets
+     a say and no single one can fill the sample. */
+  const byEntity = Object.create(null);
+  for (const m of mentions) {
+    const per = byEntity[m.entityId] || (byEntity[m.entityId] = { total: 0, byNote: Object.create(null) });
+    const list = per.byNote[m.noteId] || (per.byNote[m.noteId] = []);
+    if (list.length < PER_NOTE && per.total < PER_RECORD * 4) { list.push(m); per.total++; }
+  }
+  const sampleOf = per => {
+    const lists = Object.keys(per.byNote).map(k => per.byNote[k]);
+    const out = [];
+    for (let i = 0; out.length < PER_RECORD; i++) {
+      let added = false;
+      for (const l of lists) if (i < l.length) { out.push(l[i]); added = true; if (out.length >= PER_RECORD) break; }
+      if (!added) break;
+    }
+    return out;
+  };
+  const texts = Object.create(null);
+  const textOf = id => (id in texts) ? texts[id] : (texts[id] = String(read(id) || ""));
+
+  let n = 0;
+  for (const e of entities) {
+    if (e.status === "rejected") continue;
+    /* A shape the name itself settles, or a kind somebody chose: both
+       are already answers, and reading forty sentences to second-guess
+       them would be work spent to get less certain. */
+    if (e.type !== "concept") continue;
+    const shape = guessType(e.name);
+    if (shape !== "concept") { next[e.id] = shape; continue; }
+    const per = byEntity[e.id];
+    if (!per) continue;
+    const rows = sampleOf(per);
+    if (!rows.length) continue;
+    const score = Object.create(null), best = Object.create(null), hits = Object.create(null);
+    for (const m of rows) {
+      const text = textOf(m.noteId);
+      if (!text) continue;
+      const before = text.slice(Math.max(0, m.offset - WINDOW), m.offset);
+      const after = text.slice(m.offset + m.length, m.offset + m.length + WINDOW);
+      for (const [kind, side, re, weight] of CUES) {
+        if (re.test(side === "before" ? before : after)) {
+          score[kind] = (score[kind] || 0) + weight;
+          hits[kind] = (hits[kind] || 0) + 1;
+          if (weight > (best[kind] || 0)) best[kind] = weight;
+        }
+      }
+    }
+    const ranked = Object.keys(score).sort((a, b) => score[b] - score[a]);
+    const top = ranked[0], second = ranked[1];
+    /* A margin, not a plurality: calling a character a place strips her
+       family off her record, so a close call stays unanswered.
+
+       And the evidence has to be worth something — either one cue that
+       stands on its own, or a weak one that keeps happening. Both halves
+       are needed. Requiring the strong cue alone lost most of the cast,
+       because a name the narration follows for four hundred pages is
+       rarely introduced as "Lady Vandrea" and is constantly "Vandrea's"
+       and "she"; allowing accumulation alone filed a village as a battle
+       off three vague sentences. */
+    const enough = best[top] >= STRONG || hits[top] >= REPEATS;
+    if (top && score[top] >= 5 && enough &&
+        score[top] >= (second ? score[second] : 0) + 3) next[e.id] = top;
+    if (++n % 60 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  inferred = next;
+  return inferred;
+}
+
+/* The kind to show and to filter on: what the writer set, else what the
+   prose said, else nothing claimed. */
+function kindOf(e) {
+  const rec = typeof e === "string" ? get(e) : e;
+  if (!rec) return "concept";
+  if (rec.typed) return rec.type || "concept";
+  if (rec.type && rec.type !== "concept") return rec.type;
+  return inferred[rec.id] || "concept";
+}
+/* True when nobody said so and the app worked it out. The difference
+   matters on screen: a guess should look like one. */
+function kindWasRead(e) {
+  const rec = typeof e === "string" ? get(e) : e;
+  return !!(rec && !rec.typed && (!rec.type || rec.type === "concept") && inferred[rec.id]);
+}
+/* Only the kinds actually present, so the filter never offers an empty
+   answer. */
+function kinds() {
+  const seen = Object.create(null);
+  entities.forEach(e => { if (e.status === "confirmed") seen[kindOf(e)] = true; });
+  return TYPES.filter(t => seen[t]);
 }
 
 window.CodexEntities = {
@@ -474,6 +653,7 @@ window.CodexEntities = {
   load, migrate, onSave, ready: () => ready,
   all, confirmed, candidates, get, namesOf, resolve,
   create, rename, addAlias, merge, setStatus, setType, remove,
+  classify, kindOf, kindWasRead, kinds,
   checkAlias, checkLink, ancestors,
   scan, reindexNote, forgetNote, mentionsOf, notesMentioning, inNote,
   claimsFor, allClaims,

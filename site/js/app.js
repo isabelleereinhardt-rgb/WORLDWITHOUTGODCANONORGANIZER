@@ -185,6 +185,14 @@ async function reindexAll(onDone) {
     await E.reindexNote(entries[i].id, entries[i].text || "", entries[i].title);
     if (i % 8 === 7) await new Promise(r => setTimeout(r, 0));
   }
+  /* With every sighting placed, what each name IS can be read off the
+     sentences around it. Derived, like the sightings themselves, and
+     done last because it needs them. */
+  if (E.classify) {
+    const text = Object.create(null);
+    entries.forEach(e => { text[e.id] = e.text || ""; });
+    try { await E.classify(id => text[id]); } catch (e) {}
+  }
   indexing = false;
   if (onDone) onDone();
 }
@@ -1222,6 +1230,59 @@ function viewIndex() {
   indexSelectMode = false; indexSelected = new Set();
   renderIndex();
 }
+/* ---------- looking at the same records three ways ----------
+   The chip list is what this page has always been and it stays the
+   default. A table answers questions a list cannot — every house with
+   its seat and its founder, ordered by when it was founded — and a line
+   answers the other kind. A view is a filter, a sort and a renderer;
+   there is nothing new stored anywhere. */
+const indexView = { mode: "chips", type: "all", by: "name", dir: "asc" };
+function viewSwitchHtml() {
+  const V = window.CodexViews, E = window.CodexEntities;
+  if (!V || !E || !E.ready()) return "";
+  const kinds = ["all"].concat(E.kinds ? E.kinds() : E.TYPES.filter(t => E.confirmed().some(r => r.type === t)));
+  const tab = (id, label) =>
+    `<button class="a-chip${indexView.mode === id ? " on" : ""}" data-vmode="${id}">${label}</button>`;
+  return `<div class="vsw">
+    ${tab("chips", "Chips")}${tab("table", "Table")}${tab("line", "Timeline")}
+    ${indexView.mode === "chips" ? "" : `<span class="vsw-gap"></span>
+      <select id="vType">${kinds.map(k =>
+        `<option value="${k}"${indexView.type === k ? " selected" : ""}>${k === "all" ? "everything" : k + "s"}</option>`).join("")}</select>`}
+  </div>`;
+}
+function viewBodyHtml() {
+  const V = window.CodexViews;
+  if (!V) return "";
+  const rows = V.rowsFrom({ type: indexView.type });
+  if (indexView.mode === "line") return V.timelineHtml(rows);
+  return V.tableHtml(V.sortRows(rows, indexView.by, indexView.dir), indexView);
+}
+function bindViews() {
+  $$("[data-vmode]").forEach(b => b.onclick = () => {
+    indexView.mode = b.dataset.vmode;
+    renderIndex();
+  });
+  const t = $("#vType");
+  if (t) t.onchange = () => { indexView.type = t.value; renderIndex(); };
+  $$(".vt [data-kind-of]").forEach(s => s.onchange = async () => {
+    const E = window.CodexEntities, rec = E && E.get(s.dataset.kindOf);
+    if (!rec) return;
+    await E.setType(rec.id, s.value);
+    s.classList.remove("read");
+    s.title = "Set by you.";
+    toast(rec.name + " is a " + s.value + " now");
+    buildIndexes();
+  });
+  $$(".vt [data-sort]").forEach(b => b.onclick = () => {
+    const key = b.dataset.sort;
+    /* Clicking the column you are already sorted by turns it round,
+       which is what every table anybody has used does. */
+    if (indexView.by === key) indexView.dir = indexView.dir === "asc" ? "desc" : "asc";
+    else { indexView.by = key; indexView.dir = "asc"; }
+    renderIndex();
+  });
+}
+
 /* ---------- conflicts the canon has with itself ----------
    A disagreement is a record, not a remark: it survives, it can be
    settled, and settling it is remembered. The four answers are the
@@ -1464,6 +1525,8 @@ function renderIndex() {
       </div>
     </div>
     <p class="muted">Every cross-linked name in your world. Click any to gather its mentions and a summary.</p>
+    ${viewSwitchHtml()}
+    ${indexView.mode !== "chips" ? viewBodyHtml() : ""}
     ${conflictsHtml()}
     ${narrativeHtml()}
     ${wranglingBanner()}
@@ -1472,12 +1535,13 @@ function renderIndex() {
       <span class="faint" id="selCount">${indexSelected.size} selected</span>
       <button class="btn danger sm" id="deleteSelected" ${indexSelected.size ? "" : "disabled"}>Remove from index</button>
     </div>` : ""}
-    ${letters.map(L => `<h3 style="font-family:var(--serif);margin-top:26px">${esc(L)}</h3>
+    ${indexView.mode !== "chips" ? "" : letters.map(L => `<h3 style="font-family:var(--serif);margin-top:26px">${esc(L)}</h3>
       <div class="recog">${groups[L].sort().map(n => indexSelectMode
         ? `<label class="chip index-chip ${indexSelected.has(n) ? "checked" : ""}"><input type="checkbox" class="ic-check" data-name="${esc(n)}" ${indexSelected.has(n) ? "checked" : ""}>${esc(n)}</label>`
         : `<span class="chip" data-subject="${esc(n)}">${esc(n)}</span>`).join("")}</div>`).join("")}
   </div>`;
 
+  bindViews();
   bindWrangling();
   bindConflicts();
   bindNarrative();

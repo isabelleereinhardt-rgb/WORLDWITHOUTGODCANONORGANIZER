@@ -42,6 +42,7 @@ run "continuity, draft vs canon (no browser)" node "$HERE/continuity.test.js"
 run "entity records, aliases and mentions (no browser)" node "$HERE/entities.test.js"
 run "ranking questions against a canon (no browser)" node "$HERE/rank.test.js"
 run "narrative contradictions, and the guard (no browser)" node "$HERE/narrative.test.js"
+run "views: tables, and a canon that counts backwards (no browser)" node "$HERE/views.test.js"
 run "hostile input & edge cases (no browser)" node "$HERE/explore.js"
 
 if [ "${1:-all}" = "unit" ]; then
@@ -72,6 +73,7 @@ run "QA findings, 14 Aug (real browser, phone and desktop)" node "$HERE/qa.e2e.j
 run "entities in the app: rename and wrangling (real browser)" node "$HERE/wrangle.e2e.js"
 run "margin notes pinned to a paragraph (real browser)" node "$HERE/margins.e2e.js"
 run "reading the prose for contradictions (real browser)" node "$HERE/narrative.e2e.js"
+run "table and timeline over the real canon (real browser)" node "$HERE/views.e2e.js"
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SOMETHING FAILED"; fi
