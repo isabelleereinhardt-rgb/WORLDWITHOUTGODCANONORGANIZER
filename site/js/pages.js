@@ -252,7 +252,6 @@ async function viewRead(folderId) {
           const text = plain(c.html).trim();
           return `<section class="read-ch" id="read-ch-${i}">
             <div class="rch-head">
-              <div class="ornament">✧ ✦ ✧</div>
               <div class="rch-kicker">Chapter ${i + 1}</div>
               <div class="rch-title">${esc(c.title || "Untitled")}</div>
             </div>
@@ -261,7 +260,7 @@ async function viewRead(folderId) {
                  <a href="#/doc/${encodeURIComponent(c.id)}">Write it</a>.</p>`}
           </section>`;
         }).join("")}
-        <div class="read-end">✦✧✦<div>That's everything written so far. Keep going.</div></div>
+        <div class="read-end"><div>That's everything written so far. Keep going.</div></div>
       </article>
     </div>
   </div>`;

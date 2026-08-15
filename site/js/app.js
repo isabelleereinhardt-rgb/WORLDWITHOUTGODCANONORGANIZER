@@ -364,7 +364,6 @@ function buildNav() {
   }).join("") || `<div class="nav-item mini faint" style="cursor:default">No projects yet</div>`;
   const pinned = store.recent.map(id => byId[id]).filter(Boolean).slice(0, 5).map(e =>
     `<div class="nav-item mini" data-route="#/entry/${e.id}">
-       <span style="width:13px;text-align:center;font-size:9px;color:var(--gold)">✧</span>
        <span style="flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(e.title)}</span>
      </div>`).join("") || `<div class="nav-item mini faint" style="cursor:default">Nothing opened yet</div>`;
 
@@ -423,7 +422,6 @@ function buildNav() {
     </div>
     <div class="nav-section">
       <button class="nav-cta" id="navNewNote">+ New note</button>
-      <div class="ornament" style="margin-top:20px">✦✧✦</div>
     </div>`;
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });
@@ -854,7 +852,7 @@ function viewEntry(id) {
       </div>
       <aside class="entry-side">
         ${facts.length ? `<div class="gold-card">
-          <div class="gold-card-head">✦ At a glance ✦</div>
+          <div class="gold-card-head">At a glance</div>
           ${facts.map(f => `<div class="glance-row"><span class="gk">${esc(f.k)}</span>
             <span class="gv">${crossLink(esc(f.v))}</span></div>`).join("")}
         </div>` : ""}
@@ -1577,7 +1575,6 @@ function viewImport() {
 
     <div class="dropzone" id="dropzone">
       <div class="dz-inner">
-        <div class="ornament">✦ ✧ ✦</div>
         <div class="dz-title">Drop files here</div>
         <div class="dz-sub">PDFs come in with both their text and page images · .docx · .txt · .md · images
           · a backup <b>.json</b> restores everything</div>
@@ -3101,9 +3098,7 @@ function buildSpaceNav(nav) {
       <div class="nav-item" data-route="#/settings">${svg("settings")}<span>Settings</span></div>
     </div>
 
-    <div class="nav-section">
-      <div class="ornament" style="margin-top:20px">✦✧✦</div>
-    </div>`;
+`;
 
   $$("#nav .nav-item[data-route]").forEach(el =>
     el.onclick = () => { location.hash = el.dataset.route; if (innerWidth < 860) collapseSidebar(true); });

@@ -14,6 +14,11 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* A cover nobody has drawn yet shows the work's own initial. It used to
+   show three stars, which said nothing about the book and made every
+   unillustrated shelf look the same. */
+const initialOf = s => (String(s || "").trim().match(/[\p{L}\p{N}]/u) || [""])[0].toUpperCase();
 const view = () => $("#view");
 const S = () => window.CodexStore;
 const C = () => window.CodexCloud;
@@ -82,7 +87,7 @@ async function viewCommunity(which, arg) {
 
 function cloudNote(body) {
   body.innerHTML = `<div class="gold-card">
-    <div class="gold-card-head">✦ The community needs the database ✦</div>
+    <div class="gold-card-head">The community needs the database</div>
     <p style="font-size:14.5px;line-height:1.6;margin:0">This copy of the app isn't connected to one, so
       there is nothing shared to show. See <code>supabase/README.md</code>.</p></div>`;
 }
@@ -134,7 +139,7 @@ async function renderDiscover(body, st) {
     if (!disc.rows.length) {
       grid.innerHTML = disc.q || disc.genre
         ? `<div class="empty-state">Nothing on the shelves matches that. Try fewer words, or another genre.</div>`
-        : `<div class="gold-card"><div class="gold-card-head">✦ The shelves are waiting ✦</div>
+        : `<div class="gold-card"><div class="gold-card-head">The shelves are waiting</div>
             <p style="font-size:14.5px;line-height:1.6;margin:0">Nothing has been published to the community yet.
             Yours could be the first: start a story at <a href="#/work">the writing desk</a>, publish a
             part or two, and press <b>Go public</b>. Anyone with an account can do the same, and
@@ -326,7 +331,7 @@ async function renderShelf(body, st) {
       const out = outBy[f.id];
       return `<a class="shelf-card" href="#/work/${encodeURIComponent(f.id)}">
         <div class="sc-cover">${pub.cover ? `<img src="${esc(pub.cover)}" alt="">`
-          : `<span class="ornament">✦ ✧ ✦</span>`}</div>
+          : `<span class="cover-initial">${esc(initialOf(f.name))}</span>`}</div>
         <div class="sc-body">
           <div class="sc-kicker">${esc(pub.genre || "Unfiled")} · ${esc(pub.status || "Draft")}</div>
           <div class="sc-title">${esc(f.name)}</div>
@@ -454,7 +459,7 @@ async function spaceHome() {
     <div id="spaceFresh"></div>
 
     ${!st.signedIn && st.configured ? `<div class="gold-card" style="margin-top:26px">
-      <div class="gold-card-head">✦ Reading is open; belonging needs a name ✦</div>
+      <div class="gold-card-head">Reading is open; belonging needs a name</div>
       <p style="font-size:14.5px;line-height:1.6;margin:0">Browse and read without signing in. To publish,
         follow, comment, keep a library, or star books under a name, sign in from
         <a href="#/settings">Settings → Account</a> and pick a pen name; that is all a reader ever sees.</p>

@@ -15,6 +15,11 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* A cover nobody has drawn yet shows the work's own initial. It used to
+   show three stars, which said nothing about the book and made every
+   unillustrated shelf look the same. */
+const initialOf = s => (String(s || "").trim().match(/[\p{L}\p{N}]/u) || [""])[0].toUpperCase();
 const view = () => $("#view");
 const S = () => window.CodexStore;
 const C = () => window.CodexCloud;
@@ -97,7 +102,7 @@ function renderRich(content) {
   if (/<[a-z][^>]*>/i.test(c)) return `<div class="rch-body">${sanitizeHtml(c)}</div>`;
   return c.split(/\n+/).filter(Boolean).map(p =>
     /^([*✦\-–—\s]{3,})$/.test(p.trim())
-      ? `<div class="ornament" style="margin:22px 0">✦ ✧ ✦</div>` : `<p>${esc(p)}</p>`).join("");
+      ? `<hr class="scene-break">` : `<p>${esc(p)}</p>`).join("");
 }
 
 /* ============================================================
@@ -516,7 +521,7 @@ function statBits(b) {
 function bookCard(b, extra) {
   const author = b.community_profiles ? b.community_profiles.name : "Unknown";
   return `<a class="book-card" href="#/book/${esc(b.id)}">
-    <div class="bk-cover">${b.cover ? `<img src="${esc(b.cover)}" alt="" loading="lazy">` : `<span class="ornament">✦ ✧ ✦</span>`}
+    <div class="bk-cover">${b.cover ? `<img src="${esc(b.cover)}" alt="" loading="lazy">` : `<span class="cover-initial">${esc(initialOf(b.title))}</span>`}
       ${b.mature ? `<span class="bk-mature">18+</span>` : ""}
       ${extra && extra.badge ? `<span class="bk-new">${esc(extra.badge)}</span>` : ""}</div>
     <div class="bk-body">
@@ -642,7 +647,7 @@ async function viewBook(id) {
 
   view().innerHTML = `<div class="wrap wide work-page">
     <div class="work-head">
-      <div class="work-cover as-view">${b.cover ? `<img src="${esc(b.cover)}" alt="Cover">` : `<div class="wc-empty"><div class="ornament">✦ ✧ ✦</div></div>`}</div>
+      <div class="work-cover as-view">${b.cover ? `<img src="${esc(b.cover)}" alt="Cover">` : `<div class="cover-initial big">${esc(initialOf(b.title))}</div>`}</div>
       <div class="work-meta">
         <div class="page-kicker">${esc(b.genre || "Unfiled")} · ${esc(b.status)}${b.mature ? " · 18+" : ""}</div>
         <h1 class="display work-title">${esc(b.title)}</h1>
@@ -687,7 +692,7 @@ async function viewBook(id) {
 
       <aside class="work-rail">
         <div class="gold-card">
-          <div class="gold-card-head">✦ The author ✦</div>
+          <div class="gold-card-head">The author</div>
           <a class="auth-card" href="#/author/${esc(b.owner)}">
             ${avatarOf(author, 44)}
             <span class="ac-body"><span class="ac-name">${esc(author.name || "Unknown")}</span>
@@ -770,7 +775,7 @@ async function viewChapter(id, posArg) {
       <span class="cr-by">by <a href="#/author/${esc(b.owner)}">${esc(author.name || "")}</a></span>
     </div>
     <section class="read-ch">
-      <div class="rch-head"><div class="ornament">✧ ✦ ✧</div>
+      <div class="rch-head">
         <div class="rch-kicker">Chapter ${pos + 1} of ${chapters.length}</div>
         <div class="rch-title">${esc(ch.title || "Untitled")}</div></div>
       ${body || `<p class="faint">This chapter is empty.</p>`}
@@ -779,7 +784,7 @@ async function viewChapter(id, posArg) {
       ${pos > 0 ? `<a class="btn ghost sm" href="#/book/${esc(id)}/${pos - 1}">← Previous</a>` : `<span></span>`}
       <button class="a-chip cr-star" id="crStar">★ <span id="crKn">${nice(b.star_count)}</span></button>
       ${pos < chapters.length - 1 ? `<a class="btn sm" href="#/book/${esc(id)}/${pos + 1}">Next chapter →</a>`
-        : `<a class="btn sm" href="#/book/${esc(id)}">The end, for now ✦</a>`}
+        : `<a class="btn sm" href="#/book/${esc(id)}">The end, for now</a>`}
     </div>
     <div class="reader-say" style="margin-top:44px">
       <div class="rule-head"><span class="k">Talk about this chapter</span><span class="hr"></span></div>

@@ -113,7 +113,6 @@ function render() {
         ${shown.length ? shown.map((f, i) => `
           <div class="faq ${i === openIdx ? "open" : ""}" data-i="${i}">
             <div class="faq-head">
-              <span class="faq-glyph">${["✦", "✧", "❖"][i % 3]}</span>
               <span class="faq-q">${esc(f.q)}</span>
               <span class="faq-topic">${esc(f.topic)}</span>
             </div>
@@ -124,7 +123,7 @@ function render() {
 
       <div style="min-width:0;display:flex;flex-direction:column;gap:20px">
         <div class="gold-card">
-          <div class="gold-card-head">✦ First five minutes ✦</div>
+          <div class="gold-card-head">First five minutes</div>
           ${st.map(s => `<div class="step ${s.done ? "done" : ""}">
               <span class="step-mark">${s.done ? "✓" : ""}</span>
               <span class="step-label">${esc(s.label)}</span>

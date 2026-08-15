@@ -191,7 +191,7 @@ function avatarMedallion(name) {
     return `<a class="desk-avatar-link" href="#/settings" title="Change your avatar"
       data-avatar="56">${CodexAvatar.draw(CodexAvatarBuilder.current(), 56)}</a>`;
   }
-  const initial = (name || "").trim().charAt(0).toUpperCase() || "✦";
+  const initial = (name || "").trim().charAt(0).toUpperCase() || "?";
   return `<span class="desk-avatar" aria-hidden="true">${initial}</span>`;
 }
 
@@ -328,7 +328,7 @@ async function viewDesk() {
 
       <div class="desk-col side">
         <div class="gold-card">
-          <div class="gold-card-head">✦ Since you were last here ✦</div>
+          <div class="gold-card-head">Since you were last here</div>
           ${feed.length ? feed.map(f => {
             const m = recapMark(f.action);
             return `<div class="recap-row">

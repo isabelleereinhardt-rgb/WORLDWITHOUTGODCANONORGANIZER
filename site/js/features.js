@@ -64,7 +64,7 @@ function defaultTypography() {
 const DESIGN_VERSION = 2;
 function defaultSettings() {
   return { accent: "", bg: "", fontSize: 15, uiFont: "Crimson Pro", readFont: "Cormorant Garamond",
-    preset: "romantasy", density: "comfortable", ornament: "stars",
+    preset: "romantasy", density: "comfortable",
     typography: defaultTypography(), designVersion: DESIGN_VERSION };
 }
 
@@ -95,10 +95,6 @@ const DENSITIES = [
   ["snug", "Snug", "More on screen at once"],
   ["comfortable", "Comfortable", "The default"],
   ["airy", "Airy", "Room to breathe"],
-];
-const ORNAMENTS = [
-  ["stars", "✦ ✧ ✦"], ["diamonds", "❖ ❖ ❖"], ["fleur", "❧ ❧ ❧"],
-  ["dots", "· · ·"], ["rule", "-- ✦ --"], ["none", "(none)"],
 ];
 /* How long Lucky takes to cross the window, slowest first. Named rather
    than numeric because "18 seconds" means nothing to anyone. */
@@ -247,7 +243,6 @@ function applySettings(s) {
   const dens = { snug: 0.82, comfortable: 1, airy: 1.22 }[s.density || "comfortable"] || 1;
   root.setProperty("--dens", String(dens));
   document.documentElement.dataset.density = s.density || "comfortable";
-  document.documentElement.dataset.ornament = s.ornament || "stars";
   applyMotion(s.motion);
   root.setProperty("--sans", fontStack(s.uiFont || "Inter"));
   root.setProperty("--serif", fontStack(s.readFont || "Fraunces"));
@@ -310,18 +305,18 @@ function saveSettings() { localStorage.setItem(window.CodexAccount ? CodexAccoun
    Every panel edits something real and saves to this device only.
    ============================================================ */
 const SET_TABS = [
-  ["appearance", "Appearance", "✦"],
-  ["avatar", "Your avatar", "✧"],
-  ["typography", "Typography", "✧"],
-  ["sound", "Sound & atmosphere", "✦"],
-  ["lucky", "Lucky", "✧"],
-  ["assistant", "Assistant", "❖"],
-  ["scans", "Scanned pages", "✦"],
-  ["sections", "Sections", "✧"],
-  ["restore", "Restore", "✦"],
-  ["backup", "Workspaces & backup", "❖"],
-  ["account", "Account & syncing", "✦"],
-  ["report", "Help & report a problem", "✧"],
+  ["appearance", "Appearance"],
+  ["avatar", "Your avatar"],
+  ["typography", "Typography"],
+  ["sound", "Sound & atmosphere"],
+  ["lucky", "Lucky"],
+  ["assistant", "Assistant"],
+  ["scans", "Scanned pages"],
+  ["sections", "Sections"],
+  ["restore", "Restore"],
+  ["backup", "Workspaces & backup"],
+  ["account", "Account & syncing"],
+  ["report", "Help & report a problem"],
 ];
 let setTab = "appearance";
 
@@ -334,9 +329,8 @@ function viewSettings(tab) {
     <p class="muted">Make it yours; changes apply instantly and are remembered on this device.</p>
     <div class="set-shell">
       <nav class="set-nav">
-        ${SET_TABS.map(([id, label, glyph]) => `
-          <button class="set-tab${setTab === id ? " on" : ""}" data-settab="${id}">
-            <span class="st-glyph">${glyph}</span>${esc(label)}</button>`).join("")}
+        ${SET_TABS.map(([id, label]) => `
+          <button class="set-tab${setTab === id ? " on" : ""}" data-settab="${id}">${esc(label)}</button>`).join("")}
         <div class="set-note">
           <div class="k">Saved on this device</div>
           <div>Nothing here is uploaded. A backup is the only copy that leaves this machine.</div>
@@ -386,11 +380,6 @@ function panelAppearance(el) {
       `<button class="av-chip${(s.density || "comfortable") === id ? " on" : ""}" data-density="${id}"
         title="${esc(note)}">${esc(label)}</button>`).join("")}</div>
 
-    <div class="rule-head mt"><span class="k">Ornament set</span><span class="hr"></span></div>
-    <p class="faint set-help">The little marks between sections, and the one on Lucky's notices.</p>
-    <div class="av-chips">${ORNAMENTS.map(([id, glyphs]) =>
-      `<button class="av-chip orn${(s.ornament || "stars") === id ? " on" : ""}" data-ornament="${id}">${glyphs}</button>`).join("")}</div>
-
     <div class="rule-head mt"><span class="k">Movement</span><span class="hr"></span></div>
     <p class="faint set-help">Your device currently asks for
       ${systemWantsCalm() ? "<strong>less</strong> movement" : "<strong>full</strong> movement"}.
@@ -438,7 +427,6 @@ function panelAppearance(el) {
     toast(p.name + " applied");
   });
   $$("[data-density]", el).forEach(b => b.onclick = () => { Extra.settings.density = b.dataset.density; saveSettings(); viewSettings("appearance"); });
-  $$("[data-ornament]", el).forEach(b => b.onclick = () => { Extra.settings.ornament = b.dataset.ornament; saveSettings(); viewSettings("appearance"); });
   $$("[data-motion]", el).forEach(b => b.onclick = () => {
     Extra.settings.motion = b.dataset.motion;
     saveSettings();
@@ -682,7 +670,7 @@ function panelScans(el) {
 
     ${c.on ? `
       <div class="ai-warn">
-        <div class="aw-head">✦ What this changes</div>
+        <div class="aw-head">What this changes</div>
         <ul class="aw-list">
           <li>A picture of each unreadable page <strong>is sent to Google Cloud Vision</strong> to be read.
             Pages that already have text, and everything you type, stay here.</li>
@@ -796,7 +784,7 @@ function panelAssistant(el) {
 
     ${c.mode === "api" ? `
       <div class="ai-warn">
-        <div class="aw-head">✦ What this changes</div>
+        <div class="aw-head">What this changes</div>
         <ul class="aw-list">
           <li>The entries that match a question <strong>are sent to ${esc(prov ? prov.label : c.provider)}</strong>
             to answer it. Everything else stays here.</li>
@@ -816,7 +804,7 @@ function panelAssistant(el) {
         `<button class="av-chip local${c.provider === id ? " on" : ""}" data-aiprov="${id}">${esc(AI.PROVIDERS[id].label)}</button>`).join("")}</div>
 
       ${prov && prov.setup ? `<div class="ai-local-note">
-        <div class="aln-k">✧ Running it here</div>
+        <div class="aln-k">Running it here</div>
         <div class="aln-b">${esc(prov.setup)} Then press <b>Fetch</b> below to see the models you have.
           Nothing you ask ever leaves this computer, and there is nothing to pay.</div>
       </div>` : ""}

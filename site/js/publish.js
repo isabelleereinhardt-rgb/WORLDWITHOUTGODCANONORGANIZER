@@ -18,6 +18,11 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* A cover nobody has drawn yet shows the work's own initial. It used to
+   show three stars, which said nothing about the book and made every
+   unillustrated shelf look the same. */
+const initialOf = s => (String(s || "").trim().match(/[\p{L}\p{N}]/u) || [""])[0].toUpperCase();
 const view = () => $("#view");
 const S = () => window.CodexStore;
 const C = () => window.CodexCloud;
@@ -134,7 +139,7 @@ async function viewStories() {
     ${rows.length ? `<div class="story-list">${rows.map(r => `
       <a class="story-row" href="#/work/${encodeURIComponent(r.f.id)}">
         <span class="st-cover">${r.pub.cover ? `<img src="${esc(r.pub.cover)}" alt="">`
-          : `<span class="ornament">✦</span>`}</span>
+          : `<span class="cover-initial">${esc(initialOf(r.f.name))}</span>`}</span>
         <span class="st-main">
           <span class="st-title">${esc(r.f.name)}</span>
           <span class="st-meta">${esc(r.pub.genre || "Unfiled")} · ${r.parts} part${r.parts === 1 ? "" : "s"}
@@ -284,7 +289,7 @@ async function viewWork(folderId) {
     <div class="work-head">
       <div class="work-cover" id="workCover">
         ${pub.cover ? `<img src="${esc(pub.cover)}" alt="Cover">`
-      : `<div class="wc-empty"><div class="ornament">✦ ✧ ✦</div>Drop a cover<br><span>or click to choose</span></div>`}
+      : `<div class="wc-empty">Drop a cover<br><span>or click to choose</span></div>`}
         <input type="file" id="workCoverFile" accept="image/*" hidden>
       </div>
       <div class="work-meta">
@@ -351,11 +356,11 @@ async function viewWork(folderId) {
 
       <aside class="work-rail">
         <div class="gold-card">
-          <div class="gold-card-head">✦ Who can read this ✦</div>
+          <div class="gold-card-head">Who can read this</div>
           <div id="communityCard"><p class="faint" style="font-size:13px">Checking…</p></div>
         </div>
         <div class="gold-card" style="margin-top:14px">
-          <div class="gold-card-head">✦ Quiet reading links ✦</div>
+          <div class="gold-card-head">Quiet reading links</div>
           <div id="shareList"></div>
           <button class="a-chip" id="workShare" style="width:100%;margin-top:8px">+ New reading link</button>
         </div>
@@ -468,7 +473,7 @@ async function renderCommunityCard(folderId, f, st, liveCount) {
       go.disabled = true; go.textContent = "Publishing…";
       try {
         const id = await B.publishWork(folderId);
-        if (id) { toast("On the shelves ✦"); viewWork(folderId); }
+        if (id) { toast("On the shelves"); viewWork(folderId); }
         else { go.disabled = false; go.textContent = "Go public ◉"; }
       } catch (e) { toast(e.message || String(e)); go.disabled = false; go.textContent = "Go public ◉"; }
     };
@@ -489,7 +494,7 @@ async function renderCommunityCard(folderId, f, st, liveCount) {
         f.publish = Object.assign({}, f.publish, { visibility: "public", autoHidden: false });
         await S().put("folders", f);
         await B.publishWork(folderId);
-        toast("Back on the shelves ✦");
+        toast("Back on the shelves");
         viewWork(folderId);
       } catch (e) { toast(e.message || String(e)); }
     };
@@ -791,7 +796,7 @@ async function viewShared(token) {
       const body = window.CodexBooks ? CodexBooks.ui.renderRich(d.html)
         : plain(d.html).trim().split(/\n{1,}/).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join("");
       return `<section class="read-ch">
-        <div class="rch-head"><div class="ornament">✧ ✦ ✧</div>
+        <div class="rch-head">
           <div class="rch-kicker">Chapter ${i + 1}</div>
           <div class="rch-title">${esc(d.title || "Untitled")}</div></div>
         ${body || `<p class="faint">Not written yet.</p>`}
@@ -805,7 +810,7 @@ async function viewShared(token) {
       <button class="btn" id="rsSend">Send</button>
       <div class="auth-msg" id="rsMsg"></div>
     </div>
-    <div class="read-end">✦✧✦<div>Shared with you by the author. Nothing you read here is public.</div></div>
+    <div class="read-end"><div>Shared with you by the author. Nothing you read here is public.</div></div>
   </div>`;
 
   $("#rsSend").onclick = async () => {
