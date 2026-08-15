@@ -467,6 +467,59 @@ setTimeout(() => {
 
 
   /* ---------------------------------------------------------------
+     THE CANON ANSWERING TWICE.
+
+     Reproduced from the QA pass of 14 August: two entries, two ages,
+     and the assistant said "Kestrel Amadi is 51 years old." flatly,
+     under a banner reading "nothing added". Picking a winner between
+     two contradictory facts is the exact failure a continuity tool
+     exists to prevent, and stating it confidently makes it worse.
+     --------------------------------------------------------------- */
+  const twice = [
+    { id: "t1", title: "Kestrel Amadi", category: "Characters", type: "pdf", wordcount: 30,
+      text: "Kestrel Amadi is the last archivist of Vane Hollow. Kestrel Amadi is 34 years old." },
+    { id: "t2", title: "Kestrel Age Contradiction", category: "My Notes", type: "note", wordcount: 20,
+      text: "Kestrel Amadi was 51 years old when the chapel burned in 1147." },
+    { id: "t3", title: "Rhea", category: "Characters", type: "pdf", wordcount: 20,
+      text: "Rhea is nineteen years old. Rhea is nineteen, and has been for a year." },
+  ];
+  twice.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: twice, entities: ["Kestrel Amadi", "Rhea", "Vane Hollow"] };
+  window.Codex.topicSummary = (n, k) => sentencesOf(twice.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = (n, ex) => twice.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
+  window.Codex.bestEntryFor = n => twice.find(e => e.title.toLowerCase() === String(n).toLowerCase())
+    || twice.find(e => e._hay.includes(String(n).toLowerCase())) || null;
+
+  B.reset();
+  let clashAns = ans("how old is Kestrel Amadi");
+  check("clash: two ages are not resolved into one",
+    !/is 51 years old\.|is 34 years old\./.test(leadOf(clashAns) || ""), leadOf(clashAns));
+  check("clash: the disagreement is said out loud", /answers this twice/i.test(clashAns.html),
+    clashAns.html.replace(/<[^>]+>/g, " ").slice(0, 200));
+  check("clash: both ages are shown", /34/.test(clashAns.html) && /51/.test(clashAns.html),
+    clashAns.html.replace(/<[^>]+>/g, " ").slice(0, 240));
+  check("clash: and it asks rather than choosing", /which is current/i.test(clashAns.html));
+  check("clash: the banner no longer claims nothing was added",
+    !/nothing added/i.test(clashAns.html), clashAns.html.slice(-300));
+
+  B.reset();
+  clashAns = ans("who is Kestrel Amadi");
+  check("clash: 'who is' surfaces it too", /answers this twice/i.test(clashAns.html),
+    clashAns.html.replace(/<[^>]+>/g, " ").slice(0, 200));
+
+  /* Two entries agreeing is not a disagreement. */
+  B.reset();
+  const same = ans("how old is Rhea");
+  check("clash: the same age stated twice is not a conflict",
+    !/answers this twice/i.test(same.html) && /nineteen|19/.test(leadOf(same) || ""), leadOf(same));
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
+  /* ---------------------------------------------------------------
      Plain actions, and a verdict that agrees with its own reading.
      --------------------------------------------------------------- */
   const deeds = [

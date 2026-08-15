@@ -337,14 +337,36 @@ function label() {
    room for interpretation, that they are the only source. It is asked to
    say so when they do not answer the question, because a confident
    invention about your own canon is worse than an admission. */
+/* The rules a model gets, in the order they matter.
+
+   Three of these exist because of specific things that went wrong. The
+   splicing rule: asked who somebody was, it fused sentences from two
+   entries into one proposition that appeared in neither, and shortened
+   "Vane Hollow" to "Vane" while doing it — under a banner reading
+   "nothing added". The contradiction rule outranks everything else,
+   because two ages in the canon were resolved silently in favour of
+   one, stated flatly, and that is the exact failure a continuity tool
+   exists to prevent. And the nothing-found rule, because "nothing
+   matches" tells you nothing about what was looked for. */
 const SYSTEM_BASE = [
-  "You are a careful archivist for one writer's fictional world.",
-  "Answer ONLY from the passages given to you. They are the writer's own notes and manuscripts.",
-  "If the passages do not contain the answer, say plainly that this is not established in the entries yet, and stop. Do not invent names, dates, relationships, or events.",
-  "Do not add lore. Do not guess. Do not fill gaps with genre convention.",
+  "You are a careful archivist for one writer's fictional world. The passages below are the writer's own notes and manuscript. They are your only source of fact.",
+
+  "GROUNDING. Answer only from the passages. If they do not contain the answer, say so plainly in one sentence and stop.",
+  "Never invent names, dates, ages, relationships, places or events, and never fill a gap with genre convention or with what would make sense.",
+  "Never combine words from two different passages into a single sentence presented as fact. If two passages each contribute, write them as separate statements with separate citations.",
+  "Quote the writer's wording exactly when you quote it. Never shorten a proper noun: \"Vane Hollow\" is never \"Vane\". Do not tidy their prose.",
+
+  "CITATIONS. Every factual claim carries a citation in the form [n], matching the numbered passages. A citation must support the specific claim it follows; if you cannot point at a passage for a claim, cut the claim.",
+
+  "CONTRADICTIONS. This rule outranks every other instruction. If the passages disagree about a fact, you must surface the disagreement. Never choose between them, never average them, and never silently prefer the longer, newer or more detailed passage.",
+  "Say it in this shape: \"Your canon gives two answers for X: A [1] and B [2].\" Then stop and ask which is current. This applies even when one looks obviously like a typo; the writer decides.",
+  "Any <known_conflicts> block below has already been worked out from the writer's own entries. Report every one that bears on the question.",
+
+  "WHEN YOU FIND NOTHING. Say which name or term you looked for and did not find, rather than only \"nothing matches\". If a near-match exists, offer it.",
+
   "If the writer asks for your opinion, a judgement, or a recommendation, you may give one; ground it in the passages, explain your reasoning, and make clear it is your reading rather than established canon.",
   "Refer to entries by their titles when it helps the writer find them.",
-  "Write in clear prose, British spelling, no bullet lists unless the question is a list.",
+  "Write in clear prose, British spelling, no bullet lists unless the question is a list. Do not open by restating the question.",
 ].join(" ");
 
 /* The persona is Lucky's chosen one, the same voice the on-device brain
@@ -387,11 +409,74 @@ function systemFor(opts) {
   return parts.join(" ");
 }
 
+/* Cut at a paragraph rather than at a character.
+
+   The old version did `.slice(0, perEntry)` on one flattened blob, so a
+   long entry contributed its opening and nothing else, ending
+   mid-sentence, and everything past the cut was invisible however
+   relevant it was. Paragraphs are a boundary the writing already has;
+   keeping whole ones means the model never reads half a thought, and
+   the count of what was dropped is stated rather than hidden. */
+function trimToParagraphs(text, budget) {
+  const clean = String(text || "").replace(/[ \t]+/g, " ").trim();
+  if (clean.length <= budget) return { body: clean.replace(/\n{3,}/g, "\n\n"), cut: 0 };
+  const paras = clean.split(/\n{2,}|\n(?=\s*[A-Z])/).map(p => p.trim()).filter(Boolean);
+  const kept = [];
+  let used = 0;
+  for (const p of paras) {
+    if (used + p.length > budget) break;
+    kept.push(p);
+    used += p.length + 2;
+  }
+  /* A single paragraph longer than the whole budget still has to be cut
+     somewhere; a sentence end is the least bad place. */
+  if (!kept.length) {
+    const head = clean.slice(0, budget);
+    const stop = head.lastIndexOf(". ");
+    kept.push(stop > budget * 0.4 ? head.slice(0, stop + 1) : head);
+    used = kept[0].length;
+  }
+  return { body: kept.join("\n\n"), cut: Math.max(0, clean.length - used) };
+}
+
 function buildContext(entries, perEntry) {
   return entries.map((e, i) => {
-    const body = String(e.text || e.body || "").replace(/\s+/g, " ").trim().slice(0, perEntry);
-    return `[${i + 1}] ${e.title || "Untitled"} (${e.category || "unfiled"})\n${body}`;
-  }).join("\n\n---\n\n");
+    const { body, cut } = trimToParagraphs(e.text || e.body || "", perEntry);
+    const head = `<passage n="${i + 1}" entry="${esc(e.title || "Untitled")}" ` +
+      `section="${esc(e.category || "unfiled")}"${cut ? ` truncated="${cut} more characters"` : ""}>`;
+    return head + "\n" + body + "\n</passage>";
+  }).join("\n");
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/* Disagreements already worked out from the writer's own entries, handed
+   over rather than left to be noticed. This is the reliable half of the
+   contradiction rule: the prompt obliges the model to report them, and
+   this makes sure it has them.
+
+   Only the ones bearing on what was asked, so a canon full of settled
+   arguments does not drown one question in all of them. */
+function knownConflicts(question, entries) {
+  const K = window.CodexContinuity;
+  if (!K || !K.canonConflicts) return "";
+  let list = [];
+  try { list = K.canonConflicts() || []; } catch (e) { return ""; }
+  if (!list.length) return "";
+  const hay = (String(question || "") + " " +
+    entries.map(e => (e.title || "") + " " + (e.text || "")).join(" ")).toLowerCase();
+  const relevant = list.filter(c => hay.includes(String(c.name).toLowerCase())).slice(0, 8);
+  if (!relevant.length) return "";
+  const titleOf = id => {
+    const hit = entries.find(e => e.id === id);
+    return hit ? hit.title : "another entry";
+  };
+  return "\n<known_conflicts>\n" + relevant.map(c =>
+    `${c.name} · ${c.field} — ` +
+    c.claims.map(cl => `"${cl.value}" (${titleOf(cl.noteId)})`).join(" vs ") +
+    " — unresolved").join("\n") + "\n</known_conflicts>";
 }
 
 /* Earlier turns of the conversation, sanitised: only user/assistant
@@ -440,7 +525,7 @@ async function ask(question, entries, opts) {
     ? buildContext(use, c.contextChars)
     : "(Nothing in the writer's entries matched this. You have no passages for it. " +
       "Do not invent any; if this asks about the world, say it is not established yet.)";
-  const user = `PASSAGES FROM MY ENTRIES\n\n${ctx}\n\n---\n\nMY QUESTION: ${question}`;
+  const user = `<canon>\n${ctx}\n</canon>${knownConflicts(question, use)}\n\nQuestion: ${question}`;
   const messages = cleanHistory(opts.history).concat([{ role: "user", content: user }]);
   // a full-length answer needs room; a brief one should not pay for it
   const maxTokens = opts.length === "full" ? Math.min(8000, Math.max(c.maxTokens, 2400)) : c.maxTokens;
@@ -543,7 +628,7 @@ async function askStream(question, entries, opts, onDelta) {
     ? buildContext(use, c.contextChars)
     : "(Nothing in the writer's entries matched this. You have no passages for it. " +
       "Do not invent any; if this asks about the world, say it is not established yet.)";
-  const user = `PASSAGES FROM MY ENTRIES\n\n${ctx}\n\n---\n\nMY QUESTION: ${question}`;
+  const user = `<canon>\n${ctx}\n</canon>${knownConflicts(question, use)}\n\nQuestion: ${question}`;
   const messages = cleanHistory(opts.history).concat([{ role: "user", content: user }]);
   const maxTokens = opts.length === "full" ? Math.min(8000, Math.max(c.maxTokens, 2400)) : c.maxTokens;
 

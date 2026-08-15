@@ -820,6 +820,15 @@ function hHowOld(q, ctx, S) {
      which is worse than either answer alone. */
   const read = traitsFor(name, ctx);
   const aged = clauseOf(read, ["age", "born", "died"]);
+  /* Two ages written down is the answer to "how old is she", and it is
+     a better answer than either age alone. */
+  const clash = clashHtml(name, read, ["age", "born", "died"]);
+  if (clash) {
+    return out(`${dymNote(m[1], found)}${clash}
+      ${quoteOnly(evidenceRows(bothSides(read.clashes.filter(c => ["age", "born", "died"].indexOf(c.k) > -1))))}`,
+      { sources: read.sources, subject: name,
+        grounded: "Both readings are yours · nothing chosen for you" });
+  }
   if (aged) {
     return out(`${dymNote(m[1], found)}
       <div class="ans-label">What your canon says about ${esc(name)}'s age</div>
@@ -1672,6 +1681,50 @@ const MULTI = { does: 3 };
 function allowance(k) { return MULTI[k] || 1; }
 function countOf(list, k) { let n = 0; for (const f of list) if (f.k === k) n++; return n; }
 
+/* ---------- when the canon answers twice ----------
+   Facts that come in ones: you have a single age, a single birthplace,
+   one mother. Taking the first and dropping the rest is right for
+   those — except when the rest DISAGREE, and then dropping them is the
+   worst thing this app can do. Asked how old somebody was, with two
+   ages written down, it used to pick one and state it flatly under a
+   banner reading "nothing added". Surfacing the disagreement is the
+   entire reason a continuity tool exists; silently resolving one is the
+   failure it is meant to prevent, and the confident tone makes it
+   worse, because you would believe it. */
+const SINGLE_TRAIT = new Set(["age", "born", "died", "from", "lives", "married",
+  "capital", "seat", "founded-in", "ruled-by", "founded-by", "killed-by", "heir"]);
+/* NUMBER_WORD above is the alternation the age pattern matches on;
+   this turns one of those words into the number it means, so "seven"
+   and "7" are recognised as the same answer and "seven" and "nine" as
+   two different ones. */
+const WORD_VALUE = {};
+NUMBER_WORD.split("|").forEach((w, i) => {
+  const small = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+  if (i < small.length) WORD_VALUE[w] = small[i];
+});
+["thirty",30,"forty",40,"fifty",50,"sixty",60,"seventy",70,"eighty",80,"ninety",90]
+  .forEach((v, i, a) => { if (i % 2 === 0) WORD_VALUE[v] = a[i + 1]; });
+function valueIn(clause) {
+  const n = String(clause).match(/\d[\d,]*/g);
+  if (n) return n.map(x => x.replace(/,/g, "")).join("/");
+  const w = String(clause).toLowerCase().match(/\b[a-z]+\b/g) || [];
+  for (const x of w) if (WORD_VALUE[x] != null) return String(WORD_VALUE[x]);
+  return null;
+}
+const SHARED = new Set(["is", "was", "were", "are", "the", "a", "an", "of", "in", "at", "on",
+  "to", "by", "from", "with", "and", "her", "his", "their", "its", "old", "years", "year",
+  "age", "aged", "born", "died", "lives", "living", "city", "town", "house"]);
+function saysSomethingElse(a, b) {
+  const va = valueIn(a), vb = valueIn(b);
+  if (va && vb) return va !== vb;
+  if (va || vb) return false;                    // one gives a number, the other does not
+  const words = s => String(s).toLowerCase().split(/[^a-z0-9’'-]+/)
+    .filter(w => w.length > 2 && !SHARED.has(w));
+  const wa = words(a), wb = words(b);
+  if (!wa.length || !wb.length) return false;
+  return !wa.some(w => wb.indexOf(w) > -1);      // no word in common at all
+}
+
 /* Two deeds are the same deed when the verb matches and the objects are
    about the same thing. Objects are compared on their content words so
    that "the house" and "House Orana" meet on "house", while "her kess"
@@ -1713,6 +1766,7 @@ function sameDeed(a, b) {
 function readTraits(name, ctx) {
   const nl = name.toLowerCase();
   let found = [];
+  const clashes = [];          // single-valued facts the canon answers twice
   const seen = new Set();
   const sources = [];
   for (const e of pool(ctx)) {
@@ -1733,7 +1787,27 @@ function readTraits(name, ctx) {
         if (!piece || piece.length < 3) continue;
         // what the clause says about its own subject
         for (const t of TRAITS) {
-          if (countOf(found, t.k) >= allowance(t.k)) continue;   // first statement wins
+          if (countOf(found, t.k) >= allowance(t.k)) {
+            /* Full up on this kind of fact — but if this sentence says
+               something DIFFERENT about a fact that comes in ones, that
+               is not a duplicate to drop, it is a disagreement to
+               report. Read it far enough to know which. */
+            if (!SINGLE_TRAIT.has(t.k)) continue;
+            t.re.lastIndex = 0;
+            const alt = t.re.exec(piece);
+            if (!alt) continue;
+            if (negatedBefore(piece, alt.index)) continue;
+            if (!statementBelongsTo(piece, sentence, alt.index, nl, carry, pieceAt)) continue;
+            const altClause = t.say(alt);
+            if (!wellFormed(altClause) || selfReferential(altClause, name)) continue;
+            const held = found.find(f => f.k === t.k);
+            if (!held || !saysSomethingElse(held.clause, altClause)) continue;
+            if (clashes.some(c => c.k === t.k && c.clause.toLowerCase() === altClause.toLowerCase())) continue;
+            clashes.push({ k: t.k, clause: altClause, sentence: sentence.trim(), entry: e,
+                           against: held.clause, againstEntry: held.entry,
+                           againstSentence: held.sentence });
+            continue;
+          }
           t.re.lastIndex = 0;
           const m = t.re.exec(piece);
           if (!m) continue;
@@ -1858,7 +1932,7 @@ function readTraits(name, ctx) {
   });
   trimmed = front.concat(back);
 
-  return { traits: trimmed, sources, kind };
+  return { traits: trimmed, sources, kind, clashes };
 }
 
 /* A well-documented character can satisfy a dozen patterns, and reading
@@ -1881,6 +1955,41 @@ function traitsFor(name, ctx) {
   if (!traitCache[key]) traitCache[key] = readTraits(name, ctx);
   return traitCache[key];
 }
+/* The disagreement, said out loud, with both sides and where each came
+   from — and no preference between them, because which one is current
+   is the writer's to decide and nobody else's. */
+function clashHtml(name, read, keys) {
+  if (!read || !read.clashes || !read.clashes.length) return "";
+  const hit = read.clashes.filter(c => !keys || keys.indexOf(c.k) > -1);
+  if (!hit.length) return "";
+  return hit.slice(0, 2).map(c => `
+    <div class="clash">
+      <div class="clash-head">Your canon answers this twice</div>
+      <div class="clash-two">
+        <span class="clash-side">${esc(name)} ${esc(c.against)}${
+          c.againstEntry ? `<em>${esc(c.againstEntry.title)}</em>` : ""}</span>
+        <span class="clash-vs">and</span>
+        <span class="clash-side">${esc(name)} ${esc(c.clause)}${
+          c.entry ? `<em>${esc(c.entry.title)}</em>` : ""}</span>
+      </div>
+      <div class="clash-ask">Which is current? I have not chosen between them.</div>
+    </div>`).join("");
+}
+/* A disagreement has two sentences behind it, and quoting only the one
+   that arrived second would show half the evidence for a claim whose
+   whole point is that there are two halves. */
+function bothSides(clashes) {
+  const rows = [];
+  clashes.forEach(c => {
+    if (c.againstSentence) rows.push({ clause: c.against, sentence: c.againstSentence, entry: c.againstEntry });
+    rows.push({ clause: c.clause, sentence: c.sentence, entry: c.entry });
+  });
+  return rows;
+}
+function clashesOn(read, keys) {
+  return !!(read && read.clashes && read.clashes.some(c => !keys || keys.indexOf(c.k) > -1));
+}
+
 function clauseOf(read, keys) {
   const hit = read.traits.filter(t => keys.indexOf(t.k) > -1);
   return hit.length ? hit : null;
@@ -2109,7 +2218,12 @@ function hWhoIs(q, ctx, S) {
   const quotedKeys = new Set(quoted.map(s => s.slice(0, 40).toLowerCase()));
   const extra = inferred ? summary.filter(s => !quotedKeys.has(s.slice(0, 40).toLowerCase())) : [];
 
-  return out(`${dymNote(m[1], found)}
+  /* A disagreement about who somebody IS belongs at the top of the
+     answer about them, not buried under a sentence that quietly took
+     one side. */
+  const clash = clashHtml(name, read);
+
+  return out(`${dymNote(m[1], found)}${clash}
     <div class="blurb">
       <div class="bt">${home ? C().catDot(home.category) : ""} ${esc(name)}</div>
       ${home ? `<div class="bc">${esc(home.category)}</div>` : ""}
@@ -2127,9 +2241,11 @@ function hWhoIs(q, ctx, S) {
     </details>` : ""}
     ${extra.length ? `<div class="a-more">${esc(extra.join(" ").slice(0, 340))}</div>` : ""}`,
     { sources, subject: name,
-      grounded: inferred
-        ? "Read from your own wording · nothing added"
-        : "Grounded in your entries · nothing invented" });
+      grounded: clash
+        ? "Read from your own wording · the disagreement is yours to settle"
+        : inferred
+          ? "Read from your own wording · nothing added"
+          : "Grounded in your entries · nothing invented" });
 }
 
 /* ============================================================

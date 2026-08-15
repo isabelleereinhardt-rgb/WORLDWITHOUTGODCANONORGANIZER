@@ -2365,7 +2365,7 @@ function askAssistant(q) {
         `<a class="a-cite" href="#/entry/${encodeURIComponent(s.id)}">
           <span class="ac-n">${i + 1}</span>
           <span class="ac-body"><span class="ac-title">${esc(s.title)}</span>
-          <span class="ac-quote">${snippet(s._hay || s.body || "", q, 110) || esc(s.category)}</span></span></a>`).join("")}</div>` : ""}
+          <span class="ac-quote">${snippet(s.text || s.body || "", q, 110) || esc(s.category)}</span></span></a>`).join("")}</div>` : ""}
       <div class="a-actions">
         <button class="a-act" data-act="copy">Copy</button>
         <button class="a-act" data-act="insert">Insert into document</button>

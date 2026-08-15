@@ -268,11 +268,14 @@ function section(t) { results.push("\n" + t); }
   const real = sent.filter(x => !x.url.startsWith("/fail") && x.body && x.body.messages);
   const lastReq = real[real.length - 1];
   check("provider actually received requests (" + real.length + ")", real.length >= 3);
-  check("  request carries the writer's passages", /PASSAGES FROM MY ENTRIES/.test(
+  check("  request carries the writer's passages", /<canon>/.test(
     JSON.stringify(lastReq.body.messages)), "");
   check("  request carries real canon text", /Enyokia|Vandrea/.test(JSON.stringify(lastReq.body.messages)));
-  check("  system prompt forbids invention", /Answer ONLY from the passages/.test(
+  check("  system prompt forbids invention", /Answer only from the passages/.test(
     (lastReq.body.messages[0] || {}).content || ""), "");
+  check("  and forbids splicing two passages into one claim",
+    /Never combine words from two different passages/.test(
+      (lastReq.body.messages[0] || {}).content || ""), "");
   check("  standing instructions were sent", /House sigil/.test(
     (lastReq.body.messages[0] || {}).content || ""), (lastReq.body.messages[0] || {}).content);
   check("  personality was sent", /cat archivist/.test((lastReq.body.messages[0] || {}).content || ""));

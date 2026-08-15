@@ -52,7 +52,15 @@ const check = (label, cond, extra) => {
   check("ask ok", r.ok === true, r);
   const b = captured.body;
   check("anthropic shape", b.model === "claude-sonnet-4-5" && typeof b.system === "string" && Array.isArray(b.messages));
-  check("system: grounding", /Answer ONLY from the passages/.test(b.system));
+  check("system: grounding", /Answer only from the passages/.test(b.system));
+  check("system: never splice two passages into one claim",
+    /Never combine words from two different passages/.test(b.system));
+  check("system: never shorten a proper noun",
+    /never .Vane./.test(b.system), b.system.slice(0, 200));
+  check("system: contradictions outrank everything else",
+    /CONTRADICTIONS\. This rule outranks every other instruction/.test(b.system));
+  check("system: say what was looked for when nothing is found",
+    /which name or term you looked for/.test(b.system));
   check("system: opinions allowed", /your reading rather than established canon/.test(b.system));
   check("system: persona", /Lucky, a cat archivist.*Scholar/.test(b.system), b.system);
   check("system: standing instructions", /Prefer my own terminology\./.test(b.system));
@@ -62,8 +70,10 @@ const check = (label, cond, extra) => {
     b.messages[0].role === "user" && b.messages[1].role === "assistant" && b.messages[2].role === "user",
     b.messages.map(m => m.role));
   check("dangling user turn dropped", !/dangling/.test(JSON.stringify(b.messages.slice(0, -1))));
-  check("passages in final turn", /PASSAGES FROM MY ENTRIES/.test(b.messages[2].content) &&
+  check("passages in final turn", /<canon>/.test(b.messages[2].content) &&
     /where is she from\?/.test(b.messages[2].content));
+  check("  each passage names the entry it came from",
+    /<passage n="1" entry="Amara"/.test(b.messages[2].content), b.messages[2].content.slice(0, 200));
   check("alternation after merge", (() => {
     const msgs = b.messages;
     for (let i = 1; i < msgs.length; i++) if (msgs[i].role === msgs[i - 1].role) return false;
@@ -94,6 +104,46 @@ const check = (label, cond, extra) => {
   const mb = captured.body.messages.filter(m => m.role !== "system");
   check("merge consecutive users", mb[0].role === "user" && /one\ntwo/.test(mb[0].content), mb);
   check("drop leading assistant", !/orphan lead/.test(JSON.stringify(mb)));
+
+  /* ---------- what the model is told about disagreements ----------
+     The prompt obliges it to report a contradiction. This makes sure it
+     is handed the ones already worked out, rather than being left to
+     notice them for itself. */
+  window.CodexContinuity = {
+    canonConflicts: () => ([{
+      id: "x:age", entityId: "x", name: "Amara", field: "age",
+      claims: [{ value: "24", noteId: "e1", quote: "Age: 24" },
+               { value: "51", noteId: "e2", quote: "was 51 years old" }],
+    }]),
+  };
+  await AI.ask("how old is Amara?", [
+    { id: "e1", title: "Amara", category: "Characters", text: "Amara\nAge: 24\nShe kept the archive." },
+    { id: "e2", title: "The Burning", category: "My Notes", text: "Amara was 51 years old then." },
+  ], {});
+  /* Read the user turn, not the whole request: the system prompt names
+     <known_conflicts> in the rule about it, so matching the body would
+     pass whether or not any conflict was actually sent. */
+  const lastTurn = b2 => b2.messages[b2.messages.length - 1].content;
+  let sent = lastTurn(captured.body);
+  check("conflicts already worked out are handed to the model", /known_conflicts/.test(sent), sent.slice(0, 300));
+  check("  naming both answers", /24/.test(sent) && /51/.test(sent));
+  check("  and the entries they came from", /The Burning/.test(sent));
+  check("  marked unresolved, not decided", /unresolved/.test(sent));
+
+  // an unrelated question must not drag every argument in the canon along
+  await AI.ask("what is the weather like?", [
+    { id: "e9", title: "Weather", category: "My Notes", text: "It rains in the north." },
+  ], {});
+  check("a question about something else carries no conflicts",
+    !/known_conflicts/.test(lastTurn(captured.body)), lastTurn(captured.body).slice(0, 200));
+  delete window.CodexContinuity;
+
+  /* ---------- passages cut at a paragraph, not a character ---------- */
+  const long = "First paragraph, whole and complete.\n\nSecond paragraph, also whole.\n\n" + "x".repeat(4000);
+  await AI.ask("anything?", [{ id: "L", title: "Long", category: "My Notes", text: long }], {});
+  const body = captured.body.messages[captured.body.messages.length - 1].content;
+  check("a long entry keeps whole paragraphs", /First paragraph, whole and complete\./.test(body));
+  check("  and says how much was left out", /truncated=/.test(body), body.slice(0, 260));
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

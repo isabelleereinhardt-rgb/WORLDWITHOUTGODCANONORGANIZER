@@ -41,8 +41,12 @@ http.createServer((req, res) => {
     // formatted as markdown so the renderer is exercised too.
     const msgs = (parsed && parsed.messages) || [];
     const last = msgs[msgs.length - 1] || {};
-    const nameMatch = /MY QUESTION: (.*)$/.exec(String(last.content || ""));
-    const passageCount = (String(last.content || "").match(/^\[\d+\]/gm) || []).length;
+    /* The wire format is <canon> with one <passage n=…> per entry and
+       the question after it; this stub reads it the way a real provider
+       would, so a change to the format shows up here rather than being
+       silently tolerated. */
+    const nameMatch = /(?:^|\n)Question: ([\s\S]*)$/.exec(String(last.content || ""));
+    const passageCount = (String(last.content || "").match(/<passage n=/g) || []).length;
     const question = nameMatch ? nameMatch[1].trim() : "(none)";
     const lines = [
       "## What the passages say",

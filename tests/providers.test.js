@@ -51,10 +51,15 @@ const HISTORY = [{ role: "user", content: "hi" }, { role: "assistant", content: 
     const r = await AI.ask("who is Amara?", ENTRIES, { history: HISTORY });
     check(id + ": request succeeds", r.ok === true, r.why);
     check(id + ": went to a real URL", /^https?:\/\//.test(captured.url), captured.url);
-    check(id + ": carries the passages",
-      /PASSAGES FROM MY ENTRIES/.test(JSON.stringify(captured.body)));
+    check(id + ": carries the passages, tagged with the entry they came from",
+      /<canon>/.test(JSON.stringify(captured.body)) &&
+      /<passage n=/.test(JSON.stringify(captured.body)), JSON.stringify(captured.body).slice(0, 200));
     check(id + ": carries the grounding rule",
-      /Answer ONLY from the passages/.test(JSON.stringify(captured.body)));
+      /Answer only from the passages/.test(JSON.stringify(captured.body)));
+    check(id + ": carries the rule against splicing two passages into one claim",
+      /Never combine words from two different passages/.test(JSON.stringify(captured.body)));
+    check(id + ": carries the rule that outranks the others",
+      /CONTRADICTIONS\. This rule outranks/.test(JSON.stringify(captured.body)));
   }
 
   // ---- shape-specific expectations ----
