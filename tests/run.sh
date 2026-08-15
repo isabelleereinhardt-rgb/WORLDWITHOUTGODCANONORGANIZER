@@ -39,6 +39,7 @@ run "provider presets (no browser)" node "$HERE/providers.test.js"
 run "streaming (no browser)" node "$HERE/streaming.test.js"
 run "scanned pages (no browser)" node "$HERE/ocr.test.js"
 run "continuity, draft vs canon (no browser)" node "$HERE/continuity.test.js"
+run "entity records, aliases and mentions (no browser)" node "$HERE/entities.test.js"
 run "hostile input & edge cases (no browser)" node "$HERE/explore.js"
 
 if [ "${1:-all}" = "unit" ]; then
@@ -66,6 +67,7 @@ run "assistant end to end (real canon, real browser)" node "$HERE/assistant.e2e.
 run "scanned pages end to end (real PDF, real browser)" node "$HERE/ocr.e2e.js"
 run "reader's widget, embedded cross-origin (real browser)" node "$HERE/widget.e2e.js"
 run "QA findings, 14 Aug (real browser, phone and desktop)" node "$HERE/qa.e2e.js"
+run "entities in the app: rename and wrangling (real browser)" node "$HERE/wrangle.e2e.js"
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SOMETHING FAILED"; fi

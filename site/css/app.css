@@ -2430,3 +2430,16 @@ a.a-chip{text-decoration:none;display:inline-block}
    ============================================================ */
 *:focus-visible{outline:2px solid var(--blush)!important;outline-offset:2px;border-radius:2px}
 .skip-link:focus-visible{outline-offset:0}
+
+/* ---- the wrangling queue: names found, waiting to be told what they are ---- */
+.wq-bar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 4px}
+.wq{border:1px solid var(--line);border-left:2px solid var(--gold);background:var(--panel);
+  padding:14px 16px;margin:16px 0 8px}
+.wq-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  font-family:var(--serif);font-size:16px;margin-bottom:4px}
+.wq-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;
+  border-top:1px solid var(--line)}
+.wq-name{font-family:var(--serif);font-size:15px;min-width:150px}
+.wq-seen{color:var(--dim);font-size:12px;min-width:80px}
+.wq-acts{display:flex;gap:5px;flex-wrap:wrap;margin-left:auto}
+.wq-acts .btn{padding:3px 8px;font-size:11.5px}

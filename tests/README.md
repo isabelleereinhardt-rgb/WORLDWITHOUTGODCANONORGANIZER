@@ -79,6 +79,14 @@ refused rather than quietly trimmed, that a refusal costs nothing, that a
 failure part-way keeps what was already paid for, and that a new month
 restores the allowance.
 
+**`entities.test.js`** — the entity model: ids that survive a rename,
+aliases that resolve like canonical names, and the three invariants
+borrowed from otwarchive (an alias may only alias the same type,
+hierarchy only between confirmed records, nothing may be its own
+ancestor). Also mentions resolved on write — the trick that turns "who
+appears in this entry" from a regex sweep into a lookup — and the
+proposer, which must offer names and refuse field labels.
+
 **`explore.js`** — a hunt rather than a checklist. Hostile and malformed
 input (empty, punctuation-only, 500 characters, regex metacharacters,
 script payloads, emoji, non-Latin), markup living inside the canon,
@@ -113,6 +121,15 @@ embed must not break are asserted rather than assumed — nothing written
 to localStorage, no database opened, no cookie set, in the frame and out
 of it — along with the height message that lets a host fit the frame,
 and the two ways of arriving with no canon to show.
+
+**`wrangle.e2e.js`** — the two headline QA findings, in the running
+app. Renaming an entry used to silently break every cross-reference to
+it, because links were keyed on the title; now the record keeps its id,
+the old title becomes an alias, and prose written months ago still
+resolves. And the Name Index could only ever find names it already knew
+— the harvest was circular — so a character living inside a chapter was
+invisible; now she is found, offered, typed with one click, and
+answerable by the assistant. What you reject is never offered again.
 
 **`stub-provider.js`** — a stand-in that speaks the OpenAI request shape.
 It records everything it is sent so the tests can assert on the real

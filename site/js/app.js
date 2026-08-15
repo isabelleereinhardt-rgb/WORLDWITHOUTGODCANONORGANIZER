@@ -140,6 +140,54 @@ async function loadNotes() {
   await CodexStore.ready;
   notesCache = (await CodexStore.all("notes")).sort((a, b) => (b.updated || 0) - (a.updated || 0));
 }
+
+/* ---------- the entity index ----------
+   Records for every named thing, and a row for every place one is
+   named. The rows are derived, so they are rebuilt from the writing
+   rather than trusted: an index that can drift out of step with the
+   prose is worse than no index. */
+async function loadEntities() {
+  const E = window.CodexEntities;
+  if (!E || !window.CodexStore) return;
+  await CodexStore.ready;
+  const rows = await CodexStore.all("entities");
+  E.load(rows, []);
+  E.onSave(async (what, payload) => {
+    if (what === "entities") await CodexStore.put("entities", payload);
+    else if (what === "delete-entity") await CodexStore.del("entities", payload.id);
+    // mention rows are derived and never written to disk; see below
+  });
+  /* First run on a workspace: every entry title becomes a record, which
+     preserves exactly what the app does today. The shipped canon names
+     come in the same way so nothing that worked stops working. */
+  if (!rows.length) {
+    const hasCanon = !window.CodexWorkspaces || CodexWorkspaces.activeHasCanon();
+    await E.migrate(notesCache.map(n => n.title), hasCanon ? ORIG_ENTITIES : []);
+  }
+}
+
+/* Mentions live in memory only. Rebuilding them for four hundred
+   thousand words takes a couple of seconds, and a stored copy would be
+   one more thing that can disagree with the writing it describes.
+
+   Those seconds must not be spent with the app showing "Opening…".
+   Reading the records is quick and everything visible depends only on
+   them; the mention rows make lookups instant later, so they are built
+   after the door is open, a few entries at a time, yielding to the
+   browser between batches so nothing feels stuck. */
+let indexing = false;
+async function reindexAll(onDone) {
+  const E = window.CodexEntities;
+  if (!E || !E.ready() || indexing) return;
+  indexing = true;
+  const entries = DB.entries.slice();
+  for (let i = 0; i < entries.length; i++) {
+    await E.reindexNote(entries[i].id, entries[i].text || "");
+    if (i % 8 === 7) await new Promise(r => setTimeout(r, 0));
+  }
+  indexing = false;
+  if (onDone) onDone();
+}
 function noteToEntry(n) {
   const text = n.text || "";
   return {
@@ -179,8 +227,20 @@ function rebuildEntries() {
   const noteEntries = notesCache.map(noteToEntry);
   const visibleNotes = noteEntries.filter(e => !hidden.has(e.id) && !e.namesOnly);
   DB.entries = base.filter(e => !hidden.has(e.id)).concat(visibleNotes);
-  DB.entities = baseEntities.slice();
-  visibleNotes.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  /* Names now come from the entity records, which is what lets an alias
+     cross-link as readily as a canonical name and what stops a rename
+     breaking every reference. Until the records exist — the first
+     moments of a boot — this falls back to titles, so the app never
+     renders a nameless canon while it waits. */
+  const E = window.CodexEntities;
+  if (E && E.ready() && E.confirmed().length) {
+    const names = [];
+    E.confirmed().forEach(rec => E.namesOf(rec).forEach(n => { if (n && names.indexOf(n) < 0) names.push(n); }));
+    DB.entities = names;
+  } else {
+    DB.entities = baseEntities.slice();
+    visibleNotes.forEach(e => { if (e.title && !DB.entities.includes(e.title)) DB.entities.push(e.title); });
+  }
   // names-only imports never become entries, but their names still count
   noteEntries.filter(e => e.namesOnly && !hidden.has(e.id)).forEach(e => {
     entitiesIn(e.text).forEach(n => { if (!DB.entities.includes(n)) DB.entities.push(n); });
@@ -235,19 +295,44 @@ async function addNote(title, text, images, category, opts) {
   if (opts.namesOnly) note.namesOnly = true;
   await CodexStore.put("notes", note);
   notesCache.unshift(note);
+  const E = window.CodexEntities;
+  if (E && E.ready()) {
+    // a new entry is a new named thing, unless that name is already one
+    if (note.title && !E.resolve(note.title, { includeCandidates: true })) {
+      await E.create({ name: note.title, status: "confirmed", type: /^house\b/i.test(note.title) ? "house" : "concept" });
+    }
+    refresh();
+    await E.reindexNote(note.id, note.text || "");
+  }
   refresh();
   window.CodexFeed && CodexFeed.log("Added note", note.title);
   return note;
 }
 async function updateNote(id, patch) {
   const note = notesCache.find(n => n.id === id); if (!note) return;
+  const wasTitled = note.title;
   Object.assign(note, patch);
   await CodexStore.put("notes", note);
+  const E = window.CodexEntities;
+  if (E && E.ready()) {
+    /* The rename that used to break every cross-reference. The record
+       keeps its id and takes the old title as an alias, so a sentence
+       written months ago still points at her. */
+    if (patch && patch.title && patch.title !== wasTitled) {
+      const rec = E.resolve(wasTitled, { includeCandidates: true });
+      if (rec) await E.rename(rec.id, patch.title);
+    }
+    if (patch && (patch.text !== undefined || patch.title !== undefined)) {
+      await E.reindexNote(note.id, note.text || "");
+    }
+  }
   refresh();
 }
 async function deleteNote(id) {
   await CodexStore.del("notes", id);
   notesCache = notesCache.filter(n => n.id !== id);
+  const E = window.CodexEntities;
+  if (E && E.ready()) await E.forgetNote(id);
   refresh();
 }
 
@@ -1022,6 +1107,114 @@ function viewIndex() {
   indexSelectMode = false; indexSelected = new Set();
   renderIndex();
 }
+/* ---------- the wrangling queue ----------
+   Names found in the writing that the canon has never heard of. They
+   arrive as candidates and wait: nothing here is real until somebody
+   says what it is.
+
+   That is the whole design, and it is AO3's rather than mine. They have
+   volunteers reading tags by hand across millions of works and chose
+   that over automation deliberately, because a name extractor that
+   commits without asking is wrong in ways nobody notices until the
+   index is full of them — which is what "ATION" and "Abstinences" are
+   doing among the 750 names shipped in this repository.
+
+   Because a person confirms every one, the finder does not have to be
+   right. It only has to be worth reading. */
+let queueOpen = false;
+function wranglingBanner() {
+  const E = window.CodexEntities;
+  if (!E || !E.ready()) return "";
+  const waiting = E.candidates();
+  if (!waiting.length && !queueOpen) {
+    return `<div class="wq-bar"><button class="btn ghost sm" id="wqFind">✦ Look for names I haven't filed</button></div>`;
+  }
+  if (!queueOpen) {
+    return `<div class="wq-bar">
+      <button class="btn sm" id="wqOpen">${waiting.length} possible name${waiting.length === 1 ? "" : "s"} to review</button>
+      <button class="btn ghost sm" id="wqFind">Look again</button></div>`;
+  }
+  return `<div class="wq">
+    <div class="wq-head">
+      <span>${waiting.length} possible name${waiting.length === 1 ? "" : "s"} found in your writing</span>
+      <span class="wq-acts">
+        <button class="btn ghost sm" id="wqFind">Look again</button>
+        <button class="btn ghost sm" id="wqClose">Done</button>
+      </span>
+    </div>
+    <p class="faint">Nothing here is in your canon yet. Say what each one is, or that it is not a name;
+      whatever you reject is never offered again.</p>
+    ${waiting.slice(0, 40).map(c => `
+      <div class="wq-row" data-cand="${esc(c.id)}">
+        <span class="wq-name">${esc(c.name)}</span>
+        <span class="wq-seen">${c.seen || 0} mention${(c.seen || 0) === 1 ? "" : "s"}</span>
+        <span class="wq-acts">
+          ${["character", "place", "house", "event"].map(t =>
+            `<button class="btn ghost sm" data-wq="type" data-t="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}
+          <button class="btn ghost sm" data-wq="alias">Alias of…</button>
+          <button class="btn ghost sm danger" data-wq="no">Not a name</button>
+        </span>
+      </div>`).join("")}
+    ${waiting.length > 40 ? `<p class="faint">…and ${waiting.length - 40} more; deal with these first.</p>` : ""}
+  </div>`;
+}
+
+async function bindWrangling() {
+  const E = window.CodexEntities;
+  if (!E || !E.ready()) return;
+  const find = $("#wqFind");
+  if (find) find.onclick = async () => {
+    find.disabled = true; find.textContent = "Reading your writing…";
+    let made = 0;
+    for (const e of DB.entries) {
+      for (const p of E.propose(e.text || "", { limit: 24 })) {
+        if (E.resolve(p.name, { includeCandidates: true })) continue;
+        await E.create({ name: p.name, status: "candidate", seen: p.count,
+                         type: p.cue ? "character" : "concept" });
+        made++;
+        if (made > 200) break;
+      }
+      if (made > 200) break;
+    }
+    queueOpen = true;
+    toast(made ? made + " possible name" + (made === 1 ? "" : "s") + " to look at" : "Nothing new found");
+    renderIndex();
+  };
+  const open = $("#wqOpen");
+  if (open) open.onclick = () => { queueOpen = true; renderIndex(); };
+  const close = $("#wqClose");
+  if (close) close.onclick = () => { queueOpen = false; renderIndex(); };
+
+  $$(".wq-row").forEach(row => {
+    const id = row.dataset.cand;
+    $$("[data-wq]", row).forEach(b => b.onclick = async () => {
+      const rec = E.get(id);
+      if (!rec) return;
+      if (b.dataset.wq === "type") {
+        await E.setType(id, b.dataset.t);
+        await E.setStatus(id, "confirmed");
+        await reindexAll();
+        toast(rec.name + " is a " + b.dataset.t + " now");
+      } else if (b.dataset.wq === "no") {
+        await E.setStatus(id, "rejected");
+        toast("Won't offer " + rec.name + " again");
+      } else {
+        const of = prompt("“" + rec.name + "” is another name for which record?\n\nType the name it belongs to.");
+        if (!of) return;
+        const target = E.resolve(of);
+        if (!target) { toast("No record called “" + of + "”"); return; }
+        const r = await E.addAlias(target.id, rec.name);
+        if (!r.ok) { toast(r.why); return; }
+        await E.remove(id);
+        await reindexAll();
+        toast(rec.name + " now points at " + target.name);
+      }
+      buildIndexes();
+      renderIndex();
+    });
+  });
+}
+
 function renderIndex() {
   const groups = {};
   DB.entities.forEach(n => { const L = (n[0] || "#").toUpperCase(); (groups[L] = groups[L] || []).push(n); });
@@ -1036,6 +1229,7 @@ function renderIndex() {
       </div>
     </div>
     <p class="muted">Every cross-linked name in your world. Click any to gather its mentions and a summary.</p>
+    ${wranglingBanner()}
     ${indexSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${total && indexSelected.size === total ? "checked" : ""}> Select all</label>
       <span class="faint" id="selCount">${indexSelected.size} selected</span>
@@ -1047,6 +1241,7 @@ function renderIndex() {
         : `<span class="chip" data-subject="${esc(n)}">${esc(n)}</span>`).join("")}</div>`).join("")}
   </div>`;
 
+  bindWrangling();
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { indexSelectMode = !indexSelectMode; if (!indexSelectMode) indexSelected.clear(); renderIndex(); };
   if (!indexSelectMode) { $$(".chip[data-subject]", view).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject)); return; }
 
@@ -2474,7 +2669,7 @@ function restoreAll() {
         else if (data && !data.stores) Object.keys(data).forEach(k => { if (k.startsWith("codex.")) localStorage.setItem(k, data[k]); });
         await loadNotes();
         if (window.CodexExtra) await CodexExtra.ready();
-        buildIndexes(); buildNav();
+        buildIndexes(); await loadEntities(); buildIndexes(); buildNav();
         toast("Backup restored"); route();
       } catch (e) { toast("Could not read that file"); }
     };
@@ -2753,6 +2948,10 @@ async function init() {
   // leave the whole shell sitting on "Opening…" with an empty sidebar,
   // which is exactly what used to happen.
   try { buildIndexes(); } catch (e) { bootTrouble("indexing your canon", e); }
+  /* The entity records need DB.entries to exist before they can resolve
+     names against it, and buildIndexes needs to run again afterwards so
+     the name list comes from the records rather than from titles. */
+  try { await loadEntities(); buildIndexes(); } catch (e) { bootTrouble("indexing your names", e); }
   try { buildNav(); } catch (e) { bootTrouble("building the sidebar", e); }
   try { if (window.CodexWorkspaces) CodexWorkspaces.updateBrandLabel(); } catch (e) {}
 
@@ -2761,6 +2960,11 @@ async function init() {
   $("#app").classList.remove("loading");
 
   try { route(); } catch (e) { bootTrouble("opening that page", e); }
+
+  /* Now that the app is on screen, work out where every name appears.
+     Nothing already rendered is waiting on it, so it costs no one
+     anything to take its couple of seconds here. */
+  reindexAll(() => { try { refresh(); } catch (e) {} });
   window.addEventListener("hashchange", () => {
     try { route(); } catch (e) { bootTrouble("opening that page", e); }
   });
@@ -2894,7 +3098,13 @@ function boot() {
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
 else init();
 
-async function reloadWorkspace() { await loadNotes(); refresh(); }
+async function reloadWorkspace() {
+  await loadNotes();
+  buildIndexes();
+  // a different workspace is a different canon, so the records go too
+  await loadEntities();
+  refresh();
+}
 window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot, CANON_ORDER,
   recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll,
   currentGen, isStale,
