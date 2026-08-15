@@ -319,7 +319,7 @@ const undoBank = {};
 
 function resultHtml(res, plan) {
   if (!res.ok) {
-    return `<div class="act-card bad"><div class="ac-k">✧ I could not do that</div>
+    return `<div class="act-card bad"><div class="ac-k">I could not do that</div>
       <div class="ac-why">${esc(res.why || "")}</div></div>`;
   }
   let undoBtn = "";
@@ -329,7 +329,7 @@ function resultHtml(res, plan) {
     undoBtn = `<button class="act-undo" data-undo="${id}">Undo</button>`;
   }
   return `<div class="act-card">
-    <div class="ac-k">✦ ${esc(res.title || ACTIONS[plan.do].label)}</div>
+    <div class="ac-k">${esc(res.title || ACTIONS[plan.do].label)}</div>
     <div class="ac-detail">${esc(res.detail || "")}</div>
     <div class="ac-acts">
       ${res.link ? `<a class="btn sm" href="${esc(res.link.href)}">${esc(res.link.label)}</a>` : ""}
@@ -350,7 +350,7 @@ function proposalHtml(plan) {
   const params = def.args.map(k => plan[k] ? `<span class="ap-arg"><b>${esc(k)}</b> ${esc(String(plan[k]))}</span>` : "")
     .filter(Boolean).join("");
   return `<div class="act-card proposal" data-proposal="${id}">
-    <div class="ac-k">✧ Suggested: ${esc(def.label)}</div>
+    <div class="ac-k">Suggested: ${esc(def.label)}</div>
     ${params ? `<div class="ap-args">${params}</div>` : ""}
     <div class="ac-acts">
       <button class="btn sm" data-doit="${id}">Do it</button>

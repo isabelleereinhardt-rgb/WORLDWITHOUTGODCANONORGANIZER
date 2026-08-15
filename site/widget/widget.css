@@ -17,7 +17,6 @@ body { background: var(--bg); color: var(--ink); overflow-x: hidden; }
 .w-ask { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line);
   border-radius: 2px; background: var(--panel); padding: 8px 10px; }
 .w-ask:focus-within { border-color: var(--gold); }
-.w-glyph { color: var(--gold); flex: none; }
 .w-ask input { flex: 1; min-width: 0; background: none; border: 0; color: var(--ink);
   font: inherit; outline: none; padding: 4px 2px; }
 

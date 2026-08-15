@@ -118,7 +118,6 @@ function shell() {
       <div class="w-count">${ENTRIES.length} ${ENTRIES.length === 1 ? "entry" : "entries"} · ${NAMES.length} names</div>
     </header>
     <div class="w-ask">
-      <span class="w-glyph">✧</span>
       <input id="wq" placeholder="Ask about a character, a house, a place…" autocomplete="off"
         aria-label="Ask about the canon">
       <button class="btn sm" id="wgo">Ask</button>

@@ -17,6 +17,9 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const view = () => $("#view");
+/* The one place the Discord link lives is Settings; Help borrows it so
+   there is never a second copy to go stale. */
+const discord = () => (window.CodexExtra && CodexExtra.discord) ? CodexExtra.discord() : { invite: "", channel: "" };
 
 /* which features exist in the running app today */
 const SHIPPED = {
@@ -143,6 +146,11 @@ function render() {
           <div style="font-size:14.5px;line-height:1.55;color:var(--ink)">Ask ${esc(luckyName())} in plain words.
             He answers from your own canon, and if the question is about the app itself he points you at the page you need.</div>
           <button class="btn sm" id="helpAskLucky" style="margin-top:10px">Ask ${esc(luckyName())}</button>
+          ${discord().invite ? `<div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line);
+            font-size:13.5px;line-height:1.55;color:var(--dim)">A question he cannot answer, or something
+            plainly broken, goes to the Discord. Real people, and a thread that stays put.
+            <a href="${esc(discord().invite)}" target="_blank" rel="noopener noreferrer"
+              style="display:inline-block;margin-top:7px">Join the Discord →</a></div>` : ""}
         </div>
       </div>
     </div>

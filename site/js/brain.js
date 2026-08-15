@@ -602,7 +602,7 @@ function hRandom(q, ctx) {
       <div class="bt">${C().catDot(e.category)} ${esc(e.title)}</div>
       <div class="bc">${esc(e.category)}</div>
       ${rel.length ? `<div class="bs">${esc(rel.join(" ").slice(0, 300))}</div>` : ""}
-      <div class="spark-line">✦ ${esc(spark)}</div>
+      <div class="spark-line">${esc(spark)}</div>
       <div style="margin-top:8px"><a class="btn sm" href="#/entry/${encodeURIComponent(e.id)}">Open entry</a></div>
     </div>`,
     { sources: [e], subject: e.title, grounded: "Picked at random from your own entries" });

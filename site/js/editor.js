@@ -146,7 +146,7 @@ async function open(id) {
       <button id="tbGrammar" title="Check grammar &amp; style">Grammar</button>
       <span class="sep"></span>
       ${folderSelect}
-      <button id="tbAssist" title="Toggle assistant" class="accent">✦ Assistant</button>
+      <button id="tbAssist" title="Toggle assistant" class="accent">Assistant</button>
       <button id="tbExport" title="Export">Export</button>
       <button id="tbHistory" title="Saved versions of this draft">Versions</button>
       <span class="save-state" id="saveState">Saved</span>

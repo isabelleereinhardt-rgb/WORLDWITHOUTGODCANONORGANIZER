@@ -514,7 +514,7 @@ function statBits(b) {
     <span title="Reads">◉ ${nice(b.reads)}</span>
     <span title="Stars">★ ${nice(b.star_count)}</span>
     <span title="Chapters">☰ ${b.chapter_count}</span>
-    <span title="In libraries">✦ ${nice(b.library_count)}</span>
+    <span title="In libraries">▤ ${nice(b.library_count)}</span>
   </span>`;
 }
 
@@ -665,7 +665,7 @@ async function viewBook(id) {
         ${chapters.length ? `<a class="btn" href="#/book/${esc(id)}/${started ? startPos : 0}">${started && startPos > 0 ? "Continue · ch " + (startPos + 1) : "Start reading"}</a>` : ""}
         ${isMine ? `<a class="btn ghost sm" href="#/work/${esc(b.local_folder_id)}">Manage in My Works</a>`
         : `<button class="btn ghost sm${mine.starred ? " on" : ""}" id="bkStar">${mine.starred ? "★ Starred" : "☆ Leave a star"}</button>
-           <button class="btn ghost sm${mine.inLibrary ? " on" : ""}" id="bkLib">${mine.inLibrary ? "✦ In your library" : "✦ Save to library"}</button>`}
+           <button class="btn ghost sm${mine.inLibrary ? " on" : ""}" id="bkLib">${mine.inLibrary ? "In your library" : "Save to library"}</button>`}
         <button class="btn ghost sm" id="bkCopy">Copy link</button>
         <div class="work-stat">Updated ${rel(b.updated_at)}</div>
       </div>
@@ -723,7 +723,7 @@ async function viewBook(id) {
     if (!me()) { toastMsg("Sign in to keep a library; Settings → Account"); return; }
     try {
       await setLibrary(id, !mine.inLibrary, b.chapter_count);
-      toastMsg(mine.inLibrary ? "Removed from your library" : "✦ Saved; new chapters will show there");
+      toastMsg(mine.inLibrary ? "Removed from your library" : "Saved; new chapters will show there");
       refresh();
     } catch (e) { toastMsg(e.message || String(e)); }
   };

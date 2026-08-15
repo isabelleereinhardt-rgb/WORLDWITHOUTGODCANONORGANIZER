@@ -72,22 +72,22 @@ function defaultSettings() {
    Each one sets the same fields the controls below it set, so a preset
    is a shortcut rather than a mode you get stuck in. */
 const PRESETS = [
-  { id: "romantasy", name: "Romantasy", note: "The house look; rose on plum",
+  { id: "romantasy", name: "Romance", note: "The house look; rose on plum",
     swatches: ["#241b1e", "#f6ccd5", "#c9a15c"], theme: "dark",
     apply: { accent: "", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
-  { id: "parchment", name: "Parchment", note: "Warm paper, ink and gold",
+  { id: "parchment", name: "Mystery", note: "Warm paper, ink and gold",
     swatches: ["#f7f0ea", "#8a6526", "#38242c"], theme: "light",
     apply: { accent: "#b0567a", bg: "", uiFont: "Crimson Pro", readFont: "Cormorant Garamond" } },
-  { id: "midnight", name: "Midnight archive", note: "Cool slate, violet ink",
+  { id: "midnight", name: "Science fiction", note: "Cool slate, violet ink",
     swatches: ["#1b1a24", "#8e7cc3", "#c9c4d8"], theme: "dark",
     apply: { accent: "#8e7cc3", bg: "#1b1a24", uiFont: "Spectral", readFont: "EB Garamond" } },
-  { id: "botanical", name: "Botanical", note: "Green, quiet, unhurried",
+  { id: "botanical", name: "Classical", note: "Green, quiet, unhurried",
     swatches: ["#f3f1e7", "#5d7a58", "#33402f"], theme: "light",
     apply: { accent: "#5d7a58", bg: "#f3f1e7", uiFont: "Alegreya", readFont: "Vollkorn" } },
-  { id: "inkpress", name: "Ink press", note: "High contrast, cut glass",
+  { id: "inkpress", name: "Dark fantasy", note: "High contrast, cut glass",
     swatches: ["#141414", "#e7e3df", "#c2334f"], theme: "dark",
     apply: { accent: "#c2334f", bg: "#141414", uiFont: "Work Sans", readFont: "Playfair Display" } },
-  { id: "dusk", name: "Dusk", note: "Amber lamp on a cold evening",
+  { id: "dusk", name: "Poetry", note: "Amber lamp on a cold evening",
     swatches: ["#241d1b", "#e0a45c", "#f0e2d4"], theme: "dark",
     apply: { accent: "#e0a45c", bg: "#241d1b", uiFont: "Karla", readFont: "Cardo" } },
 ];
@@ -154,6 +154,7 @@ const Extra = {
   async unexcludeName(n) { this.excludedNames.delete(n); await S().del("excludedNames", n); },
   async unexcludeAllNames() { for (const n of Array.from(this.excludedNames)) await S().del("excludedNames", n); this.excludedNames.clear(); },
 };
+Extra.discord = () => ({ invite: DISCORD_INVITE, channel: DISCORD_CHANNEL });
 window.CodexExtra = Extra;
 window.CodexSettings = {
   save: () => saveSettings(),
@@ -386,7 +387,6 @@ function panelAppearance(el) {
       Override it here if you disagree.</p>
     <div class="pers-grid">${MOTIONS.map(([id, label, note]) =>
       `<button class="pers-card${(s.motion || "system") === id ? " on" : ""}" data-motion="${id}">
-        <span class="pc-glyph">${id === "calm" ? "☾" : id === "full" ? "✦" : "✧"}</span>
         <span><span class="pc-name">${esc(label)}</span><span class="pc-sample">${esc(note)}</span></span>
       </button>`).join("")}</div>
 
@@ -588,7 +588,7 @@ function panelLucky(el) {
     <div class="lucky-skins">
       ${L.COMPANIONS.map(([id, name, note]) => `
         <button class="lucky-skin${L.pref("luckyCompanion") === id ? " on" : ""}" data-lpal="${id}" data-skin="${esc(L.skin())}">
-          <span class="ls-face pal-face">${id === "none" ? "✧" : L.companionSvg(id)}</span>
+          <span class="ls-face pal-face">${id === "none" ? "—" : L.companionSvg(id)}</span>
           <span><span class="ls-name">${esc(name)}</span><span class="ls-note">${esc(note)}</span></span>
         </button>`).join("")}
     </div>
@@ -769,13 +769,11 @@ function panelAssistant(el) {
     <div class="rule-head"><span class="k">Where answers come from</span><span class="hr"></span></div>
     <div class="pers-grid">
       <button class="pers-card${c.mode !== "api" ? " on" : ""}" data-aimode="device">
-        <span class="pc-glyph">✧</span>
         <span><span class="pc-name">On this device</span>
         <span class="pc-sample">Searches your entries and assembles an answer from your own words.
           Nothing leaves the browser. Free, private, and cannot invent anything.</span></span>
       </button>
       <button class="pers-card${c.mode === "api" ? " on" : ""}" data-aimode="api">
-        <span class="pc-glyph">✦</span>
         <span><span class="pc-name">A model, with my own key</span>
         <span class="pc-sample">The same search runs first, then the passages it found are sent to a
           model you pay for, so answers can be reasoned rather than assembled.</span></span>
@@ -1172,6 +1170,18 @@ function panelAccount(el) {
    anything. It assembles a description of what went wrong, with the
    details worth having, and hands it to you to send however you like.
    A form that silently dropped what you wrote would be worse. */
+/* ---------- where a report goes ----------
+   "Put it on your clipboard so you can send it wherever you like" was
+   an instruction with no address at the end of it. Reports need
+   somewhere to land, and for this project that is the Discord: paste it
+   in and it is in front of people who can answer, with a thread that
+   survives longer than an email would.
+
+   One constant. Empty means no server has been set up yet, and the
+   panel says exactly that instead of offering a link that goes nowhere. */
+const DISCORD_INVITE = "";
+const DISCORD_CHANNEL = "#bug-reports";
+
 const REPORT_KINDS = [
   ["broken", "Something is broken"],
   ["wrong", "Something looks wrong"],
@@ -1189,17 +1199,24 @@ function panelReport(el) {
       and deleted entries wait in <b>Restore</b>.</p>
 
     <div class="rule-head mt"><span class="k">Report a problem</span><span class="hr"></span></div>
-    <p class="set-help">Nothing is uploaded from here. This writes up what happened, adds the technical
-      details that make it findable, and puts it on your clipboard so you can send it wherever you like.</p>
+    <p class="set-help">Nothing is uploaded from here. This writes up what happened and adds the
+      technical details that make it findable. ${DISCORD_INVITE
+        ? `Then it goes on your clipboard and opens the Discord, where you paste it into
+           <b>${esc(DISCORD_CHANNEL)}</b>.`
+        : `Then it goes on your clipboard, ready to send.`}</p>
     <div class="av-chips">${REPORT_KINDS.map(([id, label]) =>
       `<button class="av-chip${reportKind === id ? " on" : ""}" data-rkind="${id}">${esc(label)}</button>`).join("")}</div>
     <textarea class="import-body" id="rpWhat" style="margin-top:12px"
       placeholder="What were you doing, and what happened instead?"></textarea>
     <div class="auth-btns">
-      <button class="btn" id="rpCopy">Copy the report</button>
+      ${DISCORD_INVITE ? `<button class="btn" id="rpDiscord">Copy it and open the Discord</button>` : ""}
+      <button class="btn${DISCORD_INVITE ? " ghost sm" : ""}" id="rpCopy">Copy the report</button>
       <button class="btn ghost sm" id="rpDownload">Save it as a file</button>
     </div>
     <div class="auth-msg" id="rpMsg"></div>
+    ${DISCORD_INVITE ? `<p class="faint set-help">The Discord is also where to ask a question that is
+      not a fault: <a href="${esc(DISCORD_INVITE)}" target="_blank" rel="noopener noreferrer">open it in a
+      new tab</a>. Nothing is posted for you; you paste it yourself, so you see exactly what goes.</p>` : ""}
 
     <div class="rule-head mt"><span class="k">What gets included</span><span class="hr"></span></div>
     <p class="set-help">Your browser and screen size, which workspace is active, how many entries and
@@ -1207,6 +1224,19 @@ function panelReport(el) {
       writing itself; you can always attach a backup separately if it would help.</p>`;
 
   $$("[data-rkind]", el).forEach(b => b.onclick = () => { reportKind = b.dataset.rkind; renderSetPanel(); });
+  /* Copy first, then open. The other order loses the clipboard write in
+     browsers that treat the new tab as the end of the user gesture, and
+     landing in Discord with nothing to paste is worse than not going. */
+  if ($("#rpDiscord", el)) $("#rpDiscord", el).onclick = async () => {
+    const text = await buildReport();
+    const msg = $("#rpMsg", el);
+    let copied = false;
+    try { if (navigator.clipboard) { await navigator.clipboard.writeText(text); copied = true; } } catch (e) {}
+    window.open(DISCORD_INVITE, "_blank", "noopener");
+    msg.textContent = copied
+      ? "Copied. Paste it into " + DISCORD_CHANNEL + " in the tab that just opened."
+      : "The Discord is open in a new tab. Use “Copy the report”, then paste it into " + DISCORD_CHANNEL + ".";
+  };
   $("#rpCopy", el).onclick = async () => {
     const text = await buildReport();
     const msg = $("#rpMsg", el);

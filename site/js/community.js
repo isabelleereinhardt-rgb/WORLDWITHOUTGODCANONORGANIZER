@@ -175,7 +175,7 @@ async function renderLibrary(body, st) {
   }
   if (!rows.length) {
     parts.push(`<div class="empty-state" style="margin-top:26px">Nothing saved yet. Anything you
-      <b>✦ Save to library</b> from a book's page lands here, and shows a mark when the author
+      <b>Save to library</b> from a book's page lands here, and shows a mark when the author
       posts new chapters.</div>`);
   } else {
     parts.push(`<div class="rule-head${cont.length ? " mt" : ""}"><span class="k">Saved to read</span><span class="hr"></span>
@@ -435,7 +435,7 @@ async function spaceHome() {
 
     <div class="space-cards">
       <a class="space-card-lg" href="#/community/discover">
-        <div class="sc-glyph">❖</div>
+        <div class="sc-glyph">⌕</div>
         <div class="sc-name">Discover</div>
         <div class="sc-note">Everyone's shelves: browse by genre, tag, newest, most read.</div>
       </a>
@@ -450,7 +450,7 @@ async function spaceHome() {
         <div class="sc-note">Saved books, marked when new chapters arrive; pick up where you stopped.</div>
       </a>
       <a class="space-card-lg" href="#/community/rooms">
-        <div class="sc-glyph">✧</div>
+        <div class="sc-glyph">❝</div>
         <div class="sc-name">The Rooms</div>
         <div class="sc-note">Shared threads: the Lobby, the Writers' Room, prompts and signal boosts.</div>
       </a>

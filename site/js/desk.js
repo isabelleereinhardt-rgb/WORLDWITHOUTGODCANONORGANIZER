@@ -165,7 +165,7 @@ function recapMark(action) {
   const a = (action || "").toLowerCase();
   if (a.includes("delet") || a.includes("remov")) return { glyph: "−", dot: "var(--danger)" };
   if (a.includes("add") || a.includes("import") || a.includes("creat")) return { glyph: "+", dot: "var(--blush)" };
-  if (a.includes("back")) return { glyph: "✦", dot: "var(--gold)" };
+  if (a.includes("back")) return { glyph: "↓", dot: "var(--gold)" };
   return { glyph: "·", dot: "var(--blush2)" };
 }
 

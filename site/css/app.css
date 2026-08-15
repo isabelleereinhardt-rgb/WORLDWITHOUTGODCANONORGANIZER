@@ -20,7 +20,7 @@
   --panel2:#3c2a32;                 /* inputs / wells */
   --raise:#472f39;                  /* lifted chrome */
   --line:rgba(240,205,212,.16);     /* hairline */
-  --gold:#c9a15c;                   /* gilt: frames, kickers, ✦ */
+  --gold:#c9a15c;                   /* gilt: frames, kickers, rules */
   --blush:#f6ccd5;                  /* primary accent */
   --blush2:#e7b0bd;                 /* hover / deep accent */
   --ink:#f4e8e7;                    /* primary text */
@@ -152,7 +152,6 @@ kbd{font-family:var(--serif);font-size:9px;letter-spacing:.18em;background:trans
 .brand-mark{width:26px;height:26px;flex:none;display:grid;place-items:center;
   border:1px solid var(--gold);color:var(--gold);font-size:12px;border-radius:2px}
 .brand-mark svg{display:none}
-.brand-mark:before{content:"✦"}
 .brand-text{display:flex;flex-direction:column;line-height:1.05;font-family:var(--serif);
   font-style:italic;font-size:19px;letter-spacing:.01em}
 .brand-text small{font-style:normal;font-size:9px;color:var(--dim);font-family:var(--serif);
@@ -378,7 +377,6 @@ h3{font-size:22px}
 
 .assistant-context{display:flex;align-items:center;gap:7px;background:var(--panel2);
   border:1px solid var(--line);border-radius:2px;padding:5px 9px;font-size:13.5px;color:var(--dim)}
-.ctx-glyph{color:var(--gold)}
 .ctx-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctx-text a{color:var(--ink)}
 .ctx-x{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:11px}
@@ -386,7 +384,6 @@ h3{font-size:22px}
 
 .assistant-ask{display:flex;align-items:center;gap:8px;background:var(--panel2);
   border:1px solid var(--blush2);border-radius:2px;padding:8px 10px}
-.aa-glyph{color:var(--blush);flex:none}
 .assistant-ask input{flex:1;min-width:0;background:transparent;border:none;color:var(--ink);
   font-family:var(--sans);font-size:14px}
 .assistant-ask input:focus{outline:none}
@@ -422,7 +419,6 @@ h3{font-size:22px}
   border:none;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);
   font-family:var(--sans);font-size:14.5px;cursor:pointer}
 .recent-row:hover{color:var(--blush)}
-.rr-glyph{color:var(--blush2);font-size:10px;flex:none}
 
 /* one question and its answer */
 .a-turn{display:flex;flex-direction:column;gap:12px}
@@ -793,8 +789,6 @@ h3{font-size:22px}
   background:var(--panel);padding:10px 12px;cursor:pointer;color:var(--ink)}
 .pers-card:hover{border-color:var(--blush)}
 .pers-card.on{border-color:var(--blush);background:var(--chip)}
-.pc-glyph{color:var(--dim);flex:none;font-size:12px;padding-top:3px}
-.pers-card.on .pc-glyph{color:var(--blush)}
 .pc-name{display:block;font-family:var(--serif);font-style:italic;font-size:17px}
 .pc-sample{display:block;font-size:13px;color:var(--dim);line-height:1.4;margin-top:2px}
 
@@ -1419,7 +1413,6 @@ a.otd-row:hover{color:var(--blush)}
 .back-row{display:flex;gap:9px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);
   color:var(--ink);text-decoration:none;font-size:14.5px}
 .back-row:hover{color:var(--blush)}
-.br-glyph{flex:none;color:var(--blush2);font-size:10px}
 .br-body{flex:1;min-width:0}
 .br-where{display:block;font-family:var(--serif);font-size:9px;letter-spacing:.18em;
   text-transform:uppercase;color:var(--dim);margin-top:2px}
@@ -1688,14 +1681,13 @@ body.reader-mode .lucky-stage{display:none}
 .acct-k{display:block;font-family:var(--serif);font-size:9px;letter-spacing:.18em;
   text-transform:uppercase;color:var(--gold);margin-bottom:2px}
 
-/* ---------- toast: bottom-right, gold-framed, ✦ glyph, manual ✕ ---------- */
+/* ---------- toast: bottom-right, gold-framed, manual ✕ ---------- */
 .toast-stack{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;
   gap:8px;align-items:flex-end;pointer-events:none}
 .toast{display:flex;align-items:flex-start;gap:10px;min-width:220px;max-width:340px;
   background:var(--panel);border:1px solid var(--gold);border-radius:2px;box-shadow:var(--shadow);
   padding:11px 12px 11px 13px;pointer-events:auto;
   animation:toast-in .18s ease-out}
-.toast .tglyph{color:var(--gold);font-size:11px;line-height:1.5;flex:none}
 .toast .tmsg{flex:1;font-size:14px;line-height:1.45;color:var(--ink)}
 .toast .tx{flex:none;background:transparent;border:none;color:var(--dim);cursor:pointer;
   font-size:12px;line-height:1;padding:2px 0 0 2px}
@@ -1889,7 +1881,6 @@ body.reader-mode .lucky-stage{display:none}
 .a-model{border-left:2px solid var(--gold);padding:10px 0 10px 14px;margin:12px 0}
 .a-model.failed{border-left-color:var(--dim)}
 .a-model .am-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
-.a-model .am-glyph{color:var(--gold)}
 .a-model .am-who{font-family:var(--serif);font-size:9px;letter-spacing:.2em;
   text-transform:uppercase;color:var(--gold)}
 .a-model .am-state{font-family:var(--serif);font-size:9px;letter-spacing:.16em;

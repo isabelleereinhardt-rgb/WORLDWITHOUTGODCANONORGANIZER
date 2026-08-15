@@ -336,11 +336,11 @@ function renderSettings() {
     <div class="rule-head mt"><span class="k">How it is answered</span><span class="hr"></span></div>
     <div class="pers-grid">
       <button class="pers-card${o.difficulty === "easy" ? " on" : ""}" data-qdiff="easy">
-        <span class="pc-glyph">✧</span><span><span class="pc-name">Multiple choice</span>
+        <span><span class="pc-name">Multiple choice</span>
         <span class="pc-sample">Four options, one right. The wrong ones are drawn from your other entries,
           so they are plausible rather than silly.</span></span></button>
       <button class="pers-card${o.difficulty === "hard" ? " on" : ""}" data-qdiff="hard">
-        <span class="pc-glyph">✦</span><span><span class="pc-name">Type it yourself</span>
+        <span><span class="pc-name">Type it yourself</span>
         <span class="pc-sample">Recall from memory, then reveal what the canon says and mark yourself.
           Harder, and much better at finding gaps.</span></span></button>
     </div>

@@ -168,7 +168,7 @@ function render() {
       <div class="tl-list">
         ${sorted.map(ev => `<div class="tl-row" data-open="${ev.id}">
           <span class="tr-year">${esc(fmtDate(ev))}</span>
-          <span class="tr-mark">✦</span>
+          <span class="tr-mark">·</span>
           <span class="tr-body"><span class="tr-title">${esc(ev.label)}</span>
             ${ev.note ? `<span class="tr-note">${esc(ev.note.slice(0, 140))}${ev.note.length > 140 ? "…" : ""}</span>` : ""}</span>
           <button class="a-chip" data-del="${ev.id}">Delete</button>

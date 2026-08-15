@@ -104,7 +104,11 @@ function section(t) { results.push("\n" + t); }
   check("capability tour", /everything i can do/i.test(r.text) && /remember new facts/i.test(r.text), r.text.slice(0, 200));
 
   r = await ask("surprise me", { waitFor: ".spark-line" });
-  check("random spark", /✦/.test(r.text) && r.text.length > 60);
+  /* Checks the line said something, not that it was decorated. The old
+     assertion was on the ✦ in front of it, which made deleting an
+     ornament look like breaking the feature. */
+  const sparkText = (await page.locator(".spark-line").last().innerText()).trim();
+  check("random spark", sparkText.length > 20 && r.text.length > 60, sparkText);
 
   // --- learning without an API ---
   r = await ask("remember: Enyokia is terrified of open water");

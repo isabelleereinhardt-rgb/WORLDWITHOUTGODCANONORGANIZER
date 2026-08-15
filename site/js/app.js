@@ -835,7 +835,7 @@ function viewEntry(id) {
     </div>
     <div class="entry-actions">
       ${e._user ? `<button class="btn sm" id="editEntry">Edit this note</button>` : ""}
-      <button class="btn ${e._user ? "ghost " : ""}sm" id="askAssistant">✦ Ask about this</button>
+      <button class="btn ${e._user ? "ghost " : ""}sm" id="askAssistant">Ask about this</button>
       ${pdfLink}${fileLink}
       <button class="btn ghost sm" id="copyText">Copy text</button>
       <button class="btn ghost sm" id="readAloud">Read aloud</button>
@@ -877,7 +877,6 @@ function viewEntry(id) {
           <div class="rule-head"><span class="k">Mentioned in</span><span class="hr"></span>
             <span class="meta">${backs.length}</span></div>
           ${backs.slice(0, 12).map(b => `<a class="back-row" href="#/entry/${b.id}">
-            <span class="br-glyph">✧</span>
             <span class="br-body">${esc(b.title)}<span class="br-where">${esc(b.category)}</span></span></a>`).join("")}
         </div>` : ""}
       </aside>
@@ -1421,7 +1420,7 @@ function wranglingBanner() {
   if (!E || !E.ready()) return "";
   const waiting = E.candidates();
   if (!waiting.length && !queueOpen) {
-    return `<div class="wq-bar"><button class="btn ghost sm" id="wqFind">✦ Look for names I haven't filed</button></div>`;
+    return `<div class="wq-bar"><button class="btn ghost sm" id="wqFind">Look for names I haven't filed</button></div>`;
   }
   if (!queueOpen) {
     return `<div class="wq-bar">
@@ -1580,7 +1579,7 @@ function viewImport() {
           · a backup <b>.json</b> restores everything</div>
         <div class="dz-actions">
           <button class="btn sm" id="chooseFiles">Choose files</button>
-          <button class="btn ghost sm" id="dictateLore">✧ Dictate instead</button>
+          <button class="btn ghost sm" id="dictateLore">Dictate instead</button>
         </div>
       </div>
       <input type="file" id="fileInput" aria-label="Choose files to import" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
@@ -2075,7 +2074,7 @@ function renderSearch(q) {
      this, assembled before you have to open anything. */
   const brief = briefTextFor(q, results);
   let html = brief ? `<div class="sr-brief">
-      <div class="sr-brief-k">✦ Brief</div>
+      <div class="sr-brief-k">Brief</div>
       <p>${brief}</p>
       <a class="sr-fulllink" href="#/search/${encodeURIComponent(q)}">Open full results →</a>
     </div>` : "";
@@ -2554,7 +2553,7 @@ function assistantIdle() {
     ${hist.length ? `<div class="a-sect">
       <div class="a-sect-k">Recent lookups</div>
       <div class="recent-list">${hist.map(h =>
-        `<button class="recent-row" data-recent="${esc(h)}"><span class="rr-glyph">✧</span>${esc(h)}</button>`).join("")}</div>
+        `<button class="recent-row" data-recent="${esc(h)}">${esc(h)}</button>`).join("")}</div>
     </div>` : ""}
     ${luckyLedgerHtml()}`;
   bindAssistantChips($("#assistantBody"));
@@ -2659,7 +2658,7 @@ async function runAction(q, plan) {
   const turn = document.createElement("div");
   turn.className = "a-turn";
   turn.innerHTML = `<div class="a-you">${esc(q)}</div>
-    <div class="a-them"><div class="act-card working"><div class="ac-k">✦ Working…</div></div></div>`;
+    <div class="a-them"><div class="act-card working"><div class="ac-k">Working…</div></div></div>`;
   body.appendChild(turn);
   turn.scrollIntoView({ block: "start", behavior: "smooth" });
 
@@ -2693,8 +2692,7 @@ async function enrichWithModel(turn, q, local) {
   if (!them) return;
   const pending = document.createElement("div");
   pending.className = "a-model pending";
-  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
-    <span class="am-who">${esc(CodexAI.label())}</span>
+  pending.innerHTML = `<div class="am-head"><span class="am-who">${esc(CodexAI.label())}</span>
     <span class="am-state">reading your entries<span class="a-dots"><i>.</i><i>.</i><i>.</i></span></span></div>`;
   them.insertBefore(pending, them.querySelector(".a-actions"));
 
@@ -2720,8 +2718,7 @@ async function enrichWithModel(turn, q, local) {
     if (!live) {
       // first words: swap the waiting header for a writing one
       pending.className = "a-model streaming";
-      pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
-        <span class="am-who">${esc(CodexAI.label())}</span>
+      pending.innerHTML = `<div class="am-head"><span class="am-who">${esc(CodexAI.label())}</span>
         <span class="am-state">writing<span class="a-dots"><i>.</i><i>.</i><i>.</i></span></span></div>
         <div class="am-text"></div>`;
       live = { el: pending, text: "" };
@@ -2742,8 +2739,7 @@ async function enrichWithModel(turn, q, local) {
     // notice lands in the turn and muddies the text
     rail.chat.push({ role: "assistant", content: turnPlainText(turn) });
     pending.className = "a-model failed";
-    pending.innerHTML = `<div class="am-head"><span class="am-glyph">✧</span>
-      <span class="am-who">${esc(CodexAI.label())} could not answer</span></div>
+    pending.innerHTML = `<div class="am-head"><span class="am-who">${esc(CodexAI.label())} could not answer</span></div>
       <div class="am-why">${esc(r.why)} The answer above was worked out on this device instead.</div>`;
     return;
   }
@@ -2755,8 +2751,7 @@ async function enrichWithModel(turn, q, local) {
   const parsed = window.CodexActions
     ? CodexActions.extractProposals(r.text) : { text: r.text, plans: [] };
   pending.className = "a-model";
-  pending.innerHTML = `<div class="am-head"><span class="am-glyph">✦</span>
-    <span class="am-who">${esc(r.model || CodexAI.label())}</span>
+  pending.innerHTML = `<div class="am-head"><span class="am-who">${esc(r.model || CodexAI.label())}</span>
     <span class="am-state">${r.sent
       ? "from " + r.sent + " of your entries"
       : "no matching entries; answered from the thread"}${
@@ -2892,8 +2887,7 @@ function setAssistantContext(label, href) {
   if (!el) return;
   if (!label) { el.hidden = true; el.innerHTML = ""; return; }
   el.hidden = false;
-  el.innerHTML = `<span class="ctx-glyph">❖</span>
-    <span class="ctx-text">Reading <a href="${href || "#"}">${esc(label)}</a></span>
+  el.innerHTML = `<span class="ctx-text">Reading <a href="${href || "#"}">${esc(label)}</a></span>
     <button class="ctx-x" title="Stop using this as context">✕</button>`;
   el.querySelector(".ctx-x").onclick = () => setAssistantContext(null);
 }
@@ -2997,8 +2991,7 @@ function restoreAll() {
 }
 
 /* ---------- toast ----------
-   Bottom-right gold-framed panel with a ✦ glyph, ~5s auto-dismiss and a
-   manual ✕. Toasts stack rather than replacing one another, so a burst
+   Bottom-right gold-framed panel, ~5s auto-dismiss and a manual ✕. Toasts stack rather than replacing one another, so a burst
    (e.g. importing several files) doesn't swallow all but the last. */
 function toast(msg) {
   let stack = $("#toastStack");
@@ -3024,7 +3017,7 @@ function toast(msg) {
   }
   const el = document.createElement("div");
   el.className = "toast";
-  el.innerHTML = `<span class="tglyph">✦</span><span class="tmsg"></span>
+  el.innerHTML = `<span class="tmsg"></span>
     <button class="tx" title="Dismiss" aria-label="Dismiss">✕</button>`;
   el.querySelector(".tmsg").textContent = msg;   // textContent: messages can carry user text
   let done = false;
