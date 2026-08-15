@@ -1265,6 +1265,73 @@ function conflictsHtml() {
     ${list.length > 12 ? `<p class="faint">…and ${list.length - 12} more.</p>` : ""}
   </div>`;
 }
+/* ---------- reading the prose for what values cannot show ----------
+   The comparison above is free and runs constantly. This one costs
+   money and runs when asked, so it is a button with the price on it:
+   which record, how many passages, and to whom they go. */
+let narrativeOut = "";
+function narrativeHtml() {
+  const AI = window.CodexAI, K = window.CodexContinuity;
+  if (!K || !K.narrative) return "";
+  const names = (window.CodexEntities && CodexEntities.ready())
+    ? CodexEntities.confirmed().filter(r => (r.seen || 0) >= 4).slice(0, 60) : [];
+  if (!names.length) return "";
+  const live = AI && AI.on();
+  return `<div class="nq">
+    <div class="nq-head">Read the prose itself</div>
+    <p class="faint">The check above compares the facts you declare. Some disagreements are not
+      values at all — never held a sword in one chapter, practised with one in the next — and
+      those need reading rather than comparing.
+      ${live ? `Passages go to <b>${esc(AI.label())}</b>, and you are billed by them.`
+             : `That needs a model: connect your own key in <a href="#/settings/assistant">Settings</a>.
+                Everything else here stays on this device.`}</p>
+    <div class="nq-row">
+      <select id="nqWho" ${live ? "" : "disabled"}>
+        ${names.map(r => `<option value="${esc(r.name)}">${esc(r.name)} · ${r.seen} mentions</option>`).join("")}
+      </select>
+      <button class="btn sm" id="nqGo" ${live ? "" : "disabled"}>Read for contradictions</button>
+    </div>
+    <div id="nqOut">${narrativeOut}</div>
+  </div>`;
+}
+function bindNarrative() {
+  const go = $("#nqGo");
+  if (!go) return;
+  go.onclick = async () => {
+    const who = $("#nqWho").value;
+    const out = $("#nqOut");
+    go.disabled = true;
+    out.innerHTML = `<p class="faint">Reading everything about ${esc(who)}…</p>`;
+    const r = await window.CodexContinuity.narrative(who);
+    go.disabled = false;
+    if (!r.ok) { narrativeOut = `<p class="nq-bad">${esc(r.why)}</p>`; out.innerHTML = narrativeOut; return; }
+    if (!r.findings.length) {
+      /* Saying how much was read makes "nothing found" mean something.
+         And a dropped finding is worth admitting: it is the guard doing
+         its job, not a silence. */
+      narrativeOut = `<p class="faint">Nothing in the ${r.passages || 0} passages about
+        ${esc(who)} contradicts anything else in them.${
+        r.dropped ? ` (${r.dropped} suggestion${r.dropped === 1 ? "" : "s"} came back quoting
+        words that are not in your writing, so ${r.dropped === 1 ? "it was" : "they were"} discarded.)` : ""}</p>`;
+      out.innerHTML = narrativeOut;
+      return;
+    }
+    narrativeOut = r.findings.map(f => `<div class="clash">
+      <div class="clash-head">${esc(who)} · ${esc(f.about)}</div>
+      <div class="clash-two">
+        <span class="clash-side">“${esc(f.a.quote)}”<em>${esc(f.a.entry)}</em></span>
+        <span class="clash-vs">and</span>
+        <span class="clash-side">“${esc(f.b.quote)}”<em>${esc(f.b.entry)}</em></span>
+      </div>
+      <div class="clash-ask">${esc(f.why)}</div>
+    </div>`).join("") +
+      `<p class="faint">Both sides were checked against your own words before being shown${
+        r.dropped ? `; ${r.dropped} other suggestion${r.dropped === 1 ? "" : "s"} quoted
+        writing that is not there and ${r.dropped === 1 ? "was" : "were"} discarded` : ""}.</p>`;
+    out.innerHTML = narrativeOut;
+  };
+}
+
 function bindConflicts() {
   $$(".cf-row").forEach(row => {
     $$("[data-cf-act]", row).forEach(b => b.onclick = () => {
@@ -1398,6 +1465,7 @@ function renderIndex() {
     </div>
     <p class="muted">Every cross-linked name in your world. Click any to gather its mentions and a summary.</p>
     ${conflictsHtml()}
+    ${narrativeHtml()}
     ${wranglingBanner()}
     ${indexSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${total && indexSelected.size === total ? "checked" : ""}> Select all</label>
@@ -1412,6 +1480,7 @@ function renderIndex() {
 
   bindWrangling();
   bindConflicts();
+  bindNarrative();
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { indexSelectMode = !indexSelectMode; if (!indexSelectMode) indexSelected.clear(); renderIndex(); };
   if (!indexSelectMode) { $$(".chip[data-subject]", view).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject)); return; }
 

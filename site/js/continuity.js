@@ -361,5 +361,150 @@ function canonConflicts(opts) {
   return out.sort((a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field));
 }
 
-window.CodexContinuity = { check, disagrees, canonConflicts, SINGLE };
+/* ============================================================
+   THE NARRATIVE TIER
+
+   Everything above compares values: two ages, two seats, two founders.
+   That catches the bulk of real continuity bugs and it costs nothing,
+   because a declared fact is a value and values can be compared by a
+   table scan.
+
+   Prose is not a value. "She had never held a sword" and "the sword
+   was familiar in her hand" contradict each other and no amount of
+   string comparison will say so. That needs a reader, which is what a
+   model is for — and it is why this tier exists separately, runs on
+   demand, and is the only part of this app that costs money to use.
+
+   The danger is obvious and it is the reason for the verification step
+   below. A model asked to find contradictions will find them, whether
+   or not they are there, and a confidently reported contradiction that
+   is not in the text is worse than missing a real one: you would go
+   looking for it, not find it, and stop trusting the tool. So nothing
+   it says is shown until the quotes it gives are checked against the
+   passages that were actually sent. A finding whose evidence cannot be
+   located in the writer's own words is dropped, silently and without
+   argument.
+   ============================================================ */
+
+/* Passages for one record: the paragraphs across the canon that name
+   it, kept whole and labelled with where they came from. */
+function passagesFor(name, opts) {
+  opts = opts || {};
+  const C = window.Codex, E = window.CodexEntities;
+  if (!C) return [];
+  const rec = E && E.ready() ? E.resolve(name) : null;
+  const entries = rec
+    ? C.DB.entries.filter(e => E.notesMentioning(rec.id).indexOf(e.id) > -1)
+    : C.mentionsOf(name, null, true);
+  const names = rec ? E.namesOf(rec) : [name];
+  const out = [];
+  entries.slice(0, opts.maxEntries || 8).forEach(e => {
+    /* An entry titled for her is about her the whole way down, pronouns
+       included. Requiring her name in every paragraph threw away "She
+       kept the archive for eleven years without once leaving the
+       grounds" — which is exactly the kind of line a contradiction
+       turns on. Elsewhere, the name has to be there. */
+    const isHers = names.some(n => String(e.title || "").toLowerCase() === String(n).toLowerCase());
+    const paras = String(e.text || "").split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+    paras.forEach((p, i) => {
+      if (p.length < 40 || p.length > 1200) return;
+      if (!isHers && !names.some(n => p.toLowerCase().includes(String(n).toLowerCase()))) return;
+      if (out.length < (opts.maxPassages || 24)) {
+        out.push({ n: out.length + 1, entry: e.title, entryId: e.id, para: i, text: p });
+      }
+    });
+  });
+  return out;
+}
+
+const NARRATIVE_PROMPT = [
+  "Below are passages from one writer's own manuscript, all of them about {{NAME}}.",
+  "",
+  "Find places where two passages cannot both be true of {{NAME}}: a fact stated one way and",
+  "then another, an ability they have and then do not, a place they are in and cannot be, an",
+  "order of events that does not work.",
+  "",
+  "Rules, in order of importance:",
+  "- Quote both sides EXACTLY as written, word for word from the passages. Do not paraphrase,",
+  "  tidy, shorten or join. A quote that is not in the passages is worse than no finding at all.",
+  "- Give the passage number for each side.",
+  "- If two passages merely differ in emphasis, mood or detail, that is not a contradiction.",
+  "  Characters change, lie, and are described differently by different narrators. Only report",
+  "  what cannot both be true.",
+  "- If you find nothing, say so. An empty answer is a good answer.",
+  "",
+  "Answer as JSON and nothing else, in this shape:",
+  '{"findings":[{"about":"what the disagreement is about, three words",',
+  '"a":{"n":1,"quote":"exact words"},"b":{"n":4,"quote":"exact words"},',
+  '"why":"one sentence"}]}',
+].join("\n");
+
+function parseFindings(text) {
+  const raw = String(text || "");
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
+  const body = fenced ? fenced[1] : raw;
+  const at = body.indexOf("{");
+  if (at < 0) return [];
+  try {
+    const j = JSON.parse(body.slice(at, body.lastIndexOf("}") + 1));
+    return Array.isArray(j.findings) ? j.findings : [];
+  } catch (e) { return []; }
+}
+
+/* The guard. A quote must be findable in the passage it claims to come
+   from — allowing for whitespace, because a model will re-wrap a line
+   without meaning anything by it, but not for rewording. */
+function loose(s) { return String(s || "").replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim().toLowerCase(); }
+function verifyFinding(f, passages) {
+  if (!f || !f.a || !f.b) return null;
+  const find = side => {
+    const q = loose(side.quote);
+    if (q.length < 8) return null;
+    const named = passages.find(p => p.n === Number(side.n));
+    if (named && loose(named.text).includes(q)) return named;
+    /* A misnumbered passage is a slip; a quote that is nowhere at all
+       is an invention, and only the second one disqualifies it. */
+    return passages.find(p => loose(p.text).includes(q)) || null;
+  };
+  const A = find(f.a), B = find(f.b);
+  if (!A || !B) return null;
+  if (A === B && loose(f.a.quote) === loose(f.b.quote)) return null;
+  return {
+    about: String(f.about || "").slice(0, 60),
+    why: String(f.why || "").slice(0, 240),
+    a: { quote: String(f.a.quote), entry: A.entry, entryId: A.entryId },
+    b: { quote: String(f.b.quote), entry: B.entry, entryId: B.entryId },
+  };
+}
+
+/* On demand, never continuously: it costs money and it is the only
+   thing here that does. */
+async function narrative(name, opts) {
+  opts = opts || {};
+  const AI = window.CodexAI;
+  if (!AI || !AI.on()) {
+    return { ok: false, why: "This one needs a model. Connect your own key in Settings; the rest of the checking happens here on the device.", findings: [] };
+  }
+  const passages = passagesFor(name, opts);
+  if (passages.length < 2) {
+    return { ok: true, findings: [], passages: passages.length,
+      why: "There is not enough written about " + name + " yet for two passages to disagree." };
+  }
+  const question = NARRATIVE_PROMPT.replace(/\{\{NAME\}\}/g, name);
+  const asEntries = passages.map(p => ({ id: p.entryId, title: p.entry, category: "passage " + p.n, text: p.text }));
+  let r;
+  try { r = await AI.ask(question, asEntries, { length: "full" }); }
+  catch (e) { return { ok: false, why: (e && e.message) || "That request did not go through.", findings: [] }; }
+  if (!r.ok) return { ok: false, why: r.why || "The model did not answer.", findings: [] };
+
+  const claimed = parseFindings(r.text);
+  const verified = claimed.map(f => verifyFinding(f, passages)).filter(Boolean);
+  return {
+    ok: true, findings: verified, passages: passages.length,
+    claimed: claimed.length, dropped: claimed.length - verified.length,
+  };
+}
+
+window.CodexContinuity = { check, disagrees, canonConflicts, narrative,
+  passagesFor, parseFindings, verifyFinding, SINGLE };
 })();

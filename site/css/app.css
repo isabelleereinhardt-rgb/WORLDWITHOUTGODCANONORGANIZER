@@ -2498,3 +2498,13 @@ a.a-chip{text-decoration:none;display:inline-block}
 @media(max-width:860px){
   #entryBody [data-para].has-note::before{left:auto;right:0;top:-14px;text-align:left}
 }
+
+/* ---- the narrative tier: on demand, and it says what it costs ---- */
+.nq{border:1px solid var(--line);background:var(--panel);padding:14px 16px;margin:16px 0 8px}
+.nq-head{font-family:var(--serif);font-size:16px;margin-bottom:4px}
+.nq-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0 4px}
+.nq-row select{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:2px;padding:6px 8px;font:inherit;font-size:13px;max-width:100%}
+.nq-row select:disabled{opacity:.55}
+.nq-bad{color:#e0a0a0;font-size:13px}
+#nqOut .clash{margin-top:12px}
