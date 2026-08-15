@@ -1383,8 +1383,15 @@ a.otd-row:hover{color:var(--blush)}
 .entry-main{min-width:0}
 /* the design's measure: about 68 characters a line at 17px */
 .entry-main p{max-width:68ch;font-size:17px;line-height:1.7}
+/* A floated drop cap is taller than the two lines of the paragraph it
+   opens on a short first paragraph, so the float ran on past the end of
+   that paragraph and the NEXT one wrapped around it — text stepping
+   sideways for no reason a reader could see. Clearing the paragraph
+   after it keeps the letter inside the paragraph it belongs to. */
 .entry-main>p:first-of-type:first-letter{float:left;font-family:var(--serif);font-size:58px;line-height:.86;
   padding:4px 9px 0 0;color:var(--blush)}
+.entry-main>p:first-of-type{min-height:52px}
+.entry-main>p:first-of-type+*{clear:left}
 .entry-side{min-width:0;display:flex;flex-direction:column;gap:22px;position:sticky;top:16px}
 .glance-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px;line-height:1.4}
 .glance-row:last-child{border-bottom:none}
@@ -2469,3 +2476,25 @@ a.a-chip{text-decoration:none;display:inline-block}
 .clash-side em{display:block;font-size:11px;color:var(--dim);font-style:normal;margin-top:2px}
 .clash-vs{align-self:center;color:var(--dim);font-family:var(--serif);font-style:italic}
 .clash-ask{margin-top:8px;font-size:12.5px;color:var(--dim);font-family:var(--serif);font-style:italic}
+
+/* ---- margin notes pinned to the line they are about ----
+   Wattpad's inline commenting, borrowed for one writer reading her own
+   draft: a note anchored to a paragraph rather than to the entry is a
+   note you can act on, because you can see what it is about. */
+#entryBody [data-para]{position:relative}
+#entryBody [data-para].has-note{box-shadow:inset 2px 0 0 var(--gold)}
+#entryBody [data-para].has-note::before{
+  content:"✎" attr(data-notes);
+  position:absolute;left:-30px;top:2px;width:24px;text-align:right;
+  font-size:11px;letter-spacing:.02em;color:var(--gold);opacity:.85;
+  font-family:var(--sans)}
+#entryBody.marks-off [data-para].has-note{box-shadow:none}
+#entryBody.marks-off [data-para].has-note::before{display:none}
+#entryBody [data-para].para-flash{background:var(--panel);
+  box-shadow:inset 2px 0 0 var(--gold), 0 0 0 8px var(--panel)}
+.mr-anchor{margin:3px 0 0 22px;font-family:var(--serif);font-style:italic;
+  font-size:12.5px;color:var(--dim);border-left:1px solid var(--line);padding-left:8px}
+/* the gutter glyph needs somewhere to live on a narrow screen */
+@media(max-width:860px){
+  #entryBody [data-para].has-note::before{left:auto;right:0;top:-14px;text-align:left}
+}

@@ -532,8 +532,18 @@ function crossLink(html) {
 
 function renderBody(entry) {
   const lines = entry.text.split("\n");
-  let out = [], facts = [], para = [], titleSeen = 0;
-  const flushPara = () => { if (para.length) { const t = para.join(" ").trim(); if (t) out.push(`<p>${crossLink(esc(t))}</p>`); para = []; } };
+  let out = [], facts = [], para = [], titleSeen = 0, paraNo = 0;
+  /* Each paragraph is numbered as it is rendered, so a note can be tied
+     to the paragraph it is about rather than to the entry as a whole.
+     The number is only half the anchor — the paragraph's own words are
+     the other half, because revising an entry shifts every number after
+     the edit and an index alone would quietly point at the wrong line. */
+  const flushPara = () => {
+    if (!para.length) return;
+    const t = para.join(" ").trim();
+    if (t) out.push(`<p data-para="${paraNo++}">${crossLink(esc(t))}</p>`);
+    para = [];
+  };
   const flushFacts = () => { if (facts.length) { out.push(`<dl class="facts">${facts.join("")}</dl>`); facts = []; } };
   for (let raw of lines) {
     const line = raw.trim();
@@ -828,7 +838,7 @@ function viewEntry(id) {
     </div>
 
     <div class="entry-grid">
-      <div class="entry-main reading">
+      <div class="entry-main reading" id="entryBody">
         ${body}
         ${linksHtml}
         ${(e.images || []).length ? `<div class="rule-head mt"><span class="k">Plates</span><span class="hr"></span>
@@ -850,9 +860,11 @@ function viewEntry(id) {
 
         <div class="margin-card">
           <div class="rule-head"><span class="k">Your margin notes</span><span class="hr"></span>
+            <button class="a-chip" id="marginShow" title="Hide the marks in the text for a clean read">Hide marks</button>
             <button class="a-chip" id="addMargin">+ Note</button></div>
           <div id="marginList"></div>
-          <p class="faint margin-foot">Notes stay out of the entry itself, and out of exports.</p>
+          <p class="faint margin-foot">Select a line before pressing + Note to pin one to it.
+            Notes stay out of the entry itself, and out of exports.</p>
         </div>
 
         ${backs.length ? `<div>
@@ -871,6 +883,26 @@ function viewEntry(id) {
   bindBanner(e);
   renderMargins(e.id);
   $("#addMargin").onclick = () => addMargin(e.id);
+  /* Annotations you cannot turn off wreck a read, so the marks come off
+     in one click and stay off until you say otherwise. */
+  const marksBtn = $("#marginShow");
+  if (marksBtn) {
+    const apply = () => {
+      const on = localStorage.getItem("codex.marginMarks") !== "off";
+      const host = $("#entryBody");
+      if (host) host.classList.toggle("marks-off", !on);
+      /* Labelled by what clicking does, not by what is currently true:
+         "Marks on" could mean either, and a toggle you have to test to
+         understand is a toggle you press twice. */
+      marksBtn.textContent = on ? "Hide marks" : "Show marks";
+    };
+    apply();
+    marksBtn.onclick = () => {
+      const on = localStorage.getItem("codex.marginMarks") !== "off";
+      try { localStorage.setItem("codex.marginMarks", on ? "off" : "on"); } catch (err) {}
+      apply();
+    };
+  }
   if ($("#flagCheck")) $("#flagCheck").onclick = () => { openAssistant(); askAssistant("check consistency for " + e.title); };
   $("#askAssistant").onclick = () => { openAssistant(); assistantLookup(e.title); };
   if ($("#editEntry")) $("#editEntry").onclick = () => { entryEditing = e.id; viewEntry(e.id); };
@@ -988,17 +1020,45 @@ async function loadMargins(entryId) {
     return (await CodexStore.all("margins")).filter(m => m.entryId === entryId).sort((a, b) => a.at - b.at);
   } catch (err) { return []; }
 }
+/* ---------- finding the paragraph a note was left on ----------
+   The number is the fast path and the quote is the truth. Revise an
+   entry and every paragraph after the edit shifts by one, so a note
+   anchored on an index alone would end up pointing at a line it was
+   never about — which is worse than losing it, because you would
+   believe it. If the numbered paragraph no longer contains the words
+   the note was left beside, the words win. */
+function paraElements() { return $$("#entryBody [data-para]"); }
+function anchorFor(m) {
+  const paras = paraElements();
+  if (!paras.length) return null;
+  const quote = String(m.quote || "").trim().toLowerCase();
+  const byIndex = paras[m.paraIndex];
+  if (byIndex && (!quote || byIndex.textContent.toLowerCase().includes(quote))) return byIndex;
+  if (!quote) return byIndex || null;
+  const moved = paras.find(p => p.textContent.toLowerCase().includes(quote));
+  return moved || byIndex || null;
+}
+
 async function renderMargins(entryId) {
   const el = $("#marginList");
   if (!el) return;
   const list = await loadMargins(entryId);
-  el.innerHTML = list.length ? list.map((m, i) => `<div class="margin-row${m.done ? " done" : ""}">
-    <div class="mr-top"><span class="mr-n">${i + 1}</span><span class="mr-text">${esc(m.text)}</span></div>
-    <div class="mr-foot"><span class="mr-when">${new Date(m.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
-      <span class="hr"></span>
-      <button class="a-chip" data-mdone="${esc(m.id)}">${m.done ? "Reopen" : "Resolve"}</button>
-      <button class="a-chip" data-mdel="${esc(m.id)}">Remove</button></div>
-  </div>`).join("") : `<p class="faint" style="font-size:13px">Nothing noted yet.</p>`;
+  el.innerHTML = list.length ? list.map((m, i) => {
+    const anchored = m.quote ? `<div class="mr-anchor">“${esc(String(m.quote).slice(0, 90))}”</div>` : "";
+    return `<div class="margin-row${m.done ? " done" : ""}" data-mrow="${esc(m.id)}">
+      <div class="mr-top"><span class="mr-n">${i + 1}</span><span class="mr-text">${esc(m.text)}</span></div>
+      ${anchored}
+      <div class="mr-foot"><span class="mr-when">${new Date(m.at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+        <span class="hr"></span>
+        ${m.quote ? `<button class="a-chip" data-mgo="${esc(m.id)}">Show me</button>` : ""}
+        <button class="a-chip" data-mdone="${esc(m.id)}">${m.done ? "Reopen" : "Resolve"}</button>
+        <button class="a-chip" data-mdel="${esc(m.id)}">Remove</button></div>
+    </div>`;
+  }).join("") : `<p class="faint" style="font-size:13px">Nothing noted yet. Select a line in the entry
+    and press <b>+ Note</b> to pin one to it.</p>`;
+
+  markAnnotated(list);
+
   $$("[data-mdone]", el).forEach(b => b.onclick = async () => {
     const m = await CodexStore.get("margins", b.dataset.mdone);
     if (m) { m.done = !m.done; await CodexStore.put("margins", m); renderMargins(entryId); }
@@ -1007,14 +1067,61 @@ async function renderMargins(entryId) {
     await CodexStore.del("margins", b.dataset.mdel);
     renderMargins(entryId);
   });
-}
-async function addMargin(entryId) {
-  const text = prompt("A note to yourself about this entry:");
-  if (!text || !text.trim()) return;
-  await CodexStore.put("margins", {
-    id: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    entryId, text: text.trim(), at: Date.now(), done: false,
+  $$("[data-mgo]", el).forEach(b => b.onclick = () => {
+    const m = list.find(x => x.id === b.dataset.mgo);
+    const p = m && anchorFor(m);
+    if (!p) { toast("That line isn't in the entry any more"); return; }
+    p.scrollIntoView({ behavior: "smooth", block: "center" });
+    p.classList.add("para-flash");
+    setTimeout(() => p.classList.remove("para-flash"), 1400);
   });
+}
+
+/* A glyph in the gutter of every annotated paragraph, so the notes are
+   visible while reading rather than only in a list beside it. Kept
+   dismissible, because annotations you cannot turn off wreck a read. */
+function markAnnotated(list) {
+  paraElements().forEach(p => {
+    p.classList.remove("has-note");
+    p.removeAttribute("data-notes");
+  });
+  const counts = new Map();
+  list.forEach(m => {
+    if (!m.quote && m.paraIndex == null) return;
+    const p = anchorFor(m);
+    if (!p) return;
+    counts.set(p, (counts.get(p) || 0) + 1);
+  });
+  counts.forEach((n, p) => { p.classList.add("has-note"); p.setAttribute("data-notes", n); });
+}
+
+/* Where the note belongs: whatever you had selected, or the paragraph
+   the cursor was last in, or the entry as a whole if neither. */
+function selectedAnchor() {
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  let node = sel.anchorNode;
+  while (node && node !== document.body) {
+    if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute("data-para")) {
+      const quote = String(sel.toString() || "").replace(/\s+/g, " ").trim();
+      return { paraIndex: Number(node.getAttribute("data-para")),
+               quote: quote.slice(0, 160) || node.textContent.trim().slice(0, 80) };
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
+async function addMargin(entryId) {
+  const at = selectedAnchor();
+  const text = prompt(at
+    ? "A note about this line:\n\n“" + at.quote.slice(0, 120) + "”"
+    : "A note to yourself about this entry:\n\n(Select a line first to pin it to one.)");
+  if (!text || !text.trim()) return;
+  await CodexStore.put("margins", Object.assign({
+    id: "m" + newId(),
+    entryId, text: text.trim(), at: Date.now(), done: false,
+  }, at || {}));
   renderMargins(entryId);
 }
 

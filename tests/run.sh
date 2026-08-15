@@ -69,6 +69,7 @@ run "scanned pages end to end (real PDF, real browser)" node "$HERE/ocr.e2e.js"
 run "reader's widget, embedded cross-origin (real browser)" node "$HERE/widget.e2e.js"
 run "QA findings, 14 Aug (real browser, phone and desktop)" node "$HERE/qa.e2e.js"
 run "entities in the app: rename and wrangling (real browser)" node "$HERE/wrangle.e2e.js"
+run "margin notes pinned to a paragraph (real browser)" node "$HERE/margins.e2e.js"
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SOMETHING FAILED"; fi
