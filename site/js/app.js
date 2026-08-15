@@ -191,10 +191,42 @@ function rebuildEntries() {
   DB.stats.entities = DB.entities.length;
   DB.stats.images = hasCanon ? (window.WORLD_DB && window.WORLD_DB.stats && window.WORLD_DB.stats.images) || 0 : 0;
 }
+/* crypto.randomUUID needs a secure context; a file:// copy of this app
+   has crypto but not that method, so it falls back to enough randomness
+   to make a collision unreachable rather than merely unlikely. */
+function newId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  if (window.crypto && crypto.getRandomValues) {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
+  }
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 14);
+}
+
+/* The same text, filed twice. The main way this canon grows is
+   re-pasting a draft as it changes, and nothing stopped the same
+   paragraph landing five times; every count, every "appears in N
+   entries" and every comparison then quietly reads high. */
+function duplicateOf(title, text) {
+  const t = (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (t.length < 40) return null;                 // too short to be sure
+  const ti = (title || "").trim().toLowerCase();
+  return notesCache.find(n =>
+    (n.text || "").replace(/\s+/g, " ").trim().toLowerCase() === t &&
+    (!ti || (n.title || "").trim().toLowerCase() === ti)) || null;
+}
+
 async function addNote(title, text, images, category, opts) {
   opts = opts || {};
   const note = {
-    id: "note-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    /* Three random base-36 characters is 46,656 suffixes, so two notes
+       made in the same millisecond collide about once in 160 — and a
+       collision is silent, because storing a note is an upsert, so the
+       second one overwrites the first. Importing a folder of PDFs
+       creates notes in a tight loop, which is exactly the birthday
+       problem. A real UUID ends it. */
+    id: "note-" + newId(),
     title: title || "Untitled note", text: text || "", images: images || [], category: category || "My Notes",
     created: Date.now(), updated: Date.now(),
   };
@@ -1056,7 +1088,7 @@ function viewImport() {
           <button class="btn ghost sm" id="dictateLore">✧ Dictate instead</button>
         </div>
       </div>
-      <input type="file" id="fileInput" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
+      <input type="file" id="fileInput" aria-label="Choose files to import" multiple accept=".txt,.md,.markdown,.json,.pdf,.docx,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,image/*" hidden>
     </div>
     <div class="import-progress" id="importProgress" hidden></div>
     ${(() => {
@@ -1077,7 +1109,10 @@ function viewImport() {
     <div class="lore-grid">
       <div>
         <div class="rule-head"><span class="k">Or paste writing</span><span class="hr"></span></div>
-        <input class="import-title" id="pasteTitle" placeholder="Give it a title; a character, a place, a note">
+        <label class="sr-only" for="pasteTitle">Title for this entry</label>
+        <input class="import-title" id="pasteTitle" maxlength="200"
+          placeholder="Give it a title; a character, a place, a note">
+        <label class="sr-only" for="pasteBody">The writing to file</label>
         <textarea class="import-body" id="pasteBody" placeholder="Paste a chapter, a note, a scrap of dialogue. It is indexed the moment you save it; searchable, cross-linked, and readable by the assistant."></textarea>
       </div>
       <div class="lore-side">
@@ -1134,13 +1169,35 @@ function viewImport() {
   };
 
   $("#addPaste").onclick = async () => {
+    const btn = $("#addPaste");
     const t = $("#pasteTitle").value.trim(), b = $("#pasteBody").value.trim(), c = $("#pasteCat").value;
-    if (!b) { toast("Nothing to add yet"); return; }
+    /* "Nothing to add yet" was said even when a title had been typed,
+       which tells somebody who HAS entered something that they have
+       not. Say what is actually missing. */
+    if (!b) { toast(t ? "Add some text below the title to save this" : "Nothing to add yet"); return; }
+
+    const dupe = duplicateOf(t, b);
+    if (dupe && !confirm(
+      "You already have an entry with this text:\n\n  " + dupe.title +
+      "\n\nAdd it again anyway?\n\nOK = keep both · Cancel = don't add")) return;
+
     const namesOnly = $("#optNamesOnly").checked;
-    const note = await addNote(t || ("Note " + new Date().toLocaleDateString()), b, [], c,
-      { summarize: !namesOnly && $("#optSummarize").checked,
-        aiRead: namesOnly ? false : $("#optAiRead").checked,
-        namesOnly });
+    /* A 2 MB paste took twenty seconds with the button still looking
+       clickable, so people clicked it again and got a second copy. */
+    const big = b.length > 200000;
+    btn.disabled = true;
+    if (big) importProgress("Indexing " + Math.round(b.length / 1024) + " KB; this takes a moment…");
+    let note;
+    try {
+      note = await addNote(t || autoTitle(b), b, [], c,
+        { summarize: !namesOnly && $("#optSummarize").checked,
+          aiRead: namesOnly ? false : $("#optAiRead").checked,
+          namesOnly });
+    } finally {
+      btn.disabled = false;
+      const p = $("#importProgress"); if (p) p.hidden = true;
+    }
+    clearDraft();
     if (namesOnly) {
       const found = Array.from(entitiesIn(b)).length;
       logImport(`Harvested names from <b>${esc(note.title)}</b>; ${found} recognised, no entry filed.`, c);
@@ -1152,7 +1209,52 @@ function viewImport() {
     $("#pasteTitle").value = ""; $("#pasteBody").value = "";
     location.hash = "#/entry/" + note.id;
   };
+
+  bindDraftKeeper();
 }
+
+/* "Note 8/14/2026" for every untitled import means two of them are the
+   same row twice in the list, the sidebar and the index. The first few
+   words of what was actually written tell them apart. */
+function autoTitle(body) {
+  const first = String(body || "").replace(/\s+/g, " ").trim().split(" ").slice(0, 6).join(" ");
+  const clean = first.replace(/[.,;:!?]+$/, "").trim();
+  return clean.length > 2 ? clean.slice(0, 80) : "Note " + new Date().toLocaleDateString();
+}
+
+/* ---------- the draft you have not saved yet ----------
+   Typing a chapter into the paste box and clicking anything in the
+   sidebar threw it away with no warning, on a page that advertises
+   autosave. It is kept in localStorage while you type, restored when
+   you come back, and the tab asks before closing on top of it. */
+const DRAFT_KEY = "codex.importDraft";
+function saveDraft() {
+  const t = $("#pasteTitle"), b = $("#pasteBody");
+  if (!t || !b) return;
+  if (!t.value && !b.value) { clearDraft(); return; }
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ t: t.value, b: b.value, at: Date.now() })); }
+  catch (e) {}                              // a draft too big for the quota is not worth an error
+}
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+function hasDraft() {
+  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); return d && (d.t || d.b) ? d : null; }
+  catch (e) { return null; }
+}
+let draftTimer = null;
+function bindDraftKeeper() {
+  const t = $("#pasteTitle"), b = $("#pasteBody");
+  if (!t || !b) return;
+  const d = hasDraft();
+  if (d) { t.value = d.t || ""; b.value = d.b || ""; if (d.b) toast("Restored what you were writing"); }
+  const touch = () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 400); };
+  t.addEventListener("input", touch);
+  b.addEventListener("input", touch);
+}
+/* Bound once, not per render, so it survives moving between routes. */
+window.addEventListener("beforeunload", e => {
+  const t = $("#pasteTitle"), b = $("#pasteBody");
+  if (t && b && (t.value.trim() || b.value.trim())) { e.preventDefault(); e.returnValue = ""; }
+});
 function logImport(msg, cat) { const l = $("#importLog"); if (l) l.innerHTML = `<div class="import-ok">✓ ${msg} <a href="#/browse/${encodeURIComponent(cat || "My Notes")}">See “${esc(cat || "My Notes")}” →</a></div>` + l.innerHTML; }
 function importProgress(msg) { const p = $("#importProgress"); if (!p) return; p.hidden = false; p.textContent = msg; }
 
@@ -2390,7 +2492,22 @@ function toast(msg) {
   if (!stack) {
     stack = document.createElement("div");
     stack.id = "toastStack"; stack.className = "toast-stack";
+    /* Without this a screen reader hears nothing at all when a save is
+       refused; the only feedback was a shape appearing in a corner. */
+    stack.setAttribute("role", "status");
+    stack.setAttribute("aria-live", "polite");
     document.body.appendChild(stack);
+  }
+  /* Clicking Save four times with an empty box left four identical
+     toasts stacked up. The same message said again is the same message. */
+  const already = Array.from(stack.querySelectorAll(".toast")).find(
+    t => t.querySelector(".tmsg") && t.querySelector(".tmsg").textContent === msg);
+  if (already) {
+    already.classList.remove("in");
+    void already.offsetWidth;                     // restart the entrance
+    already.classList.add("in");
+    if (already._reset) already._reset();
+    return;
   }
   const el = document.createElement("div");
   el.className = "toast";
@@ -2405,7 +2522,9 @@ function toast(msg) {
     setTimeout(() => el.remove(), 260);
   };
   el.querySelector(".tx").onclick = dismiss;
-  const t = setTimeout(dismiss, 5000);
+  let t = setTimeout(dismiss, 5000);
+  // repeating the same message restarts its clock rather than stacking
+  el._reset = () => { clearTimeout(t); t = setTimeout(dismiss, 5000); };
   stack.appendChild(el);
   // keep the stack from growing without bound in a long burst
   while (stack.children.length > 4) stack.firstChild.remove();
@@ -2778,5 +2897,7 @@ else init();
 async function reloadWorkspace() { await loadNotes(); refresh(); }
 window.Codex = { DB, byId, mentionsOf, bestEntryFor, SRC, topicSummary, refresh, addNote, updateNote, deleteNote, categoriesList, factsOf, sentencesOf, visibleEntries, reloadWorkspace, entitiesIn, snippet, searchAll, svg, catColor, catDot, CANON_ORDER,
   recentCount: () => store.recent.length, recentIds: () => store.recent.slice(), backup: backupAll,
-  currentGen, isStale };
+  currentGen, isStale,
+  // exposed so the id generator can be exercised without making notes
+  _newId: newId };
 })();

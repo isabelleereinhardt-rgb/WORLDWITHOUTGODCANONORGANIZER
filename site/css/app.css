@@ -121,9 +121,17 @@ kbd{font-family:var(--serif);font-size:9px;letter-spacing:.18em;background:trans
 /* the rail narrows before it's dropped entirely (README: 358 → 306) */
 @media(max-width:1500px){:root{--assist-w:306px}}
 
-.topbar{grid-area:top;display:flex;align-items:center;gap:18px;
+/* Wrapping is not a mobile concern. The six controls here need 1,070px
+   between them, so every window from 861px — where the narrow layout
+   stops applying — up to about 1,070px pushed the account chip and the
+   theme toggle off the right-hand edge. Wrapping always means it wraps
+   only when it has to, and never overflows. */
+.topbar{grid-area:top;display:flex;align-items:center;flex-wrap:wrap;gap:18px;
   padding:10px 22px;background:var(--panel);border-bottom:1px solid var(--line);
   position:sticky;top:0;z-index:30}
+/* and the search box gives up width before anything is pushed out */
+.search-trigger{min-width:0;flex:1 1 150px}
+.topbar-right{margin-left:auto;flex-wrap:wrap}
 .sidebar{grid-area:side;background:var(--panel);border-right:1px solid var(--line);
   overflow-y:auto;padding:20px 16px 40px}
 #app.sidebar-collapsed .sidebar{display:none}
@@ -645,9 +653,40 @@ h3{font-size:22px}
 .cc-caption:focus{outline:none;color:var(--ink)}
 .cc-caption::placeholder{color:var(--ink-faint)}
 
+/* ---- keyboard, screen readers, and text that refuses to wrap ----
+   The focus ring was the browser default: rgb(16,16,16) on a rgb(36,27,30)
+   panel, a contrast ratio of 1.13:1 where WCAG asks for 3:1. Somebody
+   tabbing through this could not see where they were. */
+/* a label that is read aloud but not seen */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--blush);
+  color:var(--onblush);padding:10px 16px;border-radius:0 0 3px 0}
+.skip-link:focus{left:0}
+/* One 200,000-character word, a pasted URL or a base64 blob used to run
+   straight off the right edge and underneath the margin-notes panel. */
+.entry-main,.entry-title,.bs,.blurb,.import-body{overflow-wrap:anywhere}
+.chip,.xref{overflow-wrap:anywhere;max-width:100%}
+
 /* mobile */
 @media(max-width:860px){
-  #app,#app.assist-open{grid-template-columns:1fr;grid-template-areas:"top" "main"}
+  /* Every one of these has to be listed. The narrow layout declares ONE
+     column through grid-template-areas, but "#app.sidebar-collapsed" up
+     at line 119 is more specific than a bare "#app" and kept setting
+     TWO tracks ("0 1fr"). Named-area placement then put main in the 0
+     track, so the whole content pane laid out at zero width — on every
+     route, on every phone, because the sidebar auto-collapses below
+     860px. The app was not blank; it was one column too far left. */
+  #app,#app.assist-open,
+  #app.sidebar-collapsed,#app.sidebar-collapsed.assist-open{
+    grid-template-columns:1fr;grid-template-areas:"top" "main"}
+  /* Six topbar controls that refuse to shrink set a 947px floor under
+     the page, which is what produced the horizontal overflow and made a
+     phone browser zoom out to fit. */
+  .topbar{flex-wrap:wrap;gap:8px;padding:8px 12px}
+  .topbar-right{margin-left:auto}
+  /* Nothing inside may set a floor wider than the screen either. */
+  .main,.wrap{min-width:0}
   .sidebar{position:fixed;top:56px;bottom:0;left:0;width:var(--side-w);z-index:40;box-shadow:var(--shadow)}
   #app.sidebar-collapsed .sidebar{display:none}
   #app:not(.sidebar-collapsed) .sidebar{display:block}
@@ -2011,7 +2050,12 @@ body.reader-mode .lucky-stage{display:none}
 .lucky-tip .lt-acts .lucky-ask{padding:6px 0 0}
 .lucky-tip .lt-acts .lucky-ask:first-child{color:var(--dim)}
 .lucky-tip .lt-acts .lucky-ask:first-child:hover{color:var(--blush)}
-@media(max-width:520px){.lucky-tip{width:min(286px,calc(100vw - 60px))}}
+/* Lucky walks across the window, and his tip is anchored to him, so at
+   the right-hand end of the walk it hung past the edge of the page and
+   was clipped — taking the "another →" control with it. The clamp has
+   to apply at every width, not only on a phone. */
+.lucky-tip{width:min(286px,calc(100vw - 60px));max-width:calc(100vw - 40px)}
+.lucky-walk{max-width:100%}
 
 /* ============================================================
    ACCOUNTS: the front-door gate + topbar chip + sync status
@@ -2368,3 +2412,21 @@ a.a-chip{text-decoration:none;display:inline-block}
 .also-read{margin:8px 0 0;padding-left:18px;list-style:none}
 .also-read li{position:relative;font-size:13.5px;line-height:1.5;color:var(--ink-soft);margin:2px 0}
 .also-read li:before{content:"·";position:absolute;left:-12px;color:var(--gold)}
+
+/* ============================================================
+   THE FOCUS RING, LAST WORD
+
+   Seventeen rules in this file remove the outline on :focus and put a
+   one-pixel border tint in its place. That was never enough of a signal,
+   and against this palette it was none at all: the browser default came
+   out at rgb(16,16,16) on a rgb(36,27,30) panel, a contrast ratio of
+   1.13:1 where the guideline asks for 3:1. Somebody navigating by
+   keyboard could not see where they were.
+
+   Those rules are more specific than any sane override, and they are
+   spread across the file, so this is the case !important is actually
+   for. :focus-visible rather than :focus, so a mouse click still does
+   not draw a ring.
+   ============================================================ */
+*:focus-visible{outline:2px solid var(--blush)!important;outline-offset:2px;border-radius:2px}
+.skip-link:focus-visible{outline-offset:0}
