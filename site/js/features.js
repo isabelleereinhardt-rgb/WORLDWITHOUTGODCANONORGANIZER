@@ -1177,10 +1177,14 @@ function panelAccount(el) {
    in and it is in front of people who can answer, with a thread that
    survives longer than an email would.
 
-   One constant. Empty means no server has been set up yet, and the
-   panel says exactly that instead of offering a link that goes nowhere. */
-const DISCORD_INVITE = "";
-const DISCORD_CHANNEL = "#bug-reports";
+   Two constants. An empty invite means no server has been set up yet
+   and the panel quietly behaves as it did before, rather than offering a
+   link that goes nowhere. An empty channel means the server has not been
+   given a room for this yet, so the wording says "the Discord" instead
+   of naming a channel that might not exist — being sent to #bug-reports
+   and not finding it is worse than being sent to the front door. */
+const DISCORD_INVITE = "https://discord.gg/g2jv3mV2";
+const DISCORD_CHANNEL = "";
 
 const REPORT_KINDS = [
   ["broken", "Something is broken"],
@@ -1201,8 +1205,8 @@ function panelReport(el) {
     <div class="rule-head mt"><span class="k">Report a problem</span><span class="hr"></span></div>
     <p class="set-help">Nothing is uploaded from here. This writes up what happened and adds the
       technical details that make it findable. ${DISCORD_INVITE
-        ? `Then it goes on your clipboard and opens the Discord, where you paste it into
-           <b>${esc(DISCORD_CHANNEL)}</b>.`
+        ? `Then it goes on your clipboard and opens the Discord${DISCORD_CHANNEL
+            ? `, where you paste it into <b>${esc(DISCORD_CHANNEL)}</b>` : `, ready to paste`}.`
         : `Then it goes on your clipboard, ready to send.`}</p>
     <div class="av-chips">${REPORT_KINDS.map(([id, label]) =>
       `<button class="av-chip${reportKind === id ? " on" : ""}" data-rkind="${id}">${esc(label)}</button>`).join("")}</div>
@@ -1233,9 +1237,10 @@ function panelReport(el) {
     let copied = false;
     try { if (navigator.clipboard) { await navigator.clipboard.writeText(text); copied = true; } } catch (e) {}
     window.open(DISCORD_INVITE, "_blank", "noopener");
+    const where = DISCORD_CHANNEL ? DISCORD_CHANNEL : "the Discord";
     msg.textContent = copied
-      ? "Copied. Paste it into " + DISCORD_CHANNEL + " in the tab that just opened."
-      : "The Discord is open in a new tab. Use “Copy the report”, then paste it into " + DISCORD_CHANNEL + ".";
+      ? "Copied. Paste it into " + where + " in the tab that just opened."
+      : "The Discord is open in a new tab. Use “Copy the report”, then paste it into " + where + ".";
   };
   $("#rpCopy", el).onclick = async () => {
     const text = await buildReport();
