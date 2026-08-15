@@ -646,6 +646,42 @@ function hCompare(q, ctx, S) {
 }
 
 /* ---------- how are two names connected ---------- */
+/* ---------- which sentence actually answers "how are they related" ----------
+   Asked how two people were related, with "her brother Vaun Torrick"
+   written in one entry and "his sister Kestrel Amadi" in another, the
+   assistant answered "Kestrel Amadi met Vaun Torrick at the Salt Gate
+   on Tuesday" — a throwaway line from an unrelated note that happened
+   to be found first. Two names in a sentence is co-occurrence; a stated
+   bond is the answer, and it should not have to be lucky.
+
+   A sentence naming the bond outright wins. After that, one that states
+   any relation at all. Sharing a room comes last, because it always
+   could. */
+const KINSHIP = /\b(brother|sister|mother|father|son|daughter|wife|husband|spouse|married|widow|widower|cousin|uncle|aunt|nephew|niece|grandmother|grandfather|grandson|granddaughter|twin|heir|bastard|kin|blood)\b/i;
+const BOND = /\b(loves?|loved|hates?|hated|betrayed|serves?|served|killed|murdered|raised|swore|sworn|allied|enemy|enemies|friend|friends|rival|rivals|apprentice|master|mentor|guardian|ward|follows?|followed|worships?|owes?|owed)\b/i;
+function rankByBond(rows, a, b) {
+  const near = (s) => {
+    /* A bond word is only evidence when it sits between or beside the
+       two names, not three clauses away in a long paragraph. */
+    const low = s.toLowerCase();
+    const i = low.indexOf(String(a).toLowerCase()), j = low.indexOf(String(b).toLowerCase());
+    if (i < 0 || j < 0) return s;
+    const from = Math.max(0, Math.min(i, j) - 40);
+    const to = Math.min(s.length, Math.max(i, j) + String(i < j ? b : a).length + 40);
+    return s.slice(from, to);
+  };
+  const score = row => {
+    const window = near(row.s || row.sentence || "");
+    let n = 0;
+    if (KINSHIP.test(window)) n += 3;
+    if (BOND.test(window)) n += 2;
+    return n;
+  };
+  return rows.slice().map((r, i) => ({ r, i, n: score(r) }))
+    .sort((x, y) => y.n - x.n || x.i - y.i)     // ties keep document order
+    .map(x => x.r);
+}
+
 function hRelation(q, ctx, S) {
   let m = q.match(/^\s*(?:what(?:'s| is) the )?relationship\s+between\s+(.+?)\s+and\s+(.+?)\s*\??\s*$/i) ||
           q.match(/^\s*how\s+(?:is|are)\s+(.+?)\s+(?:related|connected|linked)\s+to\s+(.+?)\s*\??\s*$/i) ||
@@ -657,7 +693,26 @@ function hRelation(q, ctx, S) {
     return out(`<div class="assistant-hint">“${esc(cleanName(miss))}” isn't a name I've indexed,
       so I can't trace that connection yet.</div>`, { grounded: NOT_GROUNDED });
   }
-  const together = sentencesWithBoth(A.name, B.name, ctx, S * 2);
+  /* What each entry says about the other, read rather than searched
+     for. This is where the sibling bond actually lives: "her brother
+     Vaun Torrick" never contains the word "Kestrel", so no search for
+     sentences holding both names could ever find it, however it was
+     ranked. */
+  const statedBond = [];
+  [[A, B], [B, A]].forEach(([one, other]) => {
+    let read;
+    try { read = traitsFor(one.name, ctx); } catch (e) { return; }
+    if (!read) return;
+    let re;
+    try { re = new RegExp("\\b" + reEsc(other.name) + "\\b", "i"); } catch (e) { return; }
+    read.traits.forEach(t => {
+      if (!re.test(t.clause)) return;
+      if (statedBond.some(x => x.clause.toLowerCase() === t.clause.toLowerCase())) return;
+      statedBond.push({ subject: one.name, clause: t.clause, sentence: t.sentence, entry: t.entry });
+    });
+  });
+
+  const together = rankByBond(sentencesWithBoth(A.name, B.name, ctx, S * 4), A.name, B.name).slice(0, S * 2);
   const shared = pool(ctx).filter(e => e._hay && e._hay.includes(A.name.toLowerCase()) && e._hay.includes(B.name.toLowerCase()));
   if (!together.length && !shared.length) {
     return out(`${dymNote(m[1], A)}${dymNote(m[2], B)}
@@ -667,7 +722,12 @@ function hRelation(q, ctx, S) {
   }
   return out(`${dymNote(m[1], A)}${dymNote(m[2], B)}
     <div class="ans-label">How ${esc(A.name)} and ${esc(B.name)} connect</div>
+    ${statedBond.length ? `<div class="bs lead">${esc(statedBond.map(x =>
+        x.subject + " " + x.clause).join("; and "))}.</div>
+      ${quoteOnly(evidenceRows(statedBond))}` : ""}
+    ${statedBond.length && together.length ? `<div class="ans-label" style="margin-top:10px">Where they meet on the page</div>` : ""}
     ${together.length ? quoteRows(together)
+      : statedBond.length ? ""
       : `<div class="assistant-hint">They never share a single sentence, but they do share
          ${shared.length === 1 ? "an entry" : shared.length + " entries"}; the connection is by proximity, not by a stated bond.</div>`}
     ${shared.length ? `<div class="ans-label" style="margin-top:10px">Entries holding both</div>${chipRow(shared.slice(0, 12))}` : ""}`,
@@ -1056,6 +1116,37 @@ const STOP_CLAUSE = new RegExp(
 
 /* cut a captured fragment at the first thing that ends the thought, and
    tidy the trailing filler people leave when they trail off */
+/* Never stop in the middle of a name.
+
+   Every capture here is bounded — "the" plus up to four words, and so
+   on — which is what keeps a pattern from swallowing a paragraph. But a
+   bound that lands inside a proper noun turns "the last archivist of
+   Vane Hollow" into "the last archivist of Vane", and a shortened place
+   name read back to the writer is a small lie about her own world. If
+   the captured text ends where a capitalised run continues, the rest of
+   that run comes too.
+
+   Needs the match object rather than the string, because the answer is
+   in the source either side of the capture, not in the capture. */
+function completeName(m, captured) {
+  const src = m && m.input;
+  if (!src || !captured) return captured;
+  const at = src.indexOf(captured, m.index);
+  if (at < 0) return captured;
+  let end = at + captured.length;
+  /* only worth doing if the capture actually ends on a capitalised word */
+  if (!/[A-Z][\wà-öø-ÿ'’-]*$/.test(captured)) return captured;
+  let out = captured;
+  for (let guard = 0; guard < 3; guard++) {
+    const rest = src.slice(end);
+    const next = /^\s+([A-Z][\wà-öø-ÿ'’-]+)/.exec(rest);
+    if (!next) break;
+    out += " " + next[1];
+    end += next[0].length;
+  }
+  return out;
+}
+
 function tidyClause(s, maxWords) {
   let t = String(s || "").replace(/\s+/g, " ").trim();
   /* Years in this canon are written 8,544 BR. Cutting at every comma
@@ -1290,7 +1381,7 @@ const TRAITS = [
   { k: "role",
     re: /\b(?:is|was)\s+((?:a|an|the)\s+[a-z][\w'-]*(?:\s+[a-z][\w'-]*){0,3})/i,
     say: m => {
-      const phrase = tidyClause(m[1]);
+      const phrase = tidyClause(completeName(m, m[1]), 8);
       if (!phrase) return "";
       // it must actually name a role; otherwise any noun at all qualifies
       const words = phrase.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/);
@@ -1308,6 +1399,20 @@ const TRAITS = [
   { k: "family",
     re: /\b(?:is\s+)?(?:the\s+)?(?:eldest\s+|youngest\s+|only\s+)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|heir)\s+(?:of|to)\s+(.+)/i,
     say: m => "is the " + m[1].toLowerCase() + " of " + tidyClause(m[2]) },
+  /* "his sister Kestrel Amadi" and "her brother Vaun Torrick".
+
+     English states kinship this way constantly and the pattern above
+     missed all of it, because it insists on the word "of". Asked how
+     two siblings were related, with the bond written plainly in both
+     their entries, the assistant answered with a line about the pair
+     meeting at a gate on a Tuesday — the only sentence that happened to
+     contain both names. The bond was there; nothing was reading it. */
+  { k: "kin-named",
+    re: /\b(?:his|her|their|my|our)\s+(?:eldest\s+|youngest\s+|only\s+|younger\s+|older\s+|half-?)?(sister|brother|mother|father|son|daughter|wife|husband|cousin|aunt|uncle|niece|nephew|twin|heir)\s+([A-Z][\wà-öø-ÿ'’-]+(?:\s+[A-Z][\wà-öø-ÿ'’-]+){0,2})/,
+    say: m => {
+      const who = tidyClause(completeName(m, m[2]), 4);
+      return who ? "has a " + m[1].toLowerCase() + ", " + who : "";
+    } },
   { k: "married",
     re: /\b(?:is|was)\s+married\s+to\s+(.+)/i,
     say: m => "is married to " + tidyClause(m[1]) },
@@ -2251,8 +2356,50 @@ function hWhoIs(q, ctx, S) {
 /* ============================================================
    DISPATCH; first shape that matches, answers
    ============================================================ */
+/* ---------- "is there anything contradictory in my canon?" ----------
+   The assistant offered "Check my canon for contradictions" as a chip
+   and then answered the plain-English version of that exact question
+   with "nothing in your canon matches" — because retrieval was anchored
+   on recognised names, and "contradictory" is not a name. Refusing a
+   question you advertise in the same breath is the worst kind of no.
+
+   It can answer it now, because the disagreements are already worked
+   out: declared facts compared record by record, and the readings the
+   understanding layer found in prose. */
+function hConflicts(q, ctx, S) {
+  if (!/\b(contradict\w*|inconsisten\w*|conflict\w*|disagree\w*|clash\w*)\b/i.test(q)) return null;
+  if (!/\b(my canon|the canon|canon|anything|any|check|are there|is there|find|any\s+)\b/i.test(q)) return null;
+  const K = window.CodexContinuity;
+  const list = (K && K.canonConflicts) ? (() => { try { return K.canonConflicts(); } catch (e) { return []; } })() : [];
+  if (!list.length) {
+    return out(`<div class="ans-label">Checking your canon against itself</div>
+      <div class="assistant-hint">Nothing in your entries states one of these twice with different
+      answers. I compare the facts you declare in <b>Key: value</b> lines — an age, a seat, a
+      founder — record by record. Prose disagreements show up when you ask about the person
+      concerned.</div>`, { subject: null, grounded: "Compared here on this device · nothing sent" });
+  }
+  const entryTitle = id => {
+    const e = pool(ctx).find(x => x.id === id);
+    return e ? e.title : "another entry";
+  };
+  return out(`<div class="ans-label">${list.length} thing${list.length === 1 ? "" : "s"} your canon says twice, differently</div>
+    ${list.slice(0, S + 4).map(c => `
+      <div class="clash">
+        <div class="clash-head">${esc(c.name)} · ${esc(c.field)}</div>
+        <div class="clash-two">${c.claims.map(cl =>
+          `<span class="clash-side">${esc(cl.value)}<em>${esc(entryTitle(cl.noteId))}</em></span>`)
+          .join(`<span class="clash-vs">and</span>`)}</div>
+      </div>`).join("")}
+    ${list.length > S + 4 ? `<div class="assistant-hint">…and ${list.length - (S + 4)} more.</div>` : ""}
+    <div class="assistant-hint">I have not chosen between any of them. The Name Index has the
+      same list with a way to settle each one.</div>`,
+    { subject: null, grounded: "Compared here on this device · nothing chosen for you" });
+}
+
 const HANDLERS = [
   hSmalltalk, hHelp, hMemories, hRemember, hStats, hRandom,
+  // asked before anything that needs a name, because this one has none
+  hConflicts,
   hCompare, hRelation, hWhoAppears, hWhen, hWhere, hHowOld,
   hWhyHow, hDefine, hFacts, hOpinion,
   // who turns up beside somebody, which the rail offers as a follow-up

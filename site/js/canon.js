@@ -235,5 +235,98 @@ function harvestNames(entries, limit) {
     .slice(0, limit || 600);
 }
 
-window.CodexCanon = { host, sentencesOf, factsOf, entityRegex, harvestNames, CANON_ORDER, FACT_KEYS, DESCRIPTIVE };
+/* ============================================================
+   RANKING — BM25, lexical, and no embeddings anywhere
+
+   A search that insists on every word is right when you type keywords
+   and wrong when you ask a question. "What year did the chapel burn?"
+   found nothing at all in a canon containing "the chapel burned in
+   1147", because the word "year" appears nowhere in it and one missing
+   term threw the whole query away.
+
+   So: score instead of filter. BM25 is the standard for this and it
+   suits invented proper nouns better than anything with embeddings in
+   it — an embedding model has never seen Vane Hollow or Kestrel Amadi,
+   while lexical matching handles them exactly. It also costs nothing,
+   needs no network, and keeps the promise that nothing leaves the
+   browser.
+
+   Two departures from the textbook, both because this is a canon and
+   not a web corpus. A hit in the title counts for much more than a hit
+   in the body, because an entry named for the thing you asked about is
+   usually the entry you want. And a rare word is worth far more than a
+   common one, which is what IDF gives for free: in a world where every
+   entry says "house", the entry that says "chapel" wins. */
+const K1 = 1.4, B = 0.72;
+function words(s) {
+  return String(s || "").toLowerCase().match(/[a-z0-9à-öø-ÿ'’-]+/g) || [];
+}
+/* Crude, deliberately. "burn" must match "burned"; "archivist" must not
+   become "archiv" and collide with something else. Only endings that
+   are almost always inflection are removed, and never below four
+   letters. */
+function stem(w) {
+  if (w.length < 5) return w;
+  if (/(ies)$/.test(w)) return w.slice(0, -3) + "y";
+  if (/(sses|shes|ches|xes)$/.test(w)) return w.slice(0, -2);
+  if (/(ing)$/.test(w) && w.length > 6) return w.slice(0, -3);
+  if (/(ed)$/.test(w) && w.length > 5) return w.slice(0, -2);
+  if (/(s)$/.test(w) && !/(ss|us|is)$/.test(w)) return w.slice(0, -1);
+  return w;
+}
+function bagOf(text) {
+  const bag = Object.create(null);
+  let n = 0;
+  for (const w of words(text)) { const s = stem(w); bag[s] = (bag[s] || 0) + 1; n++; }
+  return { bag, n };
+}
+
+/* `docs` are entries. Returns them scored, best first, dropping zeroes. */
+function rank(query, docs, opts) {
+  opts = opts || {};
+  const qTerms = Array.from(new Set(words(query).map(stem)))
+    .filter(t => t.length > 1 && !(opts.stop && opts.stop.has(t)));
+  if (!qTerms.length || !docs.length) return [];
+
+  const prepared = docs.map(d => {
+    if (!d._bm || d._bmFor !== (d.text || "").length) {
+      d._bm = bagOf((d.text || "") + " " + (d.title || ""));
+      d._bmTitle = bagOf(d.title || "").bag;
+      d._bmFor = (d.text || "").length;
+    }
+    return d;
+  });
+  const N = prepared.length;
+  const avg = prepared.reduce((s, d) => s + d._bm.n, 0) / N || 1;
+
+  const idf = Object.create(null);
+  qTerms.forEach(t => {
+    let n = 0;
+    prepared.forEach(d => { if (d._bm.bag[t]) n++; });
+    idf[t] = Math.log(1 + (N - n + 0.5) / (n + 0.5));
+  });
+
+  const out = [];
+  prepared.forEach(d => {
+    let score = 0, hits = 0;
+    qTerms.forEach(t => {
+      const f = d._bm.bag[t] || 0;
+      if (!f) return;
+      hits++;
+      score += idf[t] * (f * (K1 + 1)) / (f + K1 * (1 - B + B * d._bm.n / avg));
+      // the title is the entry's own claim about what it is about
+      if (d._bmTitle[t]) score += idf[t] * 2.2;
+    });
+    if (!hits) return;
+    /* Matching three of the asked words beats matching one of them
+       three times, which raw term frequency does not express. */
+    score *= 1 + (hits - 1) * 0.35;
+    out.push({ e: d, score, hits });
+  });
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+window.CodexCanon = { host, sentencesOf, factsOf, entityRegex, harvestNames, rank, stem,
+  CANON_ORDER, FACT_KEYS, DESCRIPTIVE };
 })();

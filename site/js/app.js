@@ -1800,7 +1800,25 @@ function searchAll(q, forAssistant, scope) {
     if (score > 0) res.push({ e, score });
   }
   res.sort((a, b) => b.score - a.score);
-  return res.slice(0, 50).map(r => r.e);
+  if (res.length) return res.slice(0, 50).map(r => r.e);
+
+  /* Nothing matched every word — which for a typed question is the
+     normal case rather than a failure. "What year did the chapel burn?"
+     came back empty against a canon holding "the chapel burned in
+     1147", because "year" appears nowhere in it and one absent term
+     threw away the whole query.
+
+     So rank instead of filter, but only once the strict pass has found
+     nothing: when every word IS present that is a better answer than
+     anything scoring can produce, and this never overrules it. */
+  /* A weak match is worse than none. Asked about something the canon
+     has never heard of, ranking will always return SOMETHING — the
+     least irrelevant entry — and handing that back as an answer is how
+     an assistant starts making things up. Two of the asked words, or
+     one that is both rare and repeated. */
+  return CANON.rank(q, pool, { stop: GRAMMAR_WORDS })
+    .filter(r => r.hits >= Math.min(2, terms.length) || r.score >= 5)
+    .slice(0, 50).map(r => r.e);
 }
 let searchSel = 0, searchList = [];
 function renderSearch(q) {

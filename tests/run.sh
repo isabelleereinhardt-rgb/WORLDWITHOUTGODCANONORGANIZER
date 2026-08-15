@@ -40,6 +40,7 @@ run "streaming (no browser)" node "$HERE/streaming.test.js"
 run "scanned pages (no browser)" node "$HERE/ocr.test.js"
 run "continuity, draft vs canon (no browser)" node "$HERE/continuity.test.js"
 run "entity records, aliases and mentions (no browser)" node "$HERE/entities.test.js"
+run "ranking questions against a canon (no browser)" node "$HERE/rank.test.js"
 run "hostile input & edge cases (no browser)" node "$HERE/explore.js"
 
 if [ "${1:-all}" = "unit" ]; then

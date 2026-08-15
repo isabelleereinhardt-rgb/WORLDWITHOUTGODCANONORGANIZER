@@ -467,6 +467,65 @@ setTimeout(() => {
 
 
   /* ---------------------------------------------------------------
+     Kinship stated the way English states it, and names kept whole.
+     Both from the QA pass: asked how two siblings were related, with
+     the bond written plainly in both their entries, it answered with a
+     line about them meeting at a gate on a Tuesday — the only sentence
+     containing both names. And "the last archivist of Vane Hollow"
+     came back as "of Vane", a shortened place name read back to the
+     writer as if it were hers.
+     --------------------------------------------------------------- */
+  const kinfolk = [
+    { id: "r1", title: "Kestrel Amadi", category: "Characters", type: "note", wordcount: 24,
+      text: "Kestrel Amadi is the last archivist of Vane Hollow. Her brother Vaun Torrick searched nine years for her." },
+    { id: "r2", title: "Vaun Torrick", category: "Characters", type: "note", wordcount: 20,
+      text: "Vaun Torrick is a hedge knight. He searched nine years for his sister Kestrel Amadi." },
+    { id: "r3", title: "Odds and ends", category: "My Notes", type: "note", wordcount: 12,
+      text: "Kestrel Amadi met Vaun Torrick at the Salt Gate on Tuesday." },
+  ];
+  kinfolk.forEach(e => { e._hay = (e.title + " " + e.text).toLowerCase(); });
+  window.Codex.DB = { entries: kinfolk, entities: ["Kestrel Amadi", "Vaun Torrick", "Vane Hollow"] };
+  window.Codex.topicSummary = (n, k) => sentencesOf(kinfolk.map(e => e.text).join(" "))
+    .filter(x => x.toLowerCase().includes(String(n).toLowerCase())).slice(0, k);
+  window.Codex.mentionsOf = (n, ex) => kinfolk.filter(e => e.id !== ex && e._hay.includes(String(n).toLowerCase()));
+  window.Codex.bestEntryFor = n => kinfolk.find(e => e.title.toLowerCase() === String(n).toLowerCase())
+    || kinfolk.find(e => e._hay.includes(String(n).toLowerCase())) || null;
+
+  B.reset();
+  const rel = ans("How are Kestrel Amadi and Vaun Torrick related?");
+  const relText = rel.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  check("kin: the stated bond leads, not a chance meeting",
+    /has a sister, Kestrel Amadi/i.test(relText), relText.slice(0, 220));
+  check("kin: the Salt Gate line is demoted rather than dropped",
+    /Salt Gate/.test(relText) && relText.indexOf("sister") < relText.indexOf("Salt Gate"),
+    relText.slice(0, 260));
+
+  B.reset();
+  check("kin: 'his sister X' is read as a family tie",
+    /has a sister, Kestrel Amadi/i.test(leadOf(ans("who is Vaun Torrick")) || ""),
+    leadOf(ans("who is Vaun Torrick")));
+
+  B.reset();
+  check("names: a place name is never shortened",
+    /Vane Hollow/.test(leadOf(ans("who is Kestrel Amadi")) || "") &&
+    !/of Vane\b(?! Hollow)/.test(leadOf(ans("who is Kestrel Amadi")) || ""),
+    leadOf(ans("who is Kestrel Amadi")));
+
+  /* ---------- a question it advertises and used to refuse ---------- */
+  B.reset();
+  const noConf = ans("Is there anything contradictory in my canon?");
+  check("conflicts: the plain-English question is answered at all", noConf !== null,
+    "returned null, so it fell through to a word search");
+  check("conflicts: and says what it compared",
+    /Key: value|declare/i.test((noConf || {}).html || ""),
+    ((noConf || {}).html || "").replace(/<[^>]+>/g, " ").slice(0, 200));
+
+  window.Codex.DB = realDB;
+  window.Codex.topicSummary = realTopic;
+  window.Codex.mentionsOf = realMentions;
+  window.Codex.bestEntryFor = realBest;
+
+  /* ---------------------------------------------------------------
      THE CANON ANSWERING TWICE.
 
      Reproduced from the QA pass of 14 August: two entries, two ages,
