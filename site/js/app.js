@@ -194,6 +194,7 @@ async function reindexAll(onDone) {
     try { await E.classify(id => text[id]); } catch (e) {}
   }
   indexing = false;
+  await findTidy();
   if (onDone) onDone();
 }
 function noteToEntry(n) {
@@ -1415,6 +1416,85 @@ function bindConflicts() {
    Because a person confirms every one, the finder does not have to be
    right. It only has to be worth reading. */
 let queueOpen = false;
+/* ---------- debris in the index ----------
+   Worked out once, after the mention index is built, and shown as a
+   list of proposals with the reason written out. Folding an adjective
+   into the place it comes from is the valuable one: it is not tidying,
+   it is seventy-two sentences becoming findable. */
+let tidyList = null, tidyDone = false;
+async function findTidy() {
+  const E = window.CodexEntities;
+  if (!E || !E.ready() || !E.tidy || tidyDone) return;
+  const text = Object.create(null);
+  const ids = [];
+  DB.entries.forEach(e => { text[e.id] = e.text || ""; ids.push(e.id); });
+  try { tidyList = await E.tidy(id => text[id], { noteIds: ids }); } catch (e) { tidyList = []; }
+}
+function tidyBanner() {
+  if (!tidyList || !tidyList.length || tidyDone) return "";
+  const folds = tidyList.filter(t => t.action === "fold");
+  const drops = tidyList.filter(t => t.action === "drop");
+  const bits = [];
+  if (folds.length) bits.push(folds.length + " look" + (folds.length === 1 ? "s" : "") + " like another word for something you already have");
+  if (drops.length) bits.push(drops.length + " look" + (drops.length === 1 ? "s" : "") + " like a word broken across two lines");
+  return `<div class="tidy">
+    <div class="tidy-head">
+      <span>${bits.join(", and ")}.</span>
+      <span class="wq-acts">
+        <button class="btn sm" id="tdAll">Do all of these</button>
+        <button class="btn ghost sm" id="tdSkip">Leave them</button>
+      </span>
+    </div>
+    ${tidyList.map(t => `<div class="tidy-row" data-tidy="${esc(t.id)}">
+      <span class="td-why">${t.why.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</span>
+      <span class="wq-acts">
+        <button class="btn ghost sm" data-td="yes">${t.action === "fold" ? "Fold it in" : "Not a name"}</button>
+        <button class="btn ghost sm" data-td="no">Keep it</button>
+      </span>
+    </div>`).join("")}
+  </div>`;
+}
+async function applyTidy(t) {
+  const E = window.CodexEntities;
+  if (t.action === "drop") { await E.setStatus(t.id, "rejected"); return true; }
+  const keep = E.get(t.intoId);
+  if (!keep) return false;
+  /* Same word, so the same kind by definition — said plainly rather
+     than left for the merge to refuse on a technicality. */
+  await E.setType(t.id, E.kindOf(keep));
+  const r = await E.merge(keep.id, t.id);
+  return !!(r && r.ok);
+}
+function bindTidy() {
+  const skip = $("#tdSkip");
+  if (skip) skip.onclick = () => { tidyDone = true; renderIndex(); };
+  const all = $("#tdAll");
+  if (all) all.onclick = async () => {
+    all.disabled = true; all.textContent = "Working…";
+    let n = 0;
+    for (const t of tidyList.slice()) if (await applyTidy(t)) n++;
+    tidyList = []; tidyDone = true;
+    await reindexAll();
+    buildIndexes();
+    toast(n + " sorted out");
+    renderIndex();
+  };
+  $$(".tidy-row").forEach(row => {
+    const t = (tidyList || []).find(x => x.id === row.dataset.tidy);
+    if (!t) return;
+    $$("[data-td]", row).forEach(b => b.onclick = async () => {
+      if (b.dataset.td === "yes") {
+        await applyTidy(t);
+        await reindexAll();
+        buildIndexes();
+        toast(t.action === "fold" ? t.name + " now points at " + t.intoName : "Won't offer " + t.name + " again");
+      }
+      tidyList = tidyList.filter(x => x.id !== t.id);
+      renderIndex();
+    });
+  });
+}
+
 function wranglingBanner() {
   const E = window.CodexEntities;
   if (!E || !E.ready()) return "";
@@ -1526,6 +1606,7 @@ function renderIndex() {
     ${indexView.mode !== "chips" ? viewBodyHtml() : ""}
     ${conflictsHtml()}
     ${narrativeHtml()}
+    ${tidyBanner()}
     ${wranglingBanner()}
     ${indexSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${total && indexSelected.size === total ? "checked" : ""}> Select all</label>
@@ -1539,6 +1620,7 @@ function renderIndex() {
   </div>`;
 
   bindViews();
+  bindTidy();
   bindWrangling();
   bindConflicts();
   bindNarrative();

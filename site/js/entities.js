@@ -441,6 +441,130 @@ function propose(text, opts) {
     .slice(0, opts.limit || 60);
 }
 
+/* ============================================================
+   THINGS IN THE INDEX THAT ARE NOT THINGS
+
+   An index built by pulling capitalised strings out of PDFs collects
+   three kinds of debris, and the table view put all of it on one screen
+   where it cannot be ignored.
+
+   The first is words broken across a line. A PDF that wrapped
+   "INSPIRATION" mid-word leaves "INSPIR" on one line and "ATION" on the
+   next, and both look like names. They are recognisable by never once
+   appearing in a sentence: every sighting is inside a shouted heading.
+
+   The second is the possessive. "SOLIS'S" is not a second emperor.
+
+   The third is the adjective. "Aicruaean" is what you call things from
+   Aicruae, and it is written seventy-two times. As its own record those
+   seventy-two sentences are invisible when you ask about Aicruae, which
+   is the actual cost — this is a retrieval fix wearing tidying's coat.
+
+   Nothing here is performed. Every rule was checked against this canon
+   until it produced no wrong answers, and it still only proposes, with
+   the reason written out, because a rule that is right ten times is not
+   thereby right the eleventh. The writer decides, as with everything
+   else in this file.
+   ============================================================ */
+const POSSESSIVE = /^(.*)[’'ʼʼ]s$/i;
+/* Only endings that are unambiguously "belonging to". A bare -n was
+   tried and proposed folding House Vesmen into Vesme, which are two
+   different families; -i proposed Lacai into Laca. Both are gone. */
+const DEMONYMS = ["ians", "eans", "ans", "ian", "ean", "ish", "ese", "an"];
+const MIN_BASE = 5;
+
+/* A line nobody is speaking in: all caps, so a heading or a form label
+   rather than a sentence. */
+function shouted(line) {
+  const letters = (line.match(/[A-Za-z]/g) || []).length;
+  return letters >= 3 && line === line.toUpperCase();
+}
+
+async function tidy(getText, opts) {
+  opts = opts || {};
+  const read = typeof getText === "function" ? getText : () => "";
+  const live = entities.filter(e => e.status === "confirmed");
+  const byName = Object.create(null);
+  live.forEach(e => { byName[norm(e.name)] = e; });
+  const out = [];
+  const seenElsewhere = Object.create(null);
+
+  for (const e of live) {
+    /* A record with declared facts is a record somebody filled in, and
+       no amount of spelling makes it debris. */
+    if (claimsFor(e.id).length) continue;
+    const n = norm(e.name);
+
+    const p = POSSESSIVE.exec(n);
+    if (p && byName[p[1]] && byName[p[1]].id !== e.id) {
+      out.push({ id: e.id, name: e.name, action: "fold", intoId: byName[p[1]].id,
+        intoName: byName[p[1]].name,
+        why: "“" + e.name + "” is " + byName[p[1]].name + " with an apostrophe on the end." });
+      continue;
+    }
+
+    let base = null;
+    for (const s of DEMONYMS) {
+      if (!n.endsWith(s)) continue;
+      const b = n.slice(0, -s.length);
+      if (b.length >= MIN_BASE && byName[b] && byName[b].id !== e.id) { base = byName[b]; break; }
+    }
+    if (base) {
+      out.push({ id: e.id, name: e.name, action: "fold", intoId: base.id, intoName: base.name,
+        why: "“" + e.name + "” is what you call things from " + base.name +
+             ", so its " + (e.seen || 0) + " mention" + ((e.seen || 0) === 1 ? "" : "s") +
+             " belong to " + base.name + "." });
+      continue;
+    }
+    seenElsewhere[e.id] = true;
+  }
+
+  /* The heading-only test reads the writing once and looks each word up,
+     rather than searching the writing once per record: seven hundred
+     sweeps over four hundred thousand words is a frozen tab.
+
+     Only one-word names are asked about. Debris from a broken line is
+     always a single shouted token, and a phrase like "House Patton"
+     cannot be looked up a word at a time. */
+  const watch = Object.create(null);
+  live.forEach(e => {
+    if (!seenElsewhere[e.id] || /\s/.test(e.name)) return;
+    watch[norm(e.name)] = e.id;
+  });
+  const inProse = Object.create(null);
+  const notes = opts.noteIds || [];
+  let n = 0;
+  for (const noteId of notes) {
+    const text = String(read(noteId) || "");
+    if (!text) continue;
+    for (const line of text.split("\n")) {
+      if (shouted(line)) continue;
+      /* Both the whole token and its parts. Keeping the hyphen glued on
+         hid "Aksumite" inside "pre-Aksumite" and "Aksumite-Ethiopian",
+         and a word that only ever appears hyphenated then looked like it
+         never appeared in a sentence at all. */
+      const words = line.toLowerCase().split(/[^a-z0-9’'ʼ-]+/);
+      for (const w of words) {
+        if (!w) continue;
+        if (watch[w]) inProse[watch[w]] = true;
+        if (w.indexOf("-") < 0) continue;
+        for (const part of w.split("-")) if (part && watch[part]) inProse[watch[part]] = true;
+      }
+    }
+    if (++n % 20 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  if (notes.length) {
+    for (const e of live) {
+      if (!watch[norm(e.name)] || inProse[e.id]) continue;
+      if (!(e.seen > 0)) continue;              // never seen at all is a different problem
+      out.push({ id: e.id, name: e.name, action: "drop",
+        why: "“" + e.name + "” never appears in a sentence — every sighting is inside a shouted " +
+             "heading, which is what a word broken across two lines looks like." });
+    }
+  }
+  return out;
+}
+
 /* ---------- loading, and the one-time migration ---------- */
 function load(rows, mentionRows) {
   entities = (rows || []).map(make);
@@ -662,7 +786,7 @@ window.CodexEntities = {
   load, migrate, onSave, ready: () => ready,
   all, confirmed, candidates, get, namesOf, resolve,
   create, rename, addAlias, merge, setStatus, setType, remove,
-  classify, kindOf, kindWasRead, kinds,
+  classify, kindOf, kindWasRead, kinds, tidy,
   checkAlias, checkLink, ancestors,
   scan, reindexNote, forgetNote, mentionsOf, notesMentioning, inNote,
   claimsFor, allClaims,

@@ -2422,6 +2422,15 @@ a.a-chip{text-decoration:none;display:inline-block}
 
 /* ---- the wrangling queue: names found, waiting to be told what they are ---- */
 .wq-bar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 4px}
+.tidy{border:1px solid var(--line);border-radius:9px;background:var(--panel);margin:14px 0 4px;
+  padding:12px 14px}
+.tidy-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13.5px;color:var(--ink);
+  padding-bottom:9px;border-bottom:1px solid var(--line)}
+.tidy-head>span:first-child{flex:1 1 240px}
+.tidy-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 0;
+  border-bottom:1px solid var(--line)}
+.tidy-row:last-child{border-bottom:none;padding-bottom:0}
+.td-why{flex:1 1 260px;font-size:13px;line-height:1.5;color:var(--dim)}
 .wq{border:1px solid var(--line);border-left:2px solid var(--gold);background:var(--panel);
   padding:14px 16px;margin:16px 0 8px}
 .wq-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;

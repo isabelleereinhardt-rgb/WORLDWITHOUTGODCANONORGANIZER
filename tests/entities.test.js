@@ -305,6 +305,56 @@ const check = (label, cond, detail) => {
   check("  leaving one record answering to both names",
     E.resolve("Ashgrove") === E.resolve("Kestrel"));
 
+  /* ---------- debris in the index ----------
+     An index built by pulling capitalised strings out of PDFs picks up
+     adjectives, possessives and words broken across a line. Every rule
+     here proposes; none of them acts. */
+  E.load([], []);
+  for (const n of ["Aicruae", "Aicruaean", "SOLIS'S", "Solis", "ATION", "Ilkai",
+                   "Aksumite", "Vesme", "House Vesmen", "Laca", "Lacai", "Torad"]) {
+    await E.create({ name: n, status: "confirmed" });
+  }
+  const pages = {
+    p1: "AN OUTLINE IN SHOUTING\nINSPIR\nATION\nSOLIS'S\n" +
+        "Aicruaean customs baffled her. The Aicruaean court sat in silence.\n" +
+        "She rode to Aicruae in the spring, and Aicruae did not want her.\n" +
+        "The pre-Aksumite highlands were colder than Ilkai had promised.\n" +
+        "House Vesmen held the pass; Vesme itself was a day further on.\n" +
+        "Laca and Lacai are two different rivers, whatever the maps say.\n" +
+        "Solis rode for Torad. Ilkai is a word for grief.",
+  };
+  await E.reindexNote("p1", pages.p1, "An outline");
+  const debris = await E.tidy(id => pages[id] || "", { noteIds: ["p1"] });
+  const by = n => debris.find(p => p.name === n);
+
+  check("an adjective is offered up to the place it comes from",
+    by("Aicruaean") && by("Aicruaean").action === "fold" &&
+    E.get(by("Aicruaean").intoId).name === "Aicruae", by("Aicruaean"));
+  check("  and the offer says what it is worth",
+    /mentions belong to Aicruae/.test(by("Aicruaean").why), by("Aicruaean").why);
+  check("a possessive is not a second person",
+    by("SOLIS'S") && by("SOLIS'S").action === "fold" &&
+    E.get(by("SOLIS'S").intoId).name === "Solis", by("SOLIS'S"));
+  check("a word broken across a line is offered as not a name",
+    by("ATION") && by("ATION").action === "drop", by("ATION"));
+
+  /* The three that a looser rule got wrong on the real canon. */
+  check("a hyphenated sighting still counts as a sentence",
+    !by("Aksumite"), by("Aksumite"));
+  check("  two houses that rhyme are left alone", !by("House Vesmen") && !by("Vesme"),
+    [by("House Vesmen"), by("Vesme")]);
+  check("  and so are two rivers one letter apart", !by("Lacai") && !by("Laca"));
+  check("nothing ordinary is touched", !by("Torad") && !by("Ilkai") && !by("Aicruae"));
+
+  check("it proposes and does not act",
+    E.resolve("Aicruaean") !== E.resolve("Aicruae") && !!E.resolve("ATION"));
+
+  /* A record somebody filled in is a record, however it is spelled. */
+  await E.reindexNote("p2", "Aicruaean\nFounded: 8,759 BR", "Aicruaean");
+  const guarded = await E.tidy(() => "", {});
+  check("a record with declared facts is never called debris",
+    !guarded.find(p => p.name === "Aicruaean"), guarded.map(p => p.name));
+
   /* ---------- it must not be slow ---------- */
   E.load([], []);
   for (let i = 0; i < 750; i++) {

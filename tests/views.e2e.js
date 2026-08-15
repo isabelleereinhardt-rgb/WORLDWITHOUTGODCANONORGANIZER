@@ -149,6 +149,47 @@ function section(t) { results.push("\n" + t); }
   check("the chip list comes back", await page.locator(".chip[data-subject]").count() > 100);
   check("  and the table is gone", await page.locator(".vt").count() === 0);
 
+  section("THE DEBRIS THE TABLE MADE VISIBLE");
+  await page.click('[data-vmode="chips"]');
+  await page.waitForFunction(() => document.querySelectorAll(".tidy-row").length > 0, { timeout: 60000 })
+    .catch(() => {});
+  const whys = await page.locator(".td-why").allInnerTexts();
+  check("the index offers up what is not a name", whys.length >= 8, whys.length);
+  check("  adjectives are offered to the place they come from",
+    whys.some(w => /Aicruaean.*things from Aicruae/.test(w)), whys.slice(0, 3));
+  check("  a possessive is not a second person",
+    whys.some(w => /SOLIS'S/.test(w)), whys.filter(w => /SOLIS/.test(w)));
+  check("  and a word broken across a line is not a name at all",
+    whys.some(w => /“ATION”.*never appears in a sentence/.test(w)), whys.slice(-3));
+  /* The rules that a looser version got wrong on this canon. */
+  check("  a word only ever written hyphenated is left alone",
+    !whys.some(w => /Aksumite/.test(w)), whys.filter(w => /Aksum/.test(w)));
+  check("  and two houses one letter apart are never offered up",
+    !whys.some(w => /Vesme|Kulio|Kauliv/.test(w)), whys.filter(w => /Vesme|Kulio/.test(w)));
+
+  const beforeTidy = await page.evaluate(() => {
+    const E = window.CodexEntities, a = E.resolve("Aicruae");
+    return { records: E.confirmed().length, seen: a ? a.seen : 0,
+             adjIsSeparate: E.resolve("Aicruaean") !== a };
+  });
+  check("  nothing has happened yet", beforeTidy.adjIsSeparate);
+  await page.click("#tdAll");
+  await page.waitForFunction(() => document.querySelectorAll(".tidy-row").length === 0, { timeout: 90000 });
+  await page.waitForTimeout(2500);
+  const afterTidy = await page.evaluate(() => {
+    const E = window.CodexEntities, a = E.resolve("Aicruae");
+    return { records: E.confirmed().length, seen: a ? a.seen : 0,
+             adjNowFolded: E.resolve("Aicruaean") === a, debrisGone: !E.resolve("ATION") };
+  });
+  check("accepting them folds the adjectives in", afterTidy.adjNowFolded, afterTidy);
+  check("  and drops the broken words", afterTidy.debrisGone, afterTidy);
+  check("  the index gets smaller", afterTidy.records < beforeTidy.records,
+    [beforeTidy.records, afterTidy.records]);
+  /* The point of the exercise: "Aicruaean customs" is now a sighting of
+     Aicruae, so asking about Aicruae reaches those sentences. */
+  check("  and the place gains the sentences that were hidden from it",
+    afterTidy.seen > beforeTidy.seen, [beforeTidy.seen, afterTidy.seen]);
+
   section("ON A PHONE");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.click('[data-vmode="table"]');
