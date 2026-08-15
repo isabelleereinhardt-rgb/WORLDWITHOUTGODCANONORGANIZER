@@ -182,7 +182,7 @@ async function reindexAll(onDone) {
   indexing = true;
   const entries = DB.entries.slice();
   for (let i = 0; i < entries.length; i++) {
-    await E.reindexNote(entries[i].id, entries[i].text || "");
+    await E.reindexNote(entries[i].id, entries[i].text || "", entries[i].title);
     if (i % 8 === 7) await new Promise(r => setTimeout(r, 0));
   }
   indexing = false;
@@ -302,7 +302,7 @@ async function addNote(title, text, images, category, opts) {
       await E.create({ name: note.title, status: "confirmed", type: /^house\b/i.test(note.title) ? "house" : "concept" });
     }
     refresh();
-    await E.reindexNote(note.id, note.text || "");
+    await E.reindexNote(note.id, note.text || "", note.title);
   }
   refresh();
   window.CodexFeed && CodexFeed.log("Added note", note.title);
@@ -323,7 +323,7 @@ async function updateNote(id, patch) {
       if (rec) await E.rename(rec.id, patch.title);
     }
     if (patch && (patch.text !== undefined || patch.title !== undefined)) {
-      await E.reindexNote(note.id, note.text || "");
+      await E.reindexNote(note.id, note.text || "", note.title);
     }
   }
   refresh();
@@ -469,7 +469,15 @@ const factsOf = CANON.factsOf;
 
 /* The host is built once and reads DB.entries through a function, so it
    keeps up as notes are added rather than holding a stale array. */
-const CANON_HOST = CANON.host(() => DB.entries, { getEntities: () => DB.entities });
+const CANON_HOST = CANON.host(() => DB.entries, {
+  getEntities: () => DB.entities,
+  // the mention rows, so retrieval is a lookup and aliases resolve
+  index: {
+    ready: () => !!(window.CodexEntities && CodexEntities.ready()),
+    resolve: n => CodexEntities.resolve(n),
+    notesMentioning: id => CodexEntities.notesMentioning(id),
+  },
+});
 function topicSummary(name, maxSent = 4) { return CANON_HOST.topicSummary(name, maxSent); }
 
 function entitiesIn(text) {
@@ -1107,6 +1115,59 @@ function viewIndex() {
   indexSelectMode = false; indexSelected = new Set();
   renderIndex();
 }
+/* ---------- conflicts the canon has with itself ----------
+   A disagreement is a record, not a remark: it survives, it can be
+   settled, and settling it is remembered. The four answers are the
+   ones a writer actually needs — and "both are true" matters as much
+   as the rest, because unreliable narrators and characters who lie are
+   deliberate, and a checker that keeps flagging them gets switched
+   off. */
+const SETTLED_KEY = "codex.settledConflicts";
+function settledConflicts() {
+  try { return JSON.parse(localStorage.getItem(SETTLED_KEY) || "{}") || {}; }
+  catch (e) { return {}; }
+}
+function settleConflict(id) {
+  const s = settledConflicts(); s[id] = Date.now();
+  try { localStorage.setItem(SETTLED_KEY, JSON.stringify(s)); } catch (e) {}
+}
+function conflictsNow() {
+  const K = window.CodexContinuity;
+  if (!K || !K.canonConflicts) return [];
+  try { return K.canonConflicts({ settled: settledConflicts() }); } catch (e) { return []; }
+}
+function conflictsHtml() {
+  const list = conflictsNow();
+  if (!list.length) return "";
+  return `<div class="cf">
+    <div class="cf-head">${list.length} thing${list.length === 1 ? "" : "s"} your canon says twice, differently</div>
+    <p class="faint">Nothing has been chosen for you. Say which is current, or that both are meant.</p>
+    ${list.slice(0, 12).map(c => `
+      <div class="cf-row" data-cf="${esc(c.id)}">
+        <div class="cf-who"><b>${esc(c.name)}</b> · ${esc(c.field)}</div>
+        <div class="cf-claims">${c.claims.map(cl => {
+          const e = byId[cl.noteId];
+          return `<span class="cf-claim">${esc(cl.value)}
+            <a href="#/entry/${encodeURIComponent(cl.noteId)}">${esc(e ? e.title : "an entry")}</a></span>`;
+        }).join("<span class=\"cf-vs\">vs</span>")}</div>
+        <div class="cf-acts">
+          <button class="btn ghost sm" data-cf-act="both">Both are true</button>
+          <button class="btn ghost sm" data-cf-act="done">Settled</button>
+        </div>
+      </div>`).join("")}
+    ${list.length > 12 ? `<p class="faint">…and ${list.length - 12} more.</p>` : ""}
+  </div>`;
+}
+function bindConflicts() {
+  $$(".cf-row").forEach(row => {
+    $$("[data-cf-act]", row).forEach(b => b.onclick = () => {
+      settleConflict(row.dataset.cf);
+      toast(b.dataset.cfAct === "both" ? "Noted; it won't be raised again" : "Settled");
+      renderIndex();
+    });
+  });
+}
+
 /* ---------- the wrangling queue ----------
    Names found in the writing that the canon has never heard of. They
    arrive as candidates and wait: nothing here is real until somebody
@@ -1229,6 +1290,7 @@ function renderIndex() {
       </div>
     </div>
     <p class="muted">Every cross-linked name in your world. Click any to gather its mentions and a summary.</p>
+    ${conflictsHtml()}
     ${wranglingBanner()}
     ${indexSelectMode ? `<div class="select-bar">
       <label class="sel-all"><input type="checkbox" id="selAll" ${total && indexSelected.size === total ? "checked" : ""}> Select all</label>
@@ -1242,6 +1304,7 @@ function renderIndex() {
   </div>`;
 
   bindWrangling();
+  bindConflicts();
   if ($("#toggleSelect")) $("#toggleSelect").onclick = () => { indexSelectMode = !indexSelectMode; if (!indexSelectMode) indexSelected.clear(); renderIndex(); };
   if (!indexSelectMode) { $$(".chip[data-subject]", view).forEach(c => c.onclick = () => location.hash = "#/subject/" + encodeURIComponent(c.dataset.subject)); return; }
 

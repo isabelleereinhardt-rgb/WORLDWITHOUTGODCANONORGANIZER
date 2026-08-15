@@ -106,7 +106,32 @@ function host(getEntries, opts) {
     return found;
   }
 
+  /* Where a name appears.
+
+     When an entity index is available this is a lookup rather than a
+     search: the rows were written when the note was saved. It also
+     answers better than the search did, because a record's aliases
+     resolve to the same id — an entry that only ever calls her "Kes"
+     is an entry about Kestrel Amadi, and scanning for the canonical
+     string would walk straight past it.
+
+     The order and the filtering are deliberately identical to the scan
+     below, so switching between them changes speed and reach and
+     nothing else. Anything the index has never heard of — a common
+     word, a phrase, a half-typed question — still falls through to the
+     honest sweep. */
   function mentionsOf(name, excludeId, forAssistant) {
+    const idx = opts.index;
+    if (idx && idx.ready && idx.ready()) {
+      const rec = idx.resolve(String(name));
+      if (rec) {
+        const ids = new Set(idx.notesMentioning(rec.id));
+        if (ids.size) {
+          return entries().filter(e => e.id !== excludeId && isEntry(e) &&
+            ids.has(e.id) && (!forAssistant || readableByAI(e)));
+        }
+      }
+    }
     const n = String(name).toLowerCase();
     return entries().filter(e => e.id !== excludeId && isEntry(e) &&
       hay(e).includes(n) && (!forAssistant || readableByAI(e)));

@@ -47,6 +47,7 @@ const STATUS = ["confirmed", "candidate", "rejected"];
 
 let entities = [];          // the records
 let mentions = [];          // derived: where each one is named
+let claims = [];            // derived: the "Age: 34" lines, by record
 let byId = Object.create(null);
 let ready = false;
 
@@ -268,12 +269,67 @@ function scan(noteId, text) {
   return out;
 }
 
+/* ---------- declared facts ----------
+   People write "Age: 34" and "Seat: Lajazer" in their own notes, and
+   the app has always been able to read those lines; it has just never
+   compared one entry's answer with another's. Attributing each to a
+   record is what turns that into something checkable, and it is the
+   groundwork the contradiction inbox stands on: two different values
+   for one field of one record is a conflict found by a table scan,
+   with no model involved and nothing to get creative about.
+
+   Attribution is deliberately narrow. A fact line belongs to whoever
+   the entry is about — the record its title resolves to — and to
+   nobody else. A sheet headed "Kestrel Amadi" saying "Age: 34" is
+   about Kestrel; the same line inside a chapter that merely mentions
+   her is not safe to attribute and is left alone. */
+const FACT_LINE = /^([A-Z][\w '’-]{1,24})\s*:\s*(.+)$/;
+function factsIn(noteId, text, title) {
+  /* Who the entry is about. A sheet is often filed under something
+     other than its subject — the chapter it belongs to, the date it was
+     written — and announces who it is about on its first line instead,
+     which is how most of this canon is written. That heading is the
+     entry's own statement of its subject, so it outranks the filename.
+
+     It is trusted only when it is short enough to BE a heading and
+     resolves exactly. A chapter opening "Kestrel Amadi rode out at
+     dawn" resolves to nothing and falls through to the title, which is
+     the point: a name in a sentence is a mention, not a subject. */
+  const first = String(text || "").split("\n").map(l => l.trim()).find(Boolean) || "";
+  let owner = null;
+  if (first && first.length <= 60 && !/[:.!?]$/.test(first)) owner = resolve(first);
+  if (!owner && title) owner = resolve(title);
+  if (!owner) return [];
+  const out = [];
+  String(text || "").split("\n").forEach(raw => {
+    const line = raw.trim();
+    if (!line || line.length > 140) return;
+    const m = FACT_LINE.exec(line);
+    if (!m) return;
+    const key = m[1].trim().toLowerCase();
+    /* A label is a label: "Spirit Animal", "House Words", "Age". A whole
+       clause ending in a colon is prose — "The Story Of Yanxi Palace:
+       Princess Adventures…" was being filed as a field called "the
+       story of yanxi palace", which is not a fact about anybody. */
+    if (key.split(/\s+/).length > 3) return;
+    const value = m[2].trim().replace(/[;.]+$/, "");
+    if (!value || value.length > 90) return;
+    if (out.some(c => c.field === key)) return;      // the first answer in an entry wins
+    out.push({ entityId: owner.id, field: key, value, noteId, quote: line });
+  });
+  return out;
+}
+function claimsFor(entityId) { return claims.filter(c => c.entityId === entityId); }
+function allClaims() { return claims.slice(); }
+
 /* Replace everything known about one note in one go. Derived data is
    only ever rewritten wholesale; there is no partial state to get wrong. */
-async function reindexNote(noteId, text) {
+async function reindexNote(noteId, text, title) {
   mentions = mentions.filter(m => m.noteId !== noteId);
+  claims = claims.filter(c => c.noteId !== noteId);
   const found = scan(noteId, text);
   mentions = mentions.concat(found);
+  claims = claims.concat(factsIn(noteId, text, title));
   const counts = Object.create(null);
   mentions.forEach(m => { counts[m.entityId] = (counts[m.entityId] || 0) + 1; });
   entities.forEach(e => { e.seen = counts[e.id] || 0; });
@@ -282,6 +338,7 @@ async function reindexNote(noteId, text) {
 }
 async function forgetNote(noteId) {
   mentions = mentions.filter(m => m.noteId !== noteId);
+  claims = claims.filter(c => c.noteId !== noteId);
   if (saveHook) await saveHook("mentions", { noteId, rows: [] });
 }
 
@@ -384,6 +441,7 @@ function propose(text, opts) {
 function load(rows, mentionRows) {
   entities = (rows || []).map(make);
   mentions = (mentionRows || []).slice();
+  claims = [];
   index();
   ready = true;
 }
@@ -418,6 +476,7 @@ window.CodexEntities = {
   create, rename, addAlias, merge, setStatus, setType, remove,
   checkAlias, checkLink, ancestors,
   scan, reindexNote, forgetNote, mentionsOf, notesMentioning, inNote,
+  claimsFor, allClaims,
   propose,
   _mentions: () => mentions.slice(),
 };

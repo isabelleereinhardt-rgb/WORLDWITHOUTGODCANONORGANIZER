@@ -308,5 +308,58 @@ function lev(a, b, cap) {
   return prev[b.length];
 }
 
-window.CodexContinuity = { check, disagrees, SINGLE };
+/* ============================================================
+   CONFLICTS WITHIN THE CANON ITSELF
+
+   The draft check above compares what you are writing now against what
+   you wrote before. This compares what you wrote before against itself.
+
+   It is the cheap tier and it catches most of what actually goes wrong,
+   because the bulk of real continuity bugs are a single value stated
+   twice with different answers — an age, a date, a seat, a founder. No
+   model is involved: the declared "Age: 34" lines were attributed to a
+   record when the note was saved, so this is a scan over a table.
+
+   The rule that matters is that it never picks a winner. Presenting one
+   side of an unresolved contradiction as settled is the exact failure
+   this whole app exists to prevent, and it is worse than saying nothing
+   because the reader believes it. The conflict IS the answer.
+
+   Two ways of saying the same thing are not a conflict, so the same
+   comparison the draft check uses decides. And a writer may declare a
+   disagreement deliberate — unreliable narrators and lying characters
+   are the point of some books — after which it never fires again. */
+function canonConflicts(opts) {
+  const E = window.CodexEntities;
+  if (!E || !E.ready()) return [];
+  const settled = (opts && opts.settled) || {};
+  const byKey = Object.create(null);
+  E.allClaims().forEach(c => {
+    const k = c.entityId + " " + c.field;
+    (byKey[k] = byKey[k] || []).push(c);
+  });
+  const out = [];
+  Object.keys(byKey).forEach(k => {
+    const group = byKey[k];
+    if (group.length < 2) return;
+    /* Distinct answers only: the same value repeated across five
+       entries is five entries agreeing, which is not news. */
+    const distinct = [];
+    group.forEach(c => {
+      if (!distinct.some(d => !disagrees(d.value, c.value))) distinct.push(c);
+    });
+    if (distinct.length < 2) return;
+    const rec = E.get(group[0].entityId);
+    if (!rec) return;
+    const id = rec.id + ":" + group[0].field;
+    if (settled[id]) return;
+    out.push({
+      id, entityId: rec.id, name: rec.name, field: group[0].field,
+      claims: distinct.map(c => ({ value: c.value, noteId: c.noteId, quote: c.quote })),
+    });
+  });
+  return out.sort((a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field));
+}
+
+window.CodexContinuity = { check, disagrees, canonConflicts, SINGLE };
 })();

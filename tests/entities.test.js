@@ -175,6 +175,49 @@ const check = (label, cond, detail) => {
   check("  all of them confirmed, as they are today",
     E.all().every(e => e.status === "confirmed"));
 
+  /* ---------- declared facts, and conflicts between them ---------- */
+  E.load([], []);
+  eval(require("fs").readFileSync(require("path").join(__dirname, "../site/js/continuity.js"), "utf8"));
+  const K = window.CodexContinuity;
+  await E.create({ name: "Kestrel Amadi", type: "character", status: "confirmed" });
+  await E.create({ name: "Vane Hollow", type: "place", status: "confirmed" });
+
+  await E.reindexNote("f1", "Kestrel Amadi\nAge: 34\nAllegiance: the Ash Order\nShe kept the archive.",
+    "Kestrel Amadi");
+  check("declared facts are attributed to the record the entry is about",
+    E.claimsFor(E.resolve("Kestrel Amadi").id).length === 2,
+    E.claimsFor(E.resolve("Kestrel Amadi").id));
+  check("  and prose lines are not mistaken for facts",
+    !E.claimsFor(E.resolve("Kestrel Amadi").id).some(c => /kept the archive/i.test(c.value)));
+
+  check("one entry alone is not a conflict", K.canonConflicts().length === 0, K.canonConflicts());
+
+  await E.reindexNote("f2", "Kestrel Amadi\nAge: 51\nShe was gone by then.", "Kestrel Amadi");
+  let conf = K.canonConflicts();
+  check("two entries disagreeing about an age is a conflict",
+    conf.length === 1 && conf[0].field === "age", conf);
+  check("  both answers are carried, and neither is chosen",
+    conf[0].claims.length === 2 &&
+    conf[0].claims.some(c => c.value === "34") && conf[0].claims.some(c => c.value === "51"),
+    conf[0].claims);
+  check("  with the line each came from", conf[0].claims.every(c => /Age:/.test(c.quote)), conf[0].claims);
+
+  await E.reindexNote("f3", "Kestrel Amadi\nAge: 34\nAnother telling.", "Kestrel Amadi");
+  conf = K.canonConflicts();
+  check("a third entry agreeing with the first does not add a third answer",
+    conf.length === 1 && conf[0].claims.length === 2, conf[0] && conf[0].claims);
+
+  check("a conflict the writer has settled stops firing",
+    K.canonConflicts({ settled: { [conf[0].id]: true } }).length === 0);
+
+  /* a fact line under an entry that merely MENTIONS her is not hers */
+  await E.reindexNote("f4", "Vane Hollow\nAge: 900\nKestrel Amadi was seen here.", "Vane Hollow");
+  const kesFields = E.claimsFor(E.resolve("Kestrel Amadi").id).map(c => c.value);
+  check("a fact in somebody else's entry is not attributed to her",
+    kesFields.indexOf("900") < 0, kesFields);
+  check("  it belongs to whoever that entry is about",
+    E.claimsFor(E.resolve("Vane Hollow").id).some(c => c.value === "900"));
+
   /* ---------- it must not be slow ---------- */
   E.load([], []);
   for (let i = 0; i < 750; i++) {

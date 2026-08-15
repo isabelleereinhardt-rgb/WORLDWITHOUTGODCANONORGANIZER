@@ -146,6 +146,15 @@ function findEntity(raw) {
 }
 function findEntityRaw(raw) {
   const name = cleanName(raw);
+  /* Records first. They know that "Kes" and "the last archivist" are
+     Kestrel Amadi, which no amount of string matching against a list of
+     entry titles will ever work out, and they answer under the
+     canonical name rather than whichever nickname was typed. */
+  const E = window.CodexEntities;
+  if (name && E && E.ready()) {
+    const rec = E.resolve(name);
+    if (rec) return { name: rec.name, guessed: rec.name.toLowerCase() !== name.toLowerCase() };
+  }
   if (!name || !C()) return null;
   const db = C().DB, nl = name.toLowerCase();
   const ents = db.entities || [];

@@ -117,6 +117,49 @@ function section(t) { results.push("\n" + t); }
   check("  and never reaches the canon", await page.evaluate(() =>
     window.Codex.DB.entities.indexOf("Morrow Chase")) === -1);
 
+  /* ---------- conflicts the canon has with itself ---------- */
+  section("THE CANON DISAGREEING WITH ITSELF");
+  await page.evaluate(async () => {
+    await window.Codex.addNote("Kestrel Amadi", "Kestrel Amadi\nAge: 34\nShe kept the archive.", [], "My Notes");
+    await window.Codex.addNote("The Burning", "Kestrel Amadi\nAge: 51\nShe was gone by then.", [], "My Notes");
+    await new Promise(r => setTimeout(r, 800));
+    location.hash = "#/index";
+  });
+  await page.waitForTimeout(1200);
+  const cfText = await page.locator(".cf").innerText().catch(() => "");
+  check("two entries giving different ages is raised", /Kestrel Amadi/.test(cfText) && /age/i.test(cfText), cfText.slice(0, 200));
+  check("  with both answers shown", /34/.test(cfText) && /51/.test(cfText), cfText.slice(0, 200));
+  check("  and neither chosen", !/is 34|is 51/.test(cfText), cfText.slice(0, 200));
+
+  await page.locator(".cf-row").first().locator("button", { hasText: "Both are true" }).click();
+  await page.waitForTimeout(900);
+  check("saying both are meant stops it being raised again",
+    await page.locator(".cf").count() === 0);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.CodexEntities && window.CodexEntities.ready(), { timeout: 30000 });
+  await page.evaluate(() => { location.hash = "#/index"; });
+  await page.waitForTimeout(2500);
+  check("  and it is still settled after a reload", await page.locator(".cf").count() === 0);
+
+  /* ---------- an alias answers as the person ---------- */
+  section("AN ALIAS IS THE SAME PERSON");
+  await page.evaluate(async () => {
+    const E = window.CodexEntities;
+    const rec = E.resolve("Kestrel Amadi");
+    await E.addAlias(rec.id, "Kes");
+    await window.Codex.addNote("A Scrap", "Kes never spoke of the archive again.", [], "My Notes");
+    await new Promise(r => setTimeout(r, 700));
+  });
+  const viaAlias = await page.evaluate(() => {
+    const E = window.CodexEntities, rec = E.resolve("Kes");
+    return { same: rec && rec.name === "Kestrel Amadi",
+             notes: rec ? E.notesMentioning(rec.id).length : 0,
+             mentions: window.Codex.mentionsOf("Kestrel Amadi").length };
+  });
+  check("a nickname resolves to the person", viaAlias.same, JSON.stringify(viaAlias));
+  check("  and retrieval for her canonical name reaches the entry that only says the nickname",
+    viaAlias.mentions >= 3, JSON.stringify(viaAlias));
+
   /* ---------- the assistant can now answer about it ---------- */
   section("AND THE ASSISTANT CAN USE IT");
   await page.click("#assistantToggle");
